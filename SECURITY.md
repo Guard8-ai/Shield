@@ -17,13 +17,9 @@ Shield provides **EXPTIME security**: breaking the encryption requires exponenti
 | P=NP proven | Still 2^256 | No polynomial shortcut exists |
 | New math discovered | Still 2^256 | Symmetric crypto has unconditional bounds |
 
-### Why Traditional Crypto Breaks
+### Why Shield Uses Symmetric Cryptography
 
-RSA, ECDSA, and similar schemes rely on **computational assumptions**:
-- "Factoring is hard" (RSA)
-- "Discrete log is hard" (ECDSA, DH)
-
-If P=NP, these assumptions are **proven false**. All security vanishes instantly.
+RSA, ECDSA, and similar schemes rely on computational assumptions that may be broken by future discoveries.
 
 Shield uses **no computational assumptions**. The 2^256 bound is a mathematical fact, not a belief.
 
