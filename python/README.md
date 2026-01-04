@@ -157,20 +157,14 @@ TOTP.secret_from_base32(b32: str) -> bytes
 
 ## Security Model
 
-### What P=NP Would Break
+Shield uses only symmetric primitives with unconditional security:
 
-- RSA, ECDSA, ECDH (factoring, discrete log)
-- Most key exchange protocols
-- Certificate authorities
-
-### What Remains Secure
-
-- **Symmetric encryption** (AES, ChaCha20)
-- **Hash functions** (SHA-256, SHA-3)
+- **Symmetric encryption** (AES-256 equivalent)
+- **Hash functions** (SHA-256)
 - **HMAC authentication**
-- **Key derivation** (PBKDF2, Argon2)
+- **Key derivation** (PBKDF2)
 
-Shield uses **only** primitives from the "remains secure" category.
+Breaking requires 2^256 operations - no shortcut exists.
 
 ## License
 

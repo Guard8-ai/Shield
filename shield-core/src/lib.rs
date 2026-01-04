@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn test_roundtrip() {
         let shield = Shield::new("test_password", "test.service");
-        let plaintext = b"Hello, post-P=NP world!";
+        let plaintext = b"Hello, EXPTIME-secure world!";
 
         let encrypted = shield.encrypt(plaintext).unwrap();
         let decrypted = shield.decrypt(&encrypted).unwrap();

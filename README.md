@@ -43,12 +43,6 @@ That's it. No keys to manage. No certificates. No configuration.
 
 Shield uses only symmetric cryptography with 256-bit keys. Breaking it requires 2^256 operations - more than atoms in the observable universe - regardless of any mathematical breakthrough.
 
-### EXPTIME vs P=NP
-
-- **P=NP** would break RSA, ECDSA, Bitcoin - anything based on "hard to factor" or "hard to solve"
-- **EXPTIME** means "requires exponential time" - no shortcut possible, ever
-- Shield's security is EXPTIME: 2^256 operations minimum, by mathematical proof
-
 ---
 
 ## Quick Start

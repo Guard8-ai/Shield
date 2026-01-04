@@ -474,16 +474,7 @@ let decrypted = s.decrypt(&encrypted)?;
 
 ## Why EXPTIME-Ready?
 
-Shield is built for a post-quantum, post-P=NP world.
-
-**If P=NP is proven, these break:**
-- RSA, ECDSA, ECDH (factoring becomes easy)
-- TLS certificates, SSH keys
-- Bitcoin, Ethereum signatures
-
-**If quantum computers scale, these break:**
-- RSA, ECDSA (Shor's algorithm)
-- Most current "post-quantum" schemes (still unproven)
+Shield uses only proven symmetric primitives with unconditional security bounds.
 
 **Shield remains secure because:**
 - 256-bit symmetric keys require 2^256 operations to break
