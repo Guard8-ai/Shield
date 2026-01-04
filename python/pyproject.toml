@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shield-crypto"
+version = "0.1.0"
+description = "EXPTIME-secure encryption library - symmetric crypto with proven exponential-time security"
+readme = "README.md"
+license = {text = "CC0-1.0"}
+authors = [
+    {name = "Guard8.ai", email = "security@guard8.ai"}
+]
+keywords = ["cryptography", "encryption", "security", "post-quantum", "symmetric"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security :: Cryptography",
+]
+requires-python = ">=3.8"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Guard8.ai/Shield"
+Documentation = "https://github.com/Guard8.ai/Shield#readme"
+Repository = "https://github.com/Guard8.ai/Shield"
+Issues = "https://github.com/Guard8.ai/Shield/issues"
+
+[project.scripts]
+shield = "shield.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

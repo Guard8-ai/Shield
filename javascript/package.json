@@ -1,0 +1,54 @@
+{
+  "name": "@guard8/shield",
+  "version": "0.1.0",
+  "description": "EXPTIME-secure encryption library - symmetric cryptography with proven exponential-time security",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./src/index.js",
+      "import": "./src/index.mjs",
+      "types": "./src/index.d.ts"
+    },
+    "./browser": {
+      "import": "./src/browser.mjs",
+      "types": "./src/browser.d.ts"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "lint": "eslint src/",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "encryption",
+    "cryptography",
+    "post-quantum",
+    "p-np",
+    "symmetric",
+    "aes",
+    "pbkdf2",
+    "hmac",
+    "totp",
+    "2fa",
+    "security"
+  ],
+  "author": "Guard8.ai",
+  "license": "CC0-1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Guard8-ai/Shield"
+  },
+  "homepage": "https://github.com/Guard8-ai/Shield#readme",
+  "bugs": {
+    "url": "https://github.com/Guard8-ai/Shield/issues"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ]
+}

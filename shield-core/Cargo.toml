@@ -1,0 +1,50 @@
+[package]
+name = "shield-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["Guard8.ai"]
+description = "EXPTIME-secure encryption library - Rust core implementation"
+license = "CC0-1.0"
+repository = "https://github.com/Guard8.ai/Shield"
+keywords = ["cryptography", "encryption", "security", "post-quantum"]
+categories = ["cryptography", "no-std"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["std"]
+std = []
+wasm = ["dep:wasm-bindgen", "getrandom/js"]
+
+[dependencies]
+# Cryptographic primitives (audited, no OpenSSL)
+ring = "0.17"
+# For WASM random support
+getrandom = { version = "0.2", optional = true }
+# WASM bindings
+wasm-bindgen = { version = "0.2", optional = true }
+# Error handling
+thiserror = "1.0"
+# Constant-time operations
+subtle = "2.5"
+# Hex encoding for tests/debug
+hex = "0.4"
+# Base64 encoding
+base64 = "0.21"
+# JSON serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+criterion = "0.5"
+
+# Uncomment when benchmark file exists
+# [[bench]]
+# name = "encrypt_bench"
+# harness = false
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
