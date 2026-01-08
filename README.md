@@ -138,6 +138,11 @@ code := totp.Generate(time.Now().Unix())
 | `KeyRotationManager` | Key versioning | Zero-downtime rotation |
 | `GroupEncryption` | Multi-recipient | Team messaging |
 | `IdentityProvider` | Token-based auth | SSO systems |
+| **Web Integrations** (Python) | | |
+| `ShieldMiddleware` | FastAPI encryption | API response encryption |
+| `ShieldFlask` | Flask extension | Flask app encryption |
+| `RateLimiter` | Rate limiting | API protection |
+| `EncryptedCookie` | Secure cookies | Session management |
 
 ---
 
@@ -238,6 +243,7 @@ const decrypted = new Shield('pw', 'app').decrypt(encrypted);
 
 ```
 Shield/
+├── shield-core/     # Rust core library (single source of truth)
 ├── python/          # pip install shield-crypto
 ├── javascript/      # npm install @guard8/shield
 ├── go/              # go get github.com/Guard8-ai/shield
@@ -246,7 +252,7 @@ Shield/
 ├── csharp/          # .NET project
 ├── swift/           # Swift Package
 ├── kotlin/          # Kotlin/JVM
-├── wasm/            # WebAssembly (Rust)
+├── wasm/            # WebAssembly (re-exports shield-core)
 ├── tests/           # Cross-language integration tests
 ├── CHEATSHEET.md    # Quick reference for all languages
 ├── INSTALL.md       # Detailed installation guide
@@ -270,7 +276,10 @@ Shield/
 ## Tests
 
 ```bash
-# Python (120 tests)
+# Rust core (63 tests)
+cd shield-core && cargo test
+
+# Python (153 tests)
 cd python && python -m pytest
 
 # JavaScript (81 tests)
@@ -285,11 +294,11 @@ cd c && make test
 # Java (19 tests)
 cd java && gradle test
 
-# WebAssembly (5 tests)
+# WebAssembly (uses shield-core)
 cd wasm && cargo test
 ```
 
-**Total: 298+ tests across all implementations**
+**Total: 370+ tests across all implementations**
 
 ---
 
