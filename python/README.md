@@ -86,6 +86,90 @@ code = totp.generate()
 is_valid = totp.verify(code)  # True
 ```
 
+## Web Framework Integrations
+
+### FastAPI
+
+```python
+from fastapi import FastAPI, Depends
+from shield.integrations import ShieldMiddleware, ShieldTokenAuth
+
+app = FastAPI()
+
+# Encrypt all JSON responses automatically
+app.add_middleware(ShieldMiddleware, password="secret", service="api.example.com")
+
+# Token-based authentication
+auth = ShieldTokenAuth(password="secret", service="api.example.com")
+
+@app.post("/login")
+async def login(username: str, password: str):
+    # Verify credentials...
+    token = auth.create_token(user_id=username, roles=["user"])
+    return {"token": token}
+
+@app.get("/protected")
+async def protected(user: dict = Depends(auth)):
+    return {"user_id": user["sub"], "roles": user["roles"]}
+```
+
+### Flask
+
+```python
+from flask import Flask
+from shield.integrations import ShieldFlask, shield_required
+
+app = Flask(__name__)
+shield = ShieldFlask(app, password="secret", service="api.example.com")
+
+@app.route("/protected")
+@shield_required(password="secret", service="api.example.com")
+def protected():
+    from flask import g
+    return {"user_id": g.shield_user["sub"]}
+```
+
+### Rate Limiting
+
+```python
+from shield.integrations import RateLimiter, APIProtector
+
+# Simple rate limiter
+limiter = RateLimiter(password="secret", service="api", max_requests=100, window=60)
+
+if limiter.is_allowed(user_id):
+    process_request()
+else:
+    return "Rate limit exceeded", 429
+
+# Full API protection
+protector = APIProtector(password="secret", service="api")
+protector.add_rate_limit(max_requests=100, window=60)
+protector.add_ip_blacklist(["1.2.3.0/24"])
+
+result = protector.check_request(client_ip=request.remote_addr, user_id=user_id)
+if not result.allowed:
+    return {"error": result.reason}, 403
+```
+
+### Encrypted Cookies
+
+```python
+from shield.integrations import EncryptedCookie
+
+cookie = EncryptedCookie(password="secret", service="api.example.com")
+
+# Encode session data
+session_value = cookie.encode({"user_id": "123", "role": "admin"})
+
+# Set cookie header
+header = cookie.make_header("session", {"user_id": "123"})
+# "session=...; Secure; HttpOnly; SameSite=Strict"
+
+# Decode from request
+data = cookie.decode(request.cookies.get("session"))
+```
+
 ## CLI Usage
 
 ```bash

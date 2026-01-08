@@ -417,6 +417,96 @@ const serviceToken = provider.createServiceToken(token, 'api.example.com');
 provider.validateServiceToken(serviceToken, 'api.example.com');
 ```
 
+## Web Framework Integrations (Python)
+
+### FastAPI Middleware
+
+```python
+from fastapi import FastAPI, Depends
+from shield.integrations import ShieldMiddleware, ShieldTokenAuth
+
+app = FastAPI()
+
+# Encrypt all JSON responses
+app.add_middleware(ShieldMiddleware, password="secret", service="api.example.com")
+
+# Token authentication
+auth = ShieldTokenAuth(password="secret", service="api.example.com")
+
+@app.get("/protected")
+async def protected(user: dict = Depends(auth)):
+    return {"user_id": user["sub"]}
+```
+
+### Flask Extension
+
+```python
+from flask import Flask, g
+from shield.integrations import ShieldFlask, shield_required
+
+app = Flask(__name__)
+shield = ShieldFlask(app, password="secret", service="api.example.com")
+
+@app.route("/protected")
+@shield_required(password="secret", service="api.example.com")
+def protected():
+    return {"user_id": g.shield_user["sub"]}
+```
+
+### Rate Limiting
+
+```python
+from shield.integrations import RateLimiter, TokenBucket, APIProtector
+
+# Fixed window rate limiter
+limiter = RateLimiter(password="secret", service="api", max_requests=100, window=60)
+if limiter.is_allowed(user_id):
+    process_request()
+
+# Token bucket (allows bursts)
+bucket = TokenBucket(password="secret", service="api", capacity=10, refill_rate=1.0)
+if bucket.consume(user_id):
+    process_request()
+
+# Full API protection
+protector = APIProtector(password="secret", service="api")
+protector.add_rate_limit(max_requests=100, window=60)
+protector.add_ip_blacklist(["1.2.3.0/24"])
+result = protector.check_request(client_ip="10.0.0.1", user_id="user123")
+```
+
+### Encrypted Cookies
+
+```python
+from shield.integrations import EncryptedCookie
+
+cookie = EncryptedCookie(password="secret", service="api.example.com")
+
+# Encode session
+value = cookie.encode({"user_id": "123", "role": "admin"})
+
+# Make Set-Cookie header
+header = cookie.make_header("session", {"user_id": "123"})
+
+# Decode from request
+data = cookie.decode(cookie_value)  # Returns None if tampered/expired
+```
+
+### Browser Key Exchange
+
+```python
+from shield.integrations import BrowserBridge
+
+bridge = BrowserBridge(password="secret", service="api.example.com")
+
+# Generate key for browser client
+client_key = bridge.generate_client_key(session_id="session123", ttl=3600)
+# Returns: {"key": "...", "session_id": "session123", "expires_at": ...}
+
+# Encrypt data for specific client
+encrypted = bridge.encrypt_for_client("session123", b"sensitive data")
+```
+
 ## CLI (Python)
 
 ```bash

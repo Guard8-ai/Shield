@@ -40,6 +40,17 @@ SHIELD is an EXPTIME-secure encryption library providing symmetric cryptography 
 - `KeyRotationManager`: Zero-downtime key rotation
 - `IdentityProvider`: Token-based authentication/SSO
 
+### Python Web Integrations (`shield.integrations`)
+- `ShieldMiddleware`: FastAPI middleware for automatic response encryption
+- `ShieldFlask`: Flask extension with request/response encryption
+- `shield_protected`/`shield_required`: Decorators for protected endpoints
+- `ShieldTokenAuth`/`ShieldAPIKeyAuth`: Token and API key authentication
+- `RateLimiter`/`TokenBucket`: Rate limiting with encrypted state
+- `APIProtector`: Combined rate limiting, IP filtering, and audit logging
+- `BrowserBridge`: Secure key exchange with browser clients
+- `EncryptedCookie`: Tamper-proof encrypted cookies
+- `SecureCORS`: CORS with signed request validation
+
 ## Architecture
 
 ### Encryption Flow
@@ -63,7 +74,7 @@ Format: `nonce(16 bytes) || ciphertext || MAC(16 bytes)`
 # Rust core (63 tests)
 cd shield-core && cargo test
 
-# Python (120 tests)
+# Python (153 tests - includes 33 integration tests)
 cd python && python -m pytest
 
 # JavaScript (81 tests)
