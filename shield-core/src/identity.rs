@@ -2,6 +2,9 @@
 //!
 //! Provides identity management, session tokens, and service tokens.
 
+// Token timestamps and indices use intentional truncation for compact encoding
+#![allow(clippy::cast_possible_truncation)]
+
 use base64::Engine;
 use ring::hmac;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -14,8 +17,8 @@ use crate::error::{Result, ShieldError};
 
 /// Generate keystream using SHA256.
 fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
-    let mut keystream = Vec::with_capacity(((length + 31) / 32) * 32);
-    let num_blocks = (length + 31) / 32;
+    let mut keystream = Vec::with_capacity(length.div_ceil(32) * 32);
+    let num_blocks = length.div_ceil(32);
 
     for i in 0..num_blocks {
         let counter = (i as u32).to_le_bytes();
@@ -53,6 +56,7 @@ pub struct Session {
 
 impl Session {
     /// Check if session is expired.
+    #[must_use] 
     pub fn is_expired(&self) -> bool {
         match self.expires_at {
             None => false,
@@ -67,6 +71,7 @@ impl Session {
     }
 
     /// Check if session has permission.
+    #[must_use] 
     pub fn has_permission(&self, permission: &str) -> bool {
         self.permissions.contains(&permission.to_string())
     }
@@ -90,6 +95,7 @@ impl IdentityProvider {
     const ITERATIONS: u32 = 100_000;
 
     /// Create new identity provider.
+    #[must_use] 
     pub fn new(master_key: [u8; 32], token_ttl: u64) -> Self {
         Self {
             master_key,
@@ -152,7 +158,7 @@ impl IdentityProvider {
             user_id: user_id.to_string(),
             display_name: display_name.unwrap_or(user_id).to_string(),
             verification_key,
-            attributes: attributes.clone(),
+            attributes,  // Consume owned value, no clone needed
             created_at: now,
         };
 
@@ -169,11 +175,12 @@ impl IdentityProvider {
     }
 
     /// Authenticate user and return session token.
+    #[must_use]
     pub fn authenticate(
         &self,
         user_id: &str,
         password: &str,
-        permissions: Vec<String>,
+        permissions: &[String],
         ttl: Option<u64>,
     ) -> Option<String> {
         let user = self.users.get(user_id)?;
@@ -191,7 +198,7 @@ impl IdentityProvider {
             return None;
         }
 
-        Some(self.create_token(user_id, &permissions, ttl.unwrap_or(self.token_ttl)))
+        Some(self.create_token(user_id, permissions, ttl.unwrap_or(self.token_ttl)))
     }
 
     /// Create session token.
@@ -243,6 +250,7 @@ impl IdentityProvider {
     }
 
     /// Validate session token.
+    #[must_use] 
     pub fn validate_token(&self, token: &str) -> Option<Session> {
         let data = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(token)
@@ -305,11 +313,12 @@ impl IdentityProvider {
     }
 
     /// Create service-specific token.
+    #[must_use]
     pub fn create_service_token(
         &self,
         session_token: &str,
         service: &str,
-        permissions: Vec<String>,
+        permissions: &[String],
         ttl: u64,
     ) -> Option<String> {
         let session = self.validate_token(session_token)?;
@@ -327,7 +336,7 @@ impl IdentityProvider {
         // Serialize
         let user_id_bytes = session.user_id.as_bytes();
         let service_bytes = service.as_bytes();
-        let perms_json = serde_json::to_string(&permissions).unwrap();
+        let perms_json = serde_json::to_string(permissions).unwrap();
         let perms_bytes = perms_json.as_bytes();
 
         let mut token_data = Vec::new();
@@ -340,7 +349,7 @@ impl IdentityProvider {
         token_data.extend_from_slice(&expires_at.to_le_bytes());
 
         // Encrypt with service-specific key
-        let key = self.derive_key(&format!("service:{}", service));
+        let key = self.derive_key(&format!("service:{service}"));
         let keystream = generate_keystream(&key, &nonce, token_data.len());
         let encrypted: Vec<u8> = token_data
             .iter()
@@ -363,6 +372,7 @@ impl IdentityProvider {
     }
 
     /// Validate service token.
+    #[must_use] 
     pub fn validate_service_token(&self, token: &str, service: &str) -> Option<Session> {
         let data = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(token)
@@ -376,7 +386,7 @@ impl IdentityProvider {
         let encrypted = &data[16..data.len() - 16];
         let mac = &data[data.len() - 16..];
 
-        let key = self.derive_key(&format!("service:{}", service));
+        let key = self.derive_key(&format!("service:{service}"));
 
         // Verify MAC
         let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &key);
@@ -438,12 +448,14 @@ impl IdentityProvider {
     }
 
     /// Refresh session token.
+    #[must_use] 
     pub fn refresh_token(&self, token: &str) -> Option<String> {
         let session = self.validate_token(token)?;
         Some(self.create_token(&session.user_id, &session.permissions, self.token_ttl))
     }
 
     /// Get user identity.
+    #[must_use] 
     pub fn get_identity(&self, user_id: &str) -> Option<&Identity> {
         self.users.get(user_id).map(|u| &u.identity)
     }
@@ -466,6 +478,7 @@ pub struct SecureSession {
 
 impl SecureSession {
     /// Create new secure session.
+    #[must_use] 
     pub fn new(master_key: [u8; 32], rotation_interval: u64, max_old_keys: usize) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -493,7 +506,7 @@ impl SecureSession {
     fn derive_session_key(master_key: &[u8; 32], version: u32) -> [u8; 32] {
         let mut data = Vec::with_capacity(32 + 16);
         data.extend_from_slice(master_key);
-        data.extend_from_slice(format!("session:{}", version).as_bytes());
+        data.extend_from_slice(format!("session:{version}").as_bytes());
         let hash = ring::digest::digest(&ring::digest::SHA256, &data);
         let mut key = [0u8; 32];
         key.copy_from_slice(hash.as_ref());
@@ -585,6 +598,7 @@ impl SecureSession {
     }
 
     /// Get current key version (for testing).
+    #[must_use] 
     pub fn key_version(&self) -> u32 {
         self.key_version
     }
@@ -623,7 +637,7 @@ mod tests {
             .register("alice", "password123", None, HashMap::new())
             .unwrap();
 
-        let token = provider.authenticate("alice", "password123", vec![], None);
+        let token = provider.authenticate("alice", "password123", &[], None);
         assert!(token.is_some());
     }
 
@@ -634,7 +648,7 @@ mod tests {
             .register("alice", "password123", None, HashMap::new())
             .unwrap();
 
-        let token = provider.authenticate("alice", "wrongpassword", vec![], None);
+        let token = provider.authenticate("alice", "wrongpassword", &[], None);
         assert!(token.is_none());
     }
 
@@ -645,7 +659,7 @@ mod tests {
             .register("alice", "password", None, HashMap::new())
             .unwrap();
         let token = provider
-            .authenticate("alice", "password", vec![], None)
+            .authenticate("alice", "password", &[], None)
             .unwrap();
 
         let session = provider.validate_token(&token);
@@ -660,11 +674,11 @@ mod tests {
             .register("alice", "password", None, HashMap::new())
             .unwrap();
         let session_token = provider
-            .authenticate("alice", "password", vec![], None)
+            .authenticate("alice", "password", &[], None)
             .unwrap();
 
         let service_token = provider
-            .create_service_token(&session_token, "api.example.com", vec!["read".to_string()], 300)
+            .create_service_token(&session_token, "api.example.com", &["read".to_string()], 300)
             .unwrap();
 
         let session = provider.validate_service_token(&service_token, "api.example.com");
@@ -680,10 +694,10 @@ mod tests {
             .register("alice", "password", None, HashMap::new())
             .unwrap();
         let session_token = provider
-            .authenticate("alice", "password", vec![], None)
+            .authenticate("alice", "password", &[], None)
             .unwrap();
         let service_token = provider
-            .create_service_token(&session_token, "api.example.com", vec![], 300)
+            .create_service_token(&session_token, "api.example.com", &[], 300)
             .unwrap();
 
         let session = provider.validate_service_token(&service_token, "other.example.com");

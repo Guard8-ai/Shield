@@ -19,10 +19,26 @@
 //! let ciphertext = shield.encrypt(b"secret data").unwrap();
 //! let plaintext = shield.decrypt(&ciphertext).unwrap();
 //! ```
+//!
+//! ## Error Handling
+//!
+//! All fallible operations return `Result<T, ShieldError>`. Common errors:
+//! - [`ShieldError::AuthenticationFailed`] - MAC verification failed (tampered/wrong key)
+//! - [`ShieldError::CiphertextTooShort`] - Input too small to be valid ciphertext
+//! - [`ShieldError::RandomFailed`] - System RNG failure (extremely rare)
+//! - [`ShieldError::InvalidFormat`] - Malformed input data
+//!
+//! ## Panics
+//!
+//! Functions that may panic are documented, but panics are rare and indicate:
+//! - Internal invariant violations (should never happen in correct usage)
+//! - System-level failures (e.g., time going backwards)
 
 #![forbid(unsafe_code)]
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
+// Error/panic docs are centralized above; individual function docs are concise
+#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 mod error;
 mod shield;

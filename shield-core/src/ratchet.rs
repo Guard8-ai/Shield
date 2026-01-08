@@ -5,6 +5,9 @@
 //!
 //! Based on Signal's Double Ratchet (simplified symmetric version).
 
+// Crypto block counters are intentionally u32 - data >4GB would have other issues
+#![allow(clippy::cast_possible_truncation)]
+
 use ring::{digest, hmac, rand::{SecureRandom, SystemRandom}};
 use subtle::ConstantTimeEq;
 
@@ -111,7 +114,7 @@ fn derive_chain_key(root: &[u8; 32], label: &[u8]) -> [u8; 32] {
     result
 }
 
-/// Ratchet chain forward, returning (new_chain, message_key).
+/// Ratchet chain forward, returning (`new_chain`, `message_key`).
 fn ratchet_chain(chain_key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     // New chain key
     let mut chain_data = Vec::with_capacity(chain_key.len() + 5);
@@ -149,8 +152,8 @@ fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8], counter: u64) -> Result<Ve
     data.extend_from_slice(plaintext);
 
     // Generate keystream
-    let mut keystream = Vec::with_capacity(((data.len() + 31) / 32) * 32);
-    for i in 0..((data.len() + 31) / 32) {
+    let mut keystream = Vec::with_capacity(data.len().div_ceil(32) * 32);
+    for i in 0..data.len().div_ceil(32) {
         let block_counter = (i as u32).to_le_bytes();
         let mut hash_input = Vec::with_capacity(key.len() + nonce.len() + 4);
         hash_input.extend_from_slice(key);
@@ -205,8 +208,8 @@ fn decrypt_with_key(key: &[u8; 32], encrypted: &[u8]) -> Result<(Vec<u8>, u64)> 
     }
 
     // Generate keystream
-    let mut keystream = Vec::with_capacity(((ciphertext.len() + 31) / 32) * 32);
-    for i in 0..((ciphertext.len() + 31) / 32) {
+    let mut keystream = Vec::with_capacity(ciphertext.len().div_ceil(32) * 32);
+    for i in 0..ciphertext.len().div_ceil(32) {
         let block_counter = (i as u32).to_le_bytes();
         let mut hash_input = Vec::with_capacity(key.len() + nonce.len() + 4);
         hash_input.extend_from_slice(key);

@@ -2,6 +2,9 @@
 //!
 //! Encrypt once for multiple recipients, each can decrypt with their own key.
 
+// Member indices fit in u16 for practical group sizes (<65k members)
+#![allow(clippy::cast_possible_truncation)]
+
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ring::hmac;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -13,8 +16,8 @@ use crate::error::{Result, ShieldError};
 
 /// Generate keystream using SHA256.
 fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
-    let mut keystream = Vec::with_capacity(((length + 31) / 32) * 32);
-    let num_blocks = (length + 31) / 32;
+    let mut keystream = Vec::with_capacity(length.div_ceil(32) * 32);
+    let num_blocks = length.div_ceil(32);
 
     for i in 0..num_blocks {
         let counter = (i as u32).to_le_bytes();
@@ -104,14 +107,11 @@ pub struct GroupEncryption {
 impl GroupEncryption {
     /// Create new group encryption.
     pub fn new(group_key: Option<[u8; 32]>) -> Result<Self> {
-        let key = match group_key {
-            Some(k) => k,
-            None => {
-                let rng = SystemRandom::new();
-                let mut k = [0u8; 32];
-                rng.fill(&mut k).map_err(|_| ShieldError::RandomFailed)?;
-                k
-            }
+        let key = if let Some(k) = group_key { k } else {
+            let rng = SystemRandom::new();
+            let mut k = [0u8; 32];
+            rng.fill(&mut k).map_err(|_| ShieldError::RandomFailed)?;
+            k
         };
 
         Ok(Self {
@@ -188,6 +188,7 @@ impl GroupEncryption {
     }
 
     /// Get the group key.
+    #[must_use] 
     pub fn group_key(&self) -> &[u8; 32] {
         &self.group_key
     }
@@ -221,14 +222,11 @@ pub struct BroadcastEncryption {
 impl BroadcastEncryption {
     /// Create new broadcast encryption.
     pub fn new(master_key: Option<[u8; 32]>, subgroup_size: usize) -> Result<Self> {
-        let key = match master_key {
-            Some(k) => k,
-            None => {
-                let rng = SystemRandom::new();
-                let mut k = [0u8; 32];
-                rng.fill(&mut k).map_err(|_| ShieldError::RandomFailed)?;
-                k
-            }
+        let key = if let Some(k) = master_key { k } else {
+            let rng = SystemRandom::new();
+            let mut k = [0u8; 32];
+            rng.fill(&mut k).map_err(|_| ShieldError::RandomFailed)?;
+            k
         };
 
         Ok(Self {
@@ -246,7 +244,7 @@ impl BroadcastEncryption {
 
         // Find subgroup with space
         let mut subgroup_id = None;
-        for (sg_id, _) in &self.subgroup_keys {
+        for sg_id in self.subgroup_keys.keys() {
             let count = self.members.values().filter(|(sg, _)| sg == sg_id).count();
             if count < self.subgroup_size {
                 subgroup_id = Some(*sg_id);
@@ -254,17 +252,14 @@ impl BroadcastEncryption {
             }
         }
 
-        let sg_id = match subgroup_id {
-            Some(id) => id,
-            None => {
-                let id = self.next_subgroup;
-                let mut sg_key = [0u8; 32];
-                rng.fill(&mut sg_key)
-                    .map_err(|_| ShieldError::RandomFailed)?;
-                self.subgroup_keys.insert(id, sg_key);
-                self.next_subgroup += 1;
-                id
-            }
+        let sg_id = if let Some(id) = subgroup_id { id } else {
+            let id = self.next_subgroup;
+            let mut sg_key = [0u8; 32];
+            rng.fill(&mut sg_key)
+                .map_err(|_| ShieldError::RandomFailed)?;
+            self.subgroup_keys.insert(id, sg_key);
+            self.next_subgroup += 1;
+            id
         };
 
         self.members.insert(member_id.to_string(), (sg_id, member_key));

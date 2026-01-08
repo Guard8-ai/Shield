@@ -2,6 +2,9 @@
 //!
 //! Manages multiple key versions for seamless rotation.
 
+// Crypto block counters are intentionally u32 - data >4GB would have other issues
+#![allow(clippy::cast_possible_truncation)]
+
 use ring::hmac;
 use ring::rand::{SecureRandom, SystemRandom};
 use std::collections::HashMap;
@@ -17,6 +20,7 @@ pub struct KeyRotationManager {
 
 impl KeyRotationManager {
     /// Create new manager with initial key.
+    #[must_use] 
     pub fn new(key: [u8; 32], version: u32) -> Self {
         let mut keys = HashMap::new();
         keys.insert(version, key);
@@ -28,14 +32,16 @@ impl KeyRotationManager {
     }
 
     /// Get current key version.
+    #[must_use] 
     pub fn current_version(&self) -> u32 {
         self.current_version
     }
 
     /// Get all available versions.
+    #[must_use] 
     pub fn versions(&self) -> Vec<u32> {
         let mut v: Vec<u32> = self.keys.keys().copied().collect();
-        v.sort();
+        v.sort_unstable();
         v
     }
 
@@ -168,8 +174,8 @@ impl KeyRotationManager {
 
 /// Generate keystream using SHA256.
 fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
-    let mut keystream = Vec::with_capacity(((length + 31) / 32) * 32);
-    let num_blocks = (length + 31) / 32;
+    let mut keystream = Vec::with_capacity(length.div_ceil(32) * 32);
+    let num_blocks = length.div_ceil(32);
 
     for i in 0..num_blocks {
         let counter = (i as u32).to_le_bytes();
