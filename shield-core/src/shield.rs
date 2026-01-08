@@ -2,6 +2,9 @@
 //!
 //! Matches Python `shield.py` byte-for-byte for interoperability.
 
+// Crypto block counters are intentionally u32 - data >4GB would have other issues
+#![allow(clippy::cast_possible_truncation)]
+
 use ring::{hmac, pbkdf2, rand::{SecureRandom, SystemRandom}};
 use subtle::ConstantTimeEq;
 use std::num::NonZeroU32;
@@ -172,8 +175,8 @@ impl Shield {
 
 /// Generate keystream using SHA256 (matches Python implementation).
 fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
-    let mut keystream = Vec::with_capacity(((length + 31) / 32) * 32);
-    let num_blocks = (length + 31) / 32;
+    let mut keystream = Vec::with_capacity(length.div_ceil(32) * 32);
+    let num_blocks = length.div_ceil(32);
 
     for i in 0..num_blocks {
         let counter = (i as u32).to_le_bytes();

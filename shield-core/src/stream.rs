@@ -3,6 +3,9 @@
 //! Processes data in chunks with per-chunk authentication.
 //! Matches Python `StreamCipher` from `shield_enterprise.py`.
 
+// Crypto block/chunk counters are intentionally u32 - data >4GB would have other issues
+#![allow(clippy::cast_possible_truncation)]
+
 use ring::{hmac, digest, rand::{SecureRandom, SystemRandom}};
 use subtle::ConstantTimeEq;
 
@@ -159,7 +162,7 @@ impl<'a> StreamEncryptor<'a> {
     }
 }
 
-impl<'a> Iterator for StreamEncryptor<'a> {
+impl Iterator for StreamEncryptor<'_> {
     type Item = Result<Vec<u8>>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -227,8 +230,8 @@ fn encrypt_chunk(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>> {
     rng.fill(&mut nonce).map_err(|_| ShieldError::RandomFailed)?;
 
     // Generate keystream
-    let mut keystream = Vec::with_capacity(((data.len() + 31) / 32) * 32);
-    for i in 0..((data.len() + 31) / 32) {
+    let mut keystream = Vec::with_capacity(data.len().div_ceil(32) * 32);
+    for i in 0..data.len().div_ceil(32) {
         let counter = (i as u32).to_le_bytes();
         let mut hash_input = Vec::with_capacity(key.len() + nonce.len() + 4);
         hash_input.extend_from_slice(key);
@@ -283,8 +286,8 @@ fn decrypt_chunk(key: &[u8; 32], encrypted: &[u8]) -> Result<Vec<u8>> {
     }
 
     // Generate keystream
-    let mut keystream = Vec::with_capacity(((ciphertext.len() + 31) / 32) * 32);
-    for i in 0..((ciphertext.len() + 31) / 32) {
+    let mut keystream = Vec::with_capacity(ciphertext.len().div_ceil(32) * 32);
+    for i in 0..ciphertext.len().div_ceil(32) {
         let counter = (i as u32).to_le_bytes();
         let mut hash_input = Vec::with_capacity(key.len() + nonce.len() + 4);
         hash_input.extend_from_slice(key);

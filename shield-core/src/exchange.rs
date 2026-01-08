@@ -17,6 +17,7 @@ impl PAKEExchange {
     pub const ITERATIONS: u32 = 200_000;
 
     /// Derive key contribution from password.
+    #[must_use] 
     pub fn derive(password: &str, salt: &[u8], role: &str, iterations: Option<u32>) -> [u8; 32] {
         let iters = iterations.unwrap_or(Self::ITERATIONS);
 
@@ -40,9 +41,10 @@ impl PAKEExchange {
     }
 
     /// Combine key contributions into session key.
+    #[must_use] 
     pub fn combine(contributions: &[[u8; 32]]) -> [u8; 32] {
         let mut sorted: Vec<&[u8; 32]> = contributions.iter().collect();
-        sorted.sort_by(|a, b| a.cmp(b));
+        sorted.sort();
 
         let mut combined = Vec::with_capacity(contributions.len() * 32);
         for c in sorted {
@@ -77,6 +79,7 @@ struct ExchangeData {
 
 impl QRExchange {
     /// Encode key for QR code.
+    #[must_use] 
     pub fn encode(key: &[u8]) -> String {
         URL_SAFE_NO_PAD.encode(key)
     }
@@ -89,6 +92,7 @@ impl QRExchange {
     }
 
     /// Generate complete exchange data with metadata.
+    #[must_use] 
     pub fn generate_exchange_data(key: &[u8], metadata: Option<serde_json::Value>) -> String {
         let data = ExchangeData {
             v: 1,

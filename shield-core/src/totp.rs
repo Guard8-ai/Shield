@@ -2,6 +2,9 @@
 //!
 //! RFC 6238 compliant with recovery codes support.
 
+// TOTP digits (6-8) and Base32 indices (0-31) never overflow u32
+#![allow(clippy::cast_possible_truncation)]
+
 use ring::hmac;
 use ring::rand::{SecureRandom, SystemRandom};
 use std::collections::HashSet;
@@ -21,6 +24,7 @@ pub struct TOTP {
 
 impl TOTP {
     /// Create new TOTP with secret.
+    #[must_use] 
     pub fn new(secret: Vec<u8>, digits: usize, interval: u64) -> Self {
         Self {
             secret,
@@ -30,6 +34,7 @@ impl TOTP {
     }
 
     /// Create with default settings (6 digits, 30 second interval).
+    #[must_use] 
     pub fn with_secret(secret: Vec<u8>) -> Self {
         Self::new(secret, 6, 30)
     }
@@ -43,6 +48,7 @@ impl TOTP {
     }
 
     /// Generate TOTP code for given time.
+    #[must_use] 
     pub fn generate(&self, timestamp: Option<u64>) -> String {
         let time = timestamp.unwrap_or_else(|| {
             SystemTime::now()
@@ -76,6 +82,7 @@ impl TOTP {
     }
 
     /// Verify TOTP code with time window.
+    #[must_use] 
     pub fn verify(&self, code: &str, timestamp: Option<u64>, window: u32) -> bool {
         let time = timestamp.unwrap_or_else(|| {
             SystemTime::now()
@@ -87,12 +94,12 @@ impl TOTP {
         let window = if window == 0 { 1 } else { window };
 
         for i in 0..=window {
-            let t = time.saturating_sub((i as u64) * self.interval);
+            let t = time.saturating_sub(u64::from(i) * self.interval);
             if self.generate(Some(t)) == code {
                 return true;
             }
             if i > 0 {
-                let t = time + (i as u64) * self.interval;
+                let t = time + u64::from(i) * self.interval;
                 if self.generate(Some(t)) == code {
                     return true;
                 }
@@ -102,6 +109,7 @@ impl TOTP {
     }
 
     /// Convert secret to Base32.
+    #[must_use] 
     pub fn secret_to_base32(secret: &[u8]) -> String {
         const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
         let mut result = String::new();
@@ -109,7 +117,7 @@ impl TOTP {
         let mut bits = 0;
 
         for &byte in secret {
-            buffer = (buffer << 8) | (byte as u64);
+            buffer = (buffer << 8) | u64::from(byte);
             bits += 8;
             while bits >= 5 {
                 bits -= 5;
@@ -154,6 +162,7 @@ impl TOTP {
     }
 
     /// Generate provisioning URI for QR codes.
+    #[must_use] 
     pub fn provisioning_uri(&self, account: &str, issuer: &str) -> String {
         let secret_b32 = Self::secret_to_base32(&self.secret);
         format!(
@@ -163,6 +172,7 @@ impl TOTP {
     }
 
     /// Get the secret.
+    #[must_use] 
     pub fn secret(&self) -> &[u8] {
         &self.secret
     }
@@ -217,16 +227,31 @@ impl RecoveryCodes {
     }
 
     /// Get remaining code count.
+    #[must_use] 
     pub fn remaining(&self) -> usize {
         self.codes.len()
     }
 
+    /// Get original code count (how many were initially generated).
+    #[must_use] 
+    pub fn original_count(&self) -> usize {
+        self.original_count
+    }
+
+    /// Get used code count (original - remaining).
+    #[must_use] 
+    pub fn used_count(&self) -> usize {
+        self.original_count - self.codes.len()
+    }
+
     /// Get all codes (for display to user).
+    #[must_use] 
     pub fn codes(&self) -> Vec<String> {
         self.codes.iter().cloned().collect()
     }
 
     /// Check if any codes remain.
+    #[must_use] 
     pub fn has_codes(&self) -> bool {
         !self.codes.is_empty()
     }
