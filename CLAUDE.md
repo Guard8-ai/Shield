@@ -12,6 +12,7 @@ SHIELD is an EXPTIME-secure encryption library providing symmetric cryptography 
 
 | Directory | Focus |
 |-----------|-------|
+| `shield-core/` | **Rust core library** - Single source of truth for Rust/WASM |
 | `python/` | Python package (pip install shield-crypto) |
 | `javascript/` | JavaScript/Node.js package (@guard8/shield) |
 | `go/` | Go module (github.com/Guard8-ai/shield) |
@@ -20,7 +21,7 @@ SHIELD is an EXPTIME-secure encryption library providing symmetric cryptography 
 | `csharp/` | C#/.NET project |
 | `swift/` | Swift Package |
 | `kotlin/` | Kotlin/JVM project |
-| `wasm/` | WebAssembly module (Rust-based) |
+| `wasm/` | WebAssembly module (re-exports shield-core with wasm feature) |
 | `tests/` | Cross-language interoperability tests |
 
 ## Key Components
@@ -59,6 +60,9 @@ Format: `nonce(16 bytes) || ciphertext || MAC(16 bytes)`
 ## Running Tests
 
 ```bash
+# Rust core (63 tests)
+cd shield-core && cargo test
+
 # Python (120 tests)
 cd python && python -m pytest
 
@@ -74,7 +78,7 @@ cd c && make test
 # Java (19 tests)
 cd java && gradle test
 
-# WebAssembly (5 tests)
+# WebAssembly (uses shield-core)
 cd wasm && cargo test
 ```
 
