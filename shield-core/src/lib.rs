@@ -50,6 +50,7 @@ mod exchange;
 mod rotation;
 mod group;
 mod identity;
+pub mod password;
 #[cfg(feature = "wasm")]
 mod wasm;
 

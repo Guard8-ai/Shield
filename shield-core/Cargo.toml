@@ -13,15 +13,22 @@ categories = ["cryptography", "no-std"]
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["std"]
+default = ["std", "cli"]
 std = []
+cli = ["dep:rpassword", "dep:getrandom"]
 wasm = ["dep:wasm-bindgen", "getrandom/js"]
+
+[[bin]]
+name = "shield"
+required-features = ["cli"]
 
 [dependencies]
 # Cryptographic primitives (audited, no OpenSSL)
 ring = "0.17"
-# For WASM random support
+# For random number generation (CLI)
 getrandom = { version = "0.2", optional = true }
+# Password input (CLI)
+rpassword = { version = "7.3", optional = true }
 # WASM bindings
 wasm-bindgen = { version = "0.2", optional = true }
 # Error handling
@@ -39,10 +46,9 @@ serde_json = "1.0"
 [dev-dependencies]
 criterion = "0.5"
 
-# Uncomment when benchmark file exists
-# [[bench]]
-# name = "encrypt_bench"
-# harness = false
+[[bench]]
+name = "encrypt_bench"
+harness = false
 
 [profile.release]
 lto = true
