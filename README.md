@@ -138,6 +138,7 @@ code := totp.Generate(time.Now().Unix())
 | `KeyRotationManager` | Key versioning | Zero-downtime rotation |
 | `GroupEncryption` | Multi-recipient | Team messaging |
 | `IdentityProvider` | Token-based auth | SSO systems |
+| `check_password` | Password strength | Prevent weak passwords |
 | **Web Integrations** (Python) | | |
 | `ShieldMiddleware` | FastAPI encryption | API response encryption |
 | `ShieldFlask` | Flask extension | Flask app encryption |
@@ -162,16 +163,16 @@ shield decrypt secret.enc -o secret.txt
 # Enter same password
 ```
 
-### Set up 2FA for an app
+### Check password strength
 ```bash
-shield totp-setup --account you@email.com --issuer MyApp
-# Scan the QR code with Google Authenticator
+shield check "MyP@ssw0rd123"
+# Output: STRONG - 72.3 bits entropy
 ```
 
-### Get current 2FA code
+### Encrypt text directly
 ```bash
-shield totp-code JBSWY3DPEHPK3PXP
-# Output: 847293 (expires in 23s)
+shield text encrypt "secret message" -p password -s myapp
+# Output: hex-encoded ciphertext
 ```
 
 ### Generate a secure key
@@ -232,7 +233,7 @@ const decrypted = new Shield('pw', 'app').decrypt(encrypted);
 
 ## What Shield Does NOT Protect Against
 
-- **Weak passwords** - Use strong, unique passwords
+- **Weak passwords** - Use `check_password()` to enforce strength
 - **Compromised devices** - If attacker has your device, game over
 - **Stolen keys** - Protect your keys like passwords
 - **Side channels** - Use constant-time comparison (we do)
@@ -243,7 +244,7 @@ const decrypted = new Shield('pw', 'app').decrypt(encrypted);
 
 ```
 Shield/
-├── shield-core/     # Rust core library (single source of truth)
+├── shield-core/     # Rust core library + CLI (single source of truth)
 ├── python/          # pip install shield-crypto
 ├── javascript/      # npm install @guard8/shield
 ├── go/              # go get github.com/Guard8-ai/shield
@@ -255,6 +256,8 @@ Shield/
 ├── wasm/            # WebAssembly (re-exports shield-core)
 ├── tests/           # Cross-language integration tests
 ├── CHEATSHEET.md    # Quick reference for all languages
+├── BENCHMARKS.md    # Performance benchmarks vs AES-GCM
+├── MIGRATION.md     # Migration from Fernet, NaCl, etc.
 ├── INSTALL.md       # Detailed installation guide
 ├── SECURITY.md      # Threat model and best practices
 └── CONTRIBUTING.md  # How to contribute
@@ -266,10 +269,12 @@ Shield/
 
 | Operation | Speed | Notes |
 |-----------|-------|-------|
-| Key derivation | ~200ms | Intentional (anti-brute-force) |
-| Encryption | 500+ MB/s | After key is derived |
+| Key derivation | ~29ms | Intentional (anti-brute-force) |
+| Encryption | ~160 MB/s | SHA256-CTR (see [BENCHMARKS.md](BENCHMARKS.md)) |
 | TOTP generation | <1ms | |
 | Lamport signing | ~10ms | 8KB signature |
+
+For comparison: AES-256-GCM achieves ~3.4 GB/s with hardware acceleration. Shield prioritizes simplicity and EXPTIME security over raw speed.
 
 ---
 

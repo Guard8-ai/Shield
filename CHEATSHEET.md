@@ -507,19 +507,29 @@ client_key = bridge.generate_client_key(session_id="session123", ttl=3600)
 encrypted = bridge.encrypt_for_client("session123", b"sensitive data")
 ```
 
-## CLI (Python)
+## CLI (Rust)
 
 ```bash
+# Install
+cargo install shield-core
+
 # Encrypt/decrypt files
 shield encrypt secret.txt -o secret.enc
 shield decrypt secret.enc -o secret.txt
 
+# Check password strength
+shield check "MyP@ssw0rd123"
+# Output: STRONG - 72.3 bits entropy
+
+# Encrypt text directly
+shield text encrypt "secret message" -p password -s myservice
+shield text decrypt "hex_ciphertext" -p password -s myservice
+
 # Generate random key
 shield keygen
 
-# TOTP setup
-shield totp-setup --account user@example.com
-shield totp-code JBSWY3DPEHPK3PXP
+# Show algorithm info
+shield info
 ```
 
 ## Interoperability
@@ -550,6 +560,36 @@ let decrypted = s.decrypt(&encrypted)?;
 // b"Hello!"
 ```
 
+## Password Strength
+
+### Rust
+```rust
+use shield_core::password::{check_password, StrengthLevel};
+
+let result = check_password("MyP@ssw0rd123");
+println!("Entropy: {:.1} bits", result.entropy);
+println!("Level: {:?}", result.level);
+println!("Crack time: {}", result.crack_time_display());
+
+// Warn on weak passwords
+if matches!(result.level, StrengthLevel::Critical | StrengthLevel::Weak) {
+    eprintln!("Warning: {}", result.suggestions.first().unwrap_or(&String::new()));
+}
+```
+
+### Python
+```python
+from shield.password import check_password, StrengthLevel
+
+result = check_password("MyP@ssw0rd123")
+print(f"Entropy: {result.entropy:.1f} bits")
+print(f"Level: {result.level.name}")
+print(f"Crack time: {result.crack_time_display()}")
+
+if result.level in (StrengthLevel.Critical, StrengthLevel.Weak):
+    print(f"Warning: {result.suggestions[0]}")
+```
+
 ## Security Parameters
 
 | Parameter | Value |
@@ -577,3 +617,8 @@ Shield uses only proven symmetric primitives with unconditional security bounds.
 - HMAC-SHA256 (MAC) - 2^256 forgery resistance
 - PBKDF2 (KDF) - 2^256 * iterations key space
 - Lamport signatures - hash-based, quantum-safe
+
+## See Also
+
+- [BENCHMARKS.md](BENCHMARKS.md) - Performance comparison vs AES-GCM, ChaCha20
+- [MIGRATION.md](MIGRATION.md) - Migration from Fernet, NaCl, PyCryptodome
