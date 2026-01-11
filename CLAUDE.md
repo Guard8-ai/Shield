@@ -12,7 +12,7 @@ SHIELD is an EXPTIME-secure encryption library providing symmetric cryptography 
 
 | Directory | Focus |
 |-----------|-------|
-| `shield-core/` | **Rust core library** - Single source of truth for Rust/WASM |
+| `shield-core/` | **Rust core library + CLI** - Single source of truth for Rust/WASM |
 | `python/` | Python package (pip install shield-crypto) |
 | `javascript/` | JavaScript/Node.js package (@guard8/shield) |
 | `go/` | Go module (github.com/Guard8-ai/shield) |
@@ -23,6 +23,8 @@ SHIELD is an EXPTIME-secure encryption library providing symmetric cryptography 
 | `kotlin/` | Kotlin/JVM project |
 | `wasm/` | WebAssembly module (re-exports shield-core with wasm feature) |
 | `tests/` | Cross-language interoperability tests |
+| `BENCHMARKS.md` | Performance benchmarks vs AES-GCM, ChaCha20 |
+| `MIGRATION.md` | Migration guides from Fernet, NaCl, PyCryptodome |
 
 ## Key Components
 
@@ -39,6 +41,14 @@ SHIELD is an EXPTIME-secure encryption library providing symmetric cryptography 
 - `GroupEncryption`: Multi-recipient encryption
 - `KeyRotationManager`: Zero-downtime key rotation
 - `IdentityProvider`: Token-based authentication/SSO
+- `password`: Password strength checker with entropy calculation
+
+### CLI Tool (shield-core)
+- `shield encrypt/decrypt`: File encryption/decryption
+- `shield check`: Password strength analysis
+- `shield text`: Encrypt/decrypt text directly
+- `shield keygen`: Generate random keys
+- `shield info`: Show algorithm information
 
 ### Python Web Integrations (`shield.integrations`)
 - `ShieldMiddleware`: FastAPI middleware for automatic response encryption
@@ -112,7 +122,7 @@ All 10 implementations produce byte-identical output. Encrypt in any language, d
 - Replay attacks (ratcheting with counters)
 
 **Requirements:**
-- Strong passwords (12+ characters recommended)
+- Strong passwords (use `check_password()` to enforce)
 - Secure key storage
 - Protected endpoints
 

@@ -79,7 +79,48 @@ let decrypted = bob.decrypt(&encrypted)?;
 ## Features
 
 - `std` (default): Standard library support
+- `cli` (default): Command-line interface (`shield` binary)
 - `wasm`: WebAssembly support via wasm-bindgen
+
+## CLI Tool
+
+```bash
+# Install
+cargo install shield-core
+
+# Encrypt/decrypt files
+shield encrypt secret.txt -o secret.enc
+shield decrypt secret.enc -o secret.txt
+
+# Check password strength
+shield check "MyP@ssw0rd123"
+
+# Encrypt text directly
+shield text encrypt "hello" -p password -s service
+
+# Generate random key
+shield keygen
+
+# Show info
+shield info
+```
+
+## Password Strength
+
+```rust
+use shield_core::password::{check_password, StrengthLevel};
+
+let result = check_password("MyP@ssw0rd123");
+println!("Entropy: {:.1} bits", result.entropy);
+println!("Level: {:?}", result.level);  // Strong
+println!("Crack time: {}", result.crack_time_display());
+
+if !result.is_acceptable() {
+    for suggestion in &result.suggestions {
+        println!("Suggestion: {}", suggestion);
+    }
+}
+```
 
 ## API Reference
 
@@ -121,6 +162,23 @@ impl RatchetSession {
 }
 ```
 
+### PasswordStrength
+
+Password strength analysis.
+
+```rust
+impl PasswordStrength {
+    fn length: usize;           // Password length
+    fn entropy: f64;            // Bits of entropy
+    fn level: StrengthLevel;    // Critical/Weak/Fair/Strong/VeryStrong
+    fn crack_time_seconds: f64; // Estimated crack time
+    fn suggestions: Vec<String>;// Improvement suggestions
+    fn is_acceptable(&self) -> bool;
+    fn is_recommended(&self) -> bool;
+    fn crack_time_display(&self) -> String;
+}
+```
+
 ## Interoperability
 
 Shield produces byte-identical output across all implementations:
@@ -156,3 +214,5 @@ CC0-1.0 (Public Domain) - Use freely, no attribution required.
 - [Shield Python Package](https://pypi.org/project/shield-crypto/)
 - [Shield npm Package](https://npmjs.com/package/@guard8/shield)
 - [GitHub Repository](https://github.com/Guard8-ai/Shield)
+- [BENCHMARKS.md](../BENCHMARKS.md) - Performance comparison vs AES-GCM
+- [MIGRATION.md](../MIGRATION.md) - Migration from Fernet, NaCl, etc.
