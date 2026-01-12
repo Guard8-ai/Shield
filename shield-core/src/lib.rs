@@ -51,6 +51,9 @@ mod rotation;
 mod group;
 mod identity;
 pub mod password;
+pub mod channel;
+#[cfg(feature = "async")]
+pub mod channel_async;
 #[cfg(feature = "wasm")]
 mod wasm;
 
@@ -64,6 +67,9 @@ pub use exchange::{PAKEExchange, QRExchange, KeySplitter};
 pub use rotation::KeyRotationManager;
 pub use group::{GroupEncryption, BroadcastEncryption, EncryptedGroupMessage, EncryptedBroadcast};
 pub use identity::{IdentityProvider, Identity, Session, SecureSession};
+pub use channel::{ShieldChannel, ChannelConfig, ShieldListener};
+#[cfg(feature = "async")]
+pub use channel_async::AsyncShieldChannel;
 
 #[cfg(feature = "wasm")]
 pub use wasm::*;

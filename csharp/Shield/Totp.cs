@@ -79,7 +79,7 @@ namespace Guard8.Shield
             for (int i = 0; i < _digits; i++)
                 modulo *= 10;
 
-            return code % modulo.ToString().PadLeft(_digits, '0');
+            return (code % modulo).ToString().PadLeft(_digits, '0');
         }
 
         public string ToBase32()

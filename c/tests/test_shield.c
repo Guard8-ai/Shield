@@ -322,6 +322,56 @@ void test_lamport_one_time_use(void) {
     PASS();
 }
 
+/* ============== Recovery Codes Tests ============== */
+
+void test_recovery_codes(void) {
+    TEST("recovery_codes");
+
+    shield_recovery_t recovery;
+    assert(shield_recovery_init(&recovery, 10, 8) == SHIELD_OK);
+
+    assert(shield_recovery_remaining(&recovery) == 10);
+
+    /* Get first code */
+    char code[SHIELD_RECOVERY_CODE_LEN];
+    assert(shield_recovery_get_code(&recovery, 0, code));
+
+    /* Verify it works */
+    assert(shield_recovery_verify(&recovery, code));
+    assert(shield_recovery_remaining(&recovery) == 9);
+
+    /* Can't use same code again */
+    assert(!shield_recovery_verify(&recovery, code));
+
+    /* Invalid code fails */
+    assert(!shield_recovery_verify(&recovery, "ZZZZ-ZZZZ"));
+
+    shield_recovery_wipe(&recovery);
+
+    PASS();
+}
+
+void test_recovery_codes_normalize(void) {
+    TEST("recovery_codes_normalize");
+
+    const char *codes[] = {"ABCD-1234"};
+    shield_recovery_t recovery;
+    shield_recovery_init_from(&recovery, codes, 1);
+
+    /* Should accept lowercase */
+    assert(shield_recovery_verify(&recovery, "abcd-1234"));
+    assert(shield_recovery_remaining(&recovery) == 0);
+
+    /* Test without dash */
+    const char *codes2[] = {"EFGH-5678"};
+    shield_recovery_init_from(&recovery, codes2, 1);
+    assert(shield_recovery_verify(&recovery, "efgh5678"));
+
+    shield_recovery_wipe(&recovery);
+
+    PASS();
+}
+
 /* ============== Utility Tests ============== */
 
 void test_secure_compare(void) {
@@ -397,6 +447,10 @@ int main(void) {
     printf("\nLamport Tests:\n");
     test_lamport_signature();
     test_lamport_one_time_use();
+
+    printf("\nRecovery Codes Tests:\n");
+    test_recovery_codes();
+    test_recovery_codes_normalize();
 
     printf("\nUtility Tests:\n");
     test_secure_compare();

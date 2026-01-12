@@ -100,6 +100,21 @@ func (pe *PAKEExchange) CreateProof(peerPublic []byte) []byte {
 	return mac.Sum(nil)
 }
 
+// PAKEDerive derives a PAKE contribution from password and salt.
+// This is the static function used by ShieldChannel.
+func PAKEDerive(password string, salt []byte, role string, iterations int) []byte {
+	context := []byte("SHIELD-PAKE-" + role)
+	fullSalt := append(salt, context...)
+	return pbkdf2.Key([]byte(password), fullSalt, iterations, KeySize, sha256.New)
+}
+
+// PAKECombine combines two contributions to produce a shared key.
+func PAKECombine(local, remote []byte) []byte {
+	combined := append(local, remote...)
+	h := sha256.Sum256(combined)
+	return h[:]
+}
+
 // QRExchange provides QR code-based key exchange.
 type QRExchange struct {
 	Code      string

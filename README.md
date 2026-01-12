@@ -1,11 +1,19 @@
+<p align="center">
+  <img src="docs/assets/logo-readme-512px.png" alt="Shield Logo" width="256">
+</p>
+
 # Shield
 
 **EXPTIME-ready encryption that survives P=NP and quantum computers.**
 
+[![CI](https://github.com/Guard8-ai/Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/Guard8-ai/Shield/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](shield-core/)
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](python/)
 [![JavaScript](https://img.shields.io/badge/JavaScript-ES6+-yellow.svg)](javascript/)
 [![Go](https://img.shields.io/badge/Go-1.19+-00ADD8.svg)](go/)
+[![Security](https://img.shields.io/badge/Security-Audited-green.svg)](SECURITY_AUDIT.md)
+[![Clippy](https://img.shields.io/badge/Clippy-0%20warnings-brightgreen.svg)](shield-core/)
 
 ```bash
 pip install shield-crypto    # Python
@@ -120,6 +128,9 @@ code := totp.Generate(time.Now().Unix())
 | Swift | Swift Package | [swift/](swift/) |
 | Kotlin | Gradle: `ai.guard8:shield` | [kotlin/](kotlin/) |
 | WebAssembly | `wasm-pack build` | [wasm/](wasm/) |
+| **Browser** | `npm install @guard8/shield-browser` | [browser/](browser/) |
+| **Android** | Gradle: `ai.guard8:shield-android` | [android/](android/) |
+| **iOS** | CocoaPods / SPM | [ios/](ios/) |
 
 ---
 
@@ -139,11 +150,66 @@ code := totp.Generate(time.Now().Unix())
 | `GroupEncryption` | Multi-recipient | Team messaging |
 | `IdentityProvider` | Token-based auth | SSO systems |
 | `check_password` | Password strength | Prevent weak passwords |
+| **Secure Transport** (Rust) | | |
+| `ShieldChannel` | TLS-like secure channel | Encrypted TCP/streams |
+| `AsyncShieldChannel` | Async secure channel | Tokio-based networking |
 | **Web Integrations** (Python) | | |
 | `ShieldMiddleware` | FastAPI encryption | API response encryption |
 | `ShieldFlask` | Flask extension | Flask app encryption |
 | `RateLimiter` | Rate limiting | API protection |
 | `EncryptedCookie` | Secure cookies | Session management |
+| `BrowserBridge` | Browser key exchange | Client-side decryption |
+| **Browser SDK** | | |
+| `ShieldBrowser` | Auto-decrypt fetch() | Transparent browser encryption |
+
+---
+
+## Feature Matrix
+
+Not all features are available in all languages. Here's what's supported:
+
+### Core Features (All Languages)
+
+| Feature | Rust | Python | JS | Go | Java | C# | Swift | Kotlin | C | Android | iOS |
+|---------|:----:|:------:|:--:|:--:|:----:|:--:|:-----:|:------:|:-:|:-------:|:---:|
+| `Shield` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `quickEncrypt` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `RatchetSession` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `TOTP` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `RecoveryCodes` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | - | ✅ | ✅ |
+| `SymmetricSignature` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `LamportSignature` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+### Advanced Features
+
+| Feature | Rust | Python | JS | Go | Java | C# | Swift | Kotlin | C |
+|---------|:----:|:------:|:--:|:--:|:----:|:--:|:-----:|:------:|:-:|
+| `StreamCipher` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
+| `GroupEncryption` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
+| `KeyRotationManager` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
+| `IdentityProvider` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
+| `PAKEExchange` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
+| `QRExchange` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
+| `KeySplitter` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
+| `check_password` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
+
+### Platform-Specific Features
+
+| Feature | Platform | Description |
+|---------|----------|-------------|
+| `ShieldChannel` | Rust | TLS-like secure transport |
+| `AsyncShieldChannel` | Rust | Tokio-based async transport |
+| `SecureKeyStore` | Android | Hardware-backed key storage (TEE/StrongBox) |
+| `SecureKeychain` | iOS | Keychain + Face ID/Touch ID |
+| `ShieldMiddleware` | Python | FastAPI integration |
+| `ShieldFlask` | Python | Flask extension |
+| `ShieldBrowser` | Browser | Auto-decrypt fetch() responses |
+
+### Language Tiers
+
+- **Tier 1 (Full Features)**: Rust, Python, JavaScript, Go
+- **Tier 2 (Core Features)**: Java, C#, Swift, Kotlin, C
+- **Tier 3 (Platform-Optimized)**: Android, iOS, Browser, WASM
 
 ---
 
@@ -245,6 +311,9 @@ const decrypted = new Shield('pw', 'app').decrypt(encrypted);
 ```
 Shield/
 ├── shield-core/     # Rust core library + CLI (single source of truth)
+├── browser/         # Browser SDK (auto-decrypt fetch)
+├── android/         # Android SDK (Keystore integration)
+├── ios/             # iOS SDK (Keychain + Face ID/Touch ID)
 ├── python/          # pip install shield-crypto
 ├── javascript/      # npm install @guard8/shield
 ├── go/              # go get github.com/Guard8-ai/shield
@@ -254,6 +323,7 @@ Shield/
 ├── swift/           # Swift Package
 ├── kotlin/          # Kotlin/JVM
 ├── wasm/            # WebAssembly (re-exports shield-core)
+├── examples/        # Integration examples
 ├── tests/           # Cross-language integration tests
 ├── CHEATSHEET.md    # Quick reference for all languages
 ├── BENCHMARKS.md    # Performance benchmarks vs AES-GCM
@@ -281,8 +351,8 @@ For comparison: AES-256-GCM achieves ~3.4 GB/s with hardware acceleration. Shiel
 ## Tests
 
 ```bash
-# Rust core (63 tests)
-cd shield-core && cargo test
+# Rust core (97 tests)
+cd shield-core && cargo test --features async
 
 # Python (153 tests)
 cd python && python -m pytest
@@ -303,7 +373,7 @@ cd java && gradle test
 cd wasm && cargo test
 ```
 
-**Total: 370+ tests across all implementations**
+**Total: 400+ tests across all implementations**
 
 ---
 

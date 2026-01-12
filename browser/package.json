@@ -1,0 +1,57 @@
+{
+  "name": "@guard8/shield-browser",
+  "version": "1.0.0",
+  "description": "Shield Browser SDK - Transparent auto-decryption for web applications",
+  "type": "module",
+  "main": "dist/shield-browser.js",
+  "module": "dist/shield-browser.esm.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/shield-browser.esm.js",
+      "require": "./dist/shield-browser.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "pkg/",
+    "README.md"
+  ],
+  "scripts": {
+    "build:wasm": "cd .. && wasm-pack build browser --target web --out-dir browser/pkg",
+    "build:js": "rollup -c",
+    "build:types": "tsc --emitDeclarationOnly --outDir dist",
+    "build": "npm run build:wasm && npm run build:js && npm run build:types",
+    "clean": "rm -rf dist pkg",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "shield",
+    "encryption",
+    "browser",
+    "wasm",
+    "security",
+    "auto-decrypt"
+  ],
+  "author": "Guard8.ai",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Guard8-ai/Shield.git",
+    "directory": "browser"
+  },
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-typescript": "^11.1.5",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@vitest/coverage-v8": "^1.2.0",
+    "jsdom": "^24.0.0",
+    "rollup": "^4.9.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.2.0"
+  }
+}

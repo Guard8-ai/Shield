@@ -35,6 +35,7 @@ from shield.exchange import PAKEExchange, QRExchange, KeySplitter
 from shield.rotation import KeyRotationManager
 from shield.group import GroupEncryption, BroadcastEncryption
 from shield.identity import IdentityProvider, Identity, Session, SecureSession
+from shield.channel import ShieldChannel, ChannelConfig, ShieldListener
 
 __all__ = [
     # Core
@@ -65,4 +66,8 @@ __all__ = [
     "Identity",
     "Session",
     "SecureSession",
+    # Secure Channel
+    "ShieldChannel",
+    "ChannelConfig",
+    "ShieldListener",
 ]

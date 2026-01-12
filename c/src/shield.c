@@ -1025,3 +1025,146 @@ void shield_lamport_free(shield_lamport_t *ctx) {
     }
     shield_secure_wipe(ctx->private_key, sizeof(ctx->private_key));
 }
+
+/* ============== Recovery Codes Functions ============== */
+
+static const char HEX_CHARS[] = "0123456789ABCDEF";
+
+shield_error_t shield_recovery_init(shield_recovery_t *ctx, int count, int length) {
+    int i, j;
+    uint8_t *bytes;
+    int byte_len;
+
+    if (count <= 0) count = 10;
+    if (count > SHIELD_MAX_RECOVERY_CODES) count = SHIELD_MAX_RECOVERY_CODES;
+    if (length <= 0) length = 8;
+    if (length % 2 != 0) length++;
+
+    byte_len = length / 2;
+    bytes = (uint8_t *)malloc(byte_len);
+    if (!bytes) return SHIELD_ERR_ALLOC_FAILED;
+
+    ctx->count = count;
+    memset(ctx->used, false, sizeof(ctx->used));
+
+    for (i = 0; i < count; i++) {
+        if (shield_random_bytes(bytes, byte_len) != SHIELD_OK) {
+            free(bytes);
+            return SHIELD_ERR_RANDOM_FAILED;
+        }
+
+        /* Convert to hex: first half, dash, second half */
+        int half = byte_len / 2;
+        int pos = 0;
+
+        /* First half */
+        for (j = 0; j < half; j++) {
+            ctx->codes[i][pos++] = HEX_CHARS[(bytes[j] >> 4) & 0x0F];
+            ctx->codes[i][pos++] = HEX_CHARS[bytes[j] & 0x0F];
+        }
+
+        /* Dash */
+        ctx->codes[i][pos++] = '-';
+
+        /* Second half */
+        for (j = half; j < byte_len; j++) {
+            ctx->codes[i][pos++] = HEX_CHARS[(bytes[j] >> 4) & 0x0F];
+            ctx->codes[i][pos++] = HEX_CHARS[bytes[j] & 0x0F];
+        }
+
+        ctx->codes[i][pos] = '\0';
+    }
+
+    free(bytes);
+    return SHIELD_OK;
+}
+
+void shield_recovery_init_from(shield_recovery_t *ctx, const char **codes, int count) {
+    int i;
+
+    if (count > SHIELD_MAX_RECOVERY_CODES) count = SHIELD_MAX_RECOVERY_CODES;
+
+    ctx->count = count;
+    memset(ctx->used, false, sizeof(ctx->used));
+
+    for (i = 0; i < count; i++) {
+        strncpy(ctx->codes[i], codes[i], SHIELD_RECOVERY_CODE_LEN - 1);
+        ctx->codes[i][SHIELD_RECOVERY_CODE_LEN - 1] = '\0';
+    }
+}
+
+static void normalize_code(const char *code, char *out) {
+    char normalized[16];
+    int j = 0;
+
+    /* Remove dashes and uppercase */
+    for (int i = 0; code[i] && j < 15; i++) {
+        if (code[i] != '-') {
+            char c = code[i];
+            if (c >= 'a' && c <= 'z') c = c - 'a' + 'A';
+            normalized[j++] = c;
+        }
+    }
+    normalized[j] = '\0';
+
+    /* Format as XXXX-XXXX */
+    if (j >= 8) {
+        out[0] = normalized[0];
+        out[1] = normalized[1];
+        out[2] = normalized[2];
+        out[3] = normalized[3];
+        out[4] = '-';
+        out[5] = normalized[4];
+        out[6] = normalized[5];
+        out[7] = normalized[6];
+        out[8] = normalized[7];
+        out[9] = '\0';
+    } else {
+        out[0] = '\0';
+    }
+}
+
+bool shield_recovery_verify(shield_recovery_t *ctx, const char *code) {
+    char formatted[16];
+    int i;
+
+    normalize_code(code, formatted);
+    if (formatted[0] == '\0') return false;
+
+    for (i = 0; i < ctx->count; i++) {
+        if (!ctx->used[i] && strcmp(ctx->codes[i], formatted) == 0) {
+            ctx->used[i] = true;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+int shield_recovery_remaining(const shield_recovery_t *ctx) {
+    int count = 0;
+    for (int i = 0; i < ctx->count; i++) {
+        if (!ctx->used[i]) count++;
+    }
+    return count;
+}
+
+bool shield_recovery_get_code(const shield_recovery_t *ctx, int index, char *out) {
+    int remaining_index = 0;
+    for (int i = 0; i < ctx->count; i++) {
+        if (!ctx->used[i]) {
+            if (remaining_index == index) {
+                strcpy(out, ctx->codes[i]);
+                return true;
+            }
+            remaining_index++;
+        }
+    }
+    return false;
+}
+
+void shield_recovery_wipe(shield_recovery_t *ctx) {
+    shield_secure_wipe(ctx->codes, sizeof(ctx->codes));
+    memset(ctx->used, false, sizeof(ctx->used));
+    ctx->count = 0;
+}

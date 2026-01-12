@@ -8,6 +8,7 @@
 use ring::{hmac, pbkdf2, rand::{SecureRandom, SystemRandom}};
 use subtle::ConstantTimeEq;
 use std::num::NonZeroU32;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{Result, ShieldError};
 
@@ -28,8 +29,12 @@ const MIN_CIPHERTEXT_SIZE: usize = NONCE_SIZE + 8 + MAC_SIZE;
 /// Uses password-derived keys with PBKDF2 and encrypts using
 /// a SHA256-based stream cipher with HMAC-SHA256 authentication.
 /// Breaking requires 2^256 operations - no shortcut exists.
+///
+/// Key material is securely zeroized from memory when dropped.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Shield {
     key: [u8; 32],
+    #[zeroize(skip)]
     #[allow(dead_code)]
     counter: u64,
 }

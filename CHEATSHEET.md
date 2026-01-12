@@ -355,6 +355,63 @@ manager.decrypt(encryptedV1);  // Works
 manager.decrypt(encryptedV2);  // Works
 ```
 
+## Secure Channel (Rust-only)
+
+TLS-like encrypted transport using PAKE + RatchetSession.
+
+### Rust (Sync)
+```rust
+use shield_core::{ShieldChannel, ChannelConfig};
+use std::net::TcpStream;
+
+// Both parties share a password
+let config = ChannelConfig::new("shared-secret", "my-service");
+
+// Server
+let listener = std::net::TcpListener::bind("0.0.0.0:8080")?;
+let (stream, _) = listener.accept()?;
+let mut server = ShieldChannel::accept(stream, &config)?;
+
+// Client
+let stream = TcpStream::connect("127.0.0.1:8080")?;
+let mut client = ShieldChannel::connect(stream, &config)?;
+
+// Exchange messages with forward secrecy
+client.send(b"Hello server!")?;
+let msg = server.recv()?;  // "Hello server!"
+
+server.send(b"Hello client!")?;
+let response = client.recv()?;  // "Hello client!"
+```
+
+### Rust (Async with Tokio)
+```rust
+use shield_core::{AsyncShieldChannel, ChannelConfig};
+use tokio::net::TcpStream;
+
+let config = ChannelConfig::new("shared-secret", "my-service")
+    .with_iterations(100_000)
+    .with_timeout(5_000);
+
+// Client
+let stream = TcpStream::connect("127.0.0.1:8080").await?;
+let mut channel = AsyncShieldChannel::connect(stream, &config).await?;
+
+channel.send(b"Hello!").await?;
+let response = channel.recv().await?;
+
+// Diagnostics
+println!("Messages sent: {}", channel.messages_sent());
+println!("Service: {}", channel.service());
+```
+
+### Features
+- PAKE handshake (no certificates needed)
+- Forward secrecy via key ratcheting
+- Message authentication (HMAC)
+- Replay protection (counters)
+- Wrong password = authentication failure
+
 ## Group Encryption
 
 ### Python
@@ -618,7 +675,53 @@ Shield uses only proven symmetric primitives with unconditional security bounds.
 - PBKDF2 (KDF) - 2^256 * iterations key space
 - Lamport signatures - hash-based, quantum-safe
 
+## Browser SDK
+
+### Installation
+```bash
+npm install @guard8/shield-browser
+```
+
+### Auto-Decrypt Setup
+```javascript
+import { ShieldBrowser } from '@guard8/shield-browser';
+
+// Initialize - fetches key and installs fetch hook
+await ShieldBrowser.init('/api/shield-key');
+
+// All fetch() calls now auto-decrypt!
+const data = await fetch('/api/secret').then(r => r.json());
+// data is already decrypted
+```
+
+### Server Setup (Python)
+```python
+from shield.integrations import BrowserBridge
+
+bridge = BrowserBridge("password", "api.example.com")
+
+# Key endpoint
+@app.get("/api/shield-key")
+async def get_key(session_id: str):
+    return bridge.generate_client_key(session_id)
+
+# Encrypted endpoint
+@app.get("/api/secret")
+async def get_secret(session_id: str):
+    data = {"message": "Secret!"}
+    encrypted = bridge.encrypt_for_client(session_id, json.dumps(data).encode())
+    return {"encrypted": True, "data": base64.b64encode(encrypted).decode()}
+```
+
+### Manual Decryption
+```javascript
+const client = ShieldBrowser.getInstance();
+const decrypted = client.decryptEnvelope(JSON.stringify(encryptedResponse));
+const data = JSON.parse(decrypted);
+```
+
 ## See Also
 
 - [BENCHMARKS.md](BENCHMARKS.md) - Performance comparison vs AES-GCM, ChaCha20
 - [MIGRATION.md](MIGRATION.md) - Migration from Fernet, NaCl, PyCryptodome
+- [browser/README.md](browser/README.md) - Browser SDK documentation

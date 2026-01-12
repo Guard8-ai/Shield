@@ -10,6 +10,7 @@
 
 use ring::{digest, hmac, rand::{SecureRandom, SystemRandom}};
 use subtle::ConstantTimeEq;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{Result, ShieldError};
 
@@ -17,10 +18,15 @@ use crate::error::{Result, ShieldError};
 ///
 /// Each encrypt/decrypt advances the key chain,
 /// destroying previous keys automatically.
+///
+/// Chain keys are securely zeroized from memory when dropped.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct RatchetSession {
     send_chain: [u8; 32],
     recv_chain: [u8; 32],
+    #[zeroize(skip)]
     send_counter: u64,
+    #[zeroize(skip)]
     recv_counter: u64,
 }
 

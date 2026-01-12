@@ -72,7 +72,7 @@ class KeyRotationManager:
             raise ValueError(f"Version {version} already exists")
         self._keys[version] = key
 
-    def rotate(self, new_key: bytes, new_version: int = None) -> int:
+    def rotate(self, new_key: bytes, new_version: Optional[int] = None) -> int:
         """
         Rotate to new key.
 

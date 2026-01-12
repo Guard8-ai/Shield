@@ -1,0 +1,10 @@
+[chrome]
+port = 9222
+host = "127.0.0.1"
+
+[defaults]
+timeout_ms = 5000
+screenshot_format = "png"
+
+[inspire]
+save_dir = "inspirations"

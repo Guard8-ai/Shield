@@ -42,7 +42,7 @@ class PAKEExchange:
         password: str,
         salt: bytes,
         role: str,
-        iterations: int = None,
+        iterations: Optional[int] = None,
     ) -> bytes:
         """
         Derive key contribution from password.
@@ -121,7 +121,7 @@ class QRExchange:
         return base64.urlsafe_b64decode(encoded)
 
     @staticmethod
-    def generate_exchange_data(key: bytes, metadata: dict = None) -> str:
+    def generate_exchange_data(key: bytes, metadata: Optional[dict] = None) -> str:
         """
         Generate complete exchange data with optional metadata.
 

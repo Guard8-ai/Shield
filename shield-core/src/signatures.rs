@@ -7,10 +7,14 @@ use ring::rand::{SecureRandom, SystemRandom};
 use std::num::NonZeroU32;
 use std::time::{SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{Result, ShieldError};
 
 /// HMAC-based symmetric signature.
+///
+/// Keys are securely zeroized from memory when dropped.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct SymmetricSignature {
     signing_key: [u8; 32],
     verification_key: [u8; 32],
@@ -148,9 +152,14 @@ impl SymmetricSignature {
 }
 
 /// Lamport one-time signature (post-quantum secure).
+///
+/// Private key material is securely zeroized from memory when dropped.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct LamportSignature {
     private_key: Vec<([u8; 32], [u8; 32])>,
+    #[zeroize(skip)]
     public_key: Vec<u8>,
+    #[zeroize(skip)]
     used: bool,
 }
 

@@ -1,5 +1,6 @@
-# TaskGuard
-.taskguard/state/
+# Rust
+target/
+Cargo.lock
 
 # Python
 __pycache__/
@@ -25,11 +26,11 @@ wheels/
 .pytest_cache/
 .coverage
 htmlcov/
+.tox/
 .venv/
 venv/
-ENV/
 
-# JavaScript
+# JavaScript/Node
 node_modules/
 npm-debug.log*
 yarn-debug.log*
@@ -40,55 +41,39 @@ yarn-error.log*
 *.exe
 *.exe~
 *.dll
+*.dylib
 *.test
 *.out
-go.sum
-
-# Rust
-target/
-Cargo.lock
-**/*.rs.bk
 
 # C
 *.o
 *.a
-libshield.a
-test_shield
+c/test_shield
 
 # Java
 *.class
 *.jar
 *.war
 *.ear
-*.nar
 .gradle/
 build/
-!gradle-wrapper.jar
-
-# C#
-/bin/
-**/csharp/bin/
-obj/
-*.user
-*.suo
-*.userosscache
-*.sln.docstates
-.vs/
-*.nupkg
-
-# Swift
-.build/
-.swiftpm/
-*.xcodeproj
-xcuserdata/
-DerivedData/
 
 # Kotlin
 .kotlin/
 
-# WebAssembly
-pkg/
-wasm-pack.log
+# C#/.NET
+bin/
+obj/
+*.user
+*.suo
+*.nupkg
+
+# Swift
+.build/
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+.swiftpm/
 
 # IDE
 .idea/
@@ -96,15 +81,14 @@ wasm-pack.log
 *.swp
 *.swo
 *~
-.project
-.classpath
-.settings/
-
-# OS
 .DS_Store
-Thumbs.db
-*.log
 
-# Test artifacts
-*.enc
-*.dec
+# Environment
+.env
+.env.local
+*.pem
+*.key
+
+# Test/Coverage
+coverage/
+*.lcov
