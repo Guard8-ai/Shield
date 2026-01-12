@@ -23,7 +23,7 @@ import struct
 import secrets
 import json
 import base64
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 
 
 def _generate_keystream(key: bytes, nonce: bytes, length: int) -> bytes:
@@ -67,7 +67,7 @@ class GroupEncryption:
     the group key separately for each member.
     """
 
-    def __init__(self, group_key: bytes = None):
+    def __init__(self, group_key: Optional[bytes] = None):
         """
         Initialize group encryption.
 
@@ -191,7 +191,7 @@ class BroadcastEncryption:
     Members are organized into subgroups with shared subgroup keys.
     """
 
-    def __init__(self, master_key: bytes = None, subgroup_size: int = 16):
+    def __init__(self, master_key: Optional[bytes] = None, subgroup_size: int = 16):
         """
         Initialize broadcast encryption.
 

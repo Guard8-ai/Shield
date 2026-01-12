@@ -1,0 +1,75 @@
+# Shield - Docker Compose for Development and Testing
+version: '3.8'
+
+services:
+  # Full test suite
+  test:
+    build: .
+    volumes:
+      - .:/shield
+    command: >
+      bash -c "
+        echo '=== Running Shield Test Suite ===' &&
+        cd /shield/shield-core && cargo test --features async &&
+        cd /shield/python && python3 -m pytest &&
+        cd /shield/javascript && npm test &&
+        cd /shield/go && go test ./... &&
+        echo '=== All tests passed! ==='
+      "
+
+  # Rust development
+  rust:
+    build: .
+    volumes:
+      - .:/shield
+      - cargo-cache:/root/.cargo/registry
+    working_dir: /shield/shield-core
+    command: cargo watch -x "test --features async"
+
+  # Python development
+  python:
+    image: python:3.11-slim
+    volumes:
+      - ./python:/app
+    working_dir: /app
+    command: >
+      bash -c "
+        pip install -e '.[dev]' &&
+        python -m pytest --watch
+      "
+
+  # JavaScript development
+  javascript:
+    image: node:20-slim
+    volumes:
+      - ./javascript:/app
+    working_dir: /app
+    command: npm run test:watch
+
+  # Interoperability tests
+  interop:
+    build: .
+    volumes:
+      - .:/shield
+    working_dir: /shield/tests
+    command: python3 run_interop_tests.py
+
+  # Example: FastAPI server with Shield
+  fastapi-example:
+    image: python:3.11-slim
+    volumes:
+      - ./python:/app/shield
+      - ./examples:/app/examples
+    working_dir: /app
+    ports:
+      - "8000:8000"
+    command: >
+      bash -c "
+        pip install fastapi uvicorn &&
+        cd /app/shield && pip install -e . &&
+        cd /app/examples/fastapi &&
+        uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+volumes:
+  cargo-cache:

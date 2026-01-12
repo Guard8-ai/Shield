@@ -13,6 +13,9 @@ SHIELD is an EXPTIME-secure encryption library providing symmetric cryptography 
 | Directory | Focus |
 |-----------|-------|
 | `shield-core/` | **Rust core library + CLI** - Single source of truth for Rust/WASM |
+| `browser/` | Browser SDK - Auto-decrypt fetch() with WASM |
+| `android/` | Android SDK (Keystore + biometric integration) |
+| `ios/` | iOS SDK (Keychain + Face ID/Touch ID integration) |
 | `python/` | Python package (pip install shield-crypto) |
 | `javascript/` | JavaScript/Node.js package (@guard8/shield) |
 | `go/` | Go module (github.com/Guard8-ai/shield) |
@@ -43,12 +46,35 @@ SHIELD is an EXPTIME-secure encryption library providing symmetric cryptography 
 - `IdentityProvider`: Token-based authentication/SSO
 - `password`: Password strength checker with entropy calculation
 
+### Secure Transport (Rust-only)
+- `ShieldChannel`: TLS-like encrypted channel using PAKE + RatchetSession
+- `AsyncShieldChannel`: Tokio-based async version for high-performance networking
+- `ChannelConfig`: Configuration for password, service, iterations, timeout
+
 ### CLI Tool (shield-core)
 - `shield encrypt/decrypt`: File encryption/decryption
 - `shield check`: Password strength analysis
 - `shield text`: Encrypt/decrypt text directly
 - `shield keygen`: Generate random keys
 - `shield info`: Show algorithm information
+
+### Browser SDK (`browser/`)
+- `ShieldBrowser.init()`: Initialize with key endpoint
+- Auto-intercepts `fetch()` and decrypts encrypted responses
+- Works with Python `BrowserBridge` for key exchange
+- Transparent encryption for web applications
+
+### Mobile SDKs
+- **Android** (`android/`): Native Android SDK with Keystore integration
+  - `Shield`: Core encryption (same API as other platforms)
+  - `SecureKeyStore`: Android Keystore + EncryptedSharedPreferences
+  - Hardware-backed storage (TEE/StrongBox) when available
+  - Biometric protection support
+- **iOS** (`ios/`): Native iOS SDK with Keychain integration
+  - `Shield`: Core encryption (same API as other platforms)
+  - `SecureKeychain`: iOS Keychain with biometric protection
+  - Face ID / Touch ID integration
+  - CocoaPods + Swift Package Manager support
 
 ### Python Web Integrations (`shield.integrations`)
 - `ShieldMiddleware`: FastAPI middleware for automatic response encryption
@@ -81,8 +107,8 @@ Format: `nonce(16 bytes) || ciphertext || MAC(16 bytes)`
 ## Running Tests
 
 ```bash
-# Rust core (63 tests)
-cd shield-core && cargo test
+# Rust core (97 tests)
+cd shield-core && cargo test --features async
 
 # Python (153 tests - includes 33 integration tests)
 cd python && python -m pytest

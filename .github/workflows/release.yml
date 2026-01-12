@@ -1,0 +1,306 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v0.1.0)'
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  # Build CLI binaries for all platforms
+  build-binaries:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            name: shield-linux-x86_64
+          # Linux ARM64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            name: shield-linux-aarch64
+            cross: true
+          # Windows x86_64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+            name: shield-windows-x86_64
+          # macOS x86_64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+            name: shield-macos-x86_64
+          # macOS ARM64 (Apple Silicon)
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+            name: shield-macos-aarch64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "[target.aarch64-unknown-linux-gnu]" >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            shield-core/target
+          key: ${{ runner.os }}-${{ matrix.target }}-release-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binary
+        run: |
+          cd shield-core
+          cargo build --release --target ${{ matrix.target }} --features cli
+
+      - name: Prepare archive (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd shield-core/target/${{ matrix.target }}/release
+          chmod +x shield
+          tar -czvf ${{ matrix.name }}.${{ matrix.archive }} shield
+          mv ${{ matrix.name }}.${{ matrix.archive }} ../../../../
+
+      - name: Prepare archive (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          cd shield-core/target/${{ matrix.target }}/release
+          Compress-Archive -Path shield.exe -DestinationPath ${{ matrix.name }}.${{ matrix.archive }}
+          Move-Item ${{ matrix.name }}.${{ matrix.archive }} ../../../../
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}.${{ matrix.archive }}
+
+  # Build WASM package
+  build-wasm:
+    name: Build WASM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
+
+      - name: Build WASM
+        run: |
+          cd wasm
+          wasm-pack build --target web --release
+
+      - name: Create archive
+        run: |
+          cd wasm
+          tar -czvf shield-wasm.tar.gz pkg/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shield-wasm
+          path: wasm/shield-wasm.tar.gz
+
+  # Create GitHub Release with binaries
+  release:
+    name: Create Release
+    needs: [build-binaries, build-wasm]
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          echo "## SHA256 Checksums" > ../checksums.md
+          echo '```' >> ../checksums.md
+          for f in */*.tar.gz */*.zip; do
+            sha256sum "$f" | sed 's|artifacts/||' >> ../checksums.md
+          done
+          echo '```' >> ../checksums.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Shield ${{ github.ref_name }}
+          body: |
+            ## Shield ${{ github.ref_name }}
+
+            EXPTIME-secure encryption library release.
+
+            ### CLI Downloads
+
+            | Platform | Architecture | Download |
+            |----------|--------------|----------|
+            | Linux | x86_64 | `shield-linux-x86_64.tar.gz` |
+            | Linux | ARM64 | `shield-linux-aarch64.tar.gz` |
+            | Windows | x86_64 | `shield-windows-x86_64.zip` |
+            | macOS | x86_64 (Intel) | `shield-macos-x86_64.tar.gz` |
+            | macOS | ARM64 (Apple Silicon) | `shield-macos-aarch64.tar.gz` |
+            | WebAssembly | - | `shield-wasm.tar.gz` |
+
+            ### Quick Installation
+
+            **Linux/macOS:**
+            ```bash
+            # Download (replace with your platform)
+            curl -LO https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/shield-linux-x86_64.tar.gz
+            tar -xzf shield-linux-x86_64.tar.gz
+            sudo mv shield /usr/local/bin/
+
+            # Verify
+            shield --version
+            ```
+
+            **Windows (PowerShell):**
+            ```powershell
+            Invoke-WebRequest -Uri "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/shield-windows-x86_64.zip" -OutFile shield.zip
+            Expand-Archive shield.zip -DestinationPath .
+            .\shield.exe --version
+            ```
+
+            ### Usage
+
+            ```bash
+            # Encrypt a file
+            shield encrypt secret.txt -o secret.enc
+
+            # Decrypt a file
+            shield decrypt secret.enc
+
+            # Check password strength
+            shield check "your_password"
+
+            # Generate random key
+            shield keygen
+            ```
+
+            ### Packages
+
+            | Language | Package | Install |
+            |----------|---------|---------|
+            | Python | [shield-crypto](https://pypi.org/project/shield-crypto/) | `pip install shield-crypto` |
+            | JavaScript | [@guard8/shield](https://www.npmjs.com/package/@guard8/shield) | `npm install @guard8/shield` |
+            | Rust | [shield-core](https://crates.io/crates/shield-core) | `cargo add shield-core` |
+            | Go | [github.com/Guard8-ai/shield](https://pkg.go.dev/github.com/Guard8-ai/shield) | `go get github.com/Guard8-ai/shield` |
+
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Publish to crates.io
+  publish-rust:
+    name: Publish Rust
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cd shield-core && cargo publish --allow-dirty
+        continue-on-error: true
+
+  # Publish to PyPI
+  publish-python:
+    name: Publish Python
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build package
+        run: cd python && python -m build
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: cd python && twine upload dist/*
+        continue-on-error: true
+
+  # Publish to npm
+  publish-npm:
+    name: Publish JavaScript
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: cd javascript && npm ci
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: cd javascript && npm publish --access public
+        continue-on-error: true

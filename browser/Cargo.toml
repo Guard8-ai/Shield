@@ -1,0 +1,32 @@
+[package]
+name = "shield-browser"
+version = "1.0.0"
+edition = "2021"
+authors = ["Guard8.ai"]
+description = "Shield Browser SDK - Transparent auto-decryption for web applications"
+license = "MIT"
+repository = "https://github.com/Guard8-ai/Shield"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+shield-core = { path = "../shield-core", default-features = false }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "console",
+    "Window",
+    "Response",
+    "ResponseInit",
+    "Headers",
+    "Request",
+    "RequestInit",
+] }
+getrandom = { version = "0.2", features = ["js"] }
+base64 = "0.21"
+serde_json = "1.0"
+
+[profile.release]
+opt-level = "s"
+lto = true

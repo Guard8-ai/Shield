@@ -82,6 +82,16 @@ typedef struct {
     bool used;
 } shield_lamport_t;
 
+/* Recovery codes context */
+#define SHIELD_RECOVERY_CODE_LEN 10  /* "XXXX-XXXX" + null = 10 bytes */
+#define SHIELD_MAX_RECOVERY_CODES 20
+
+typedef struct {
+    char codes[SHIELD_MAX_RECOVERY_CODES][SHIELD_RECOVERY_CODE_LEN];
+    bool used[SHIELD_MAX_RECOVERY_CODES];
+    int count;
+} shield_recovery_t;
+
 /* ============== Core Functions ============== */
 
 /**
@@ -298,6 +308,52 @@ const uint8_t *shield_lamport_public_key(const shield_lamport_t *ctx);
  * Free Lamport context.
  */
 void shield_lamport_free(shield_lamport_t *ctx);
+
+/* ============== Recovery Codes Functions ============== */
+
+/**
+ * Initialize recovery codes with generated codes.
+ * @param ctx Recovery context
+ * @param count Number of codes to generate (max SHIELD_MAX_RECOVERY_CODES)
+ * @param length Length of each code (must be even, default 8)
+ * @return SHIELD_OK on success
+ */
+shield_error_t shield_recovery_init(shield_recovery_t *ctx, int count, int length);
+
+/**
+ * Initialize recovery codes from existing codes.
+ * @param ctx Recovery context
+ * @param codes Array of code strings (XXXX-XXXX format)
+ * @param count Number of codes
+ */
+void shield_recovery_init_from(shield_recovery_t *ctx, const char **codes, int count);
+
+/**
+ * Verify and consume a recovery code.
+ * @param ctx Recovery context
+ * @param code Code to verify (with or without dash)
+ * @return true if valid (code is now consumed)
+ */
+bool shield_recovery_verify(shield_recovery_t *ctx, const char *code);
+
+/**
+ * Get remaining code count.
+ */
+int shield_recovery_remaining(const shield_recovery_t *ctx);
+
+/**
+ * Get a specific remaining code.
+ * @param ctx Recovery context
+ * @param index Index (0-based) into remaining codes
+ * @param out Buffer to receive code (SHIELD_RECOVERY_CODE_LEN bytes)
+ * @return true if code exists at index
+ */
+bool shield_recovery_get_code(const shield_recovery_t *ctx, int index, char *out);
+
+/**
+ * Wipe recovery codes from memory.
+ */
+void shield_recovery_wipe(shield_recovery_t *ctx);
 
 /* ============== Utility Functions ============== */
 

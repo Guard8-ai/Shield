@@ -68,7 +68,7 @@ impl PasswordStrength {
         if secs < 1.0 {
             "instantly".to_string()
         } else if secs < 60.0 {
-            format!("{:.0} seconds", secs)
+            format!("{secs:.0} seconds")
         } else if secs < 3600.0 {
             format!("{:.0} minutes", secs / 60.0)
         } else if secs < 86400.0 {
@@ -176,6 +176,8 @@ pub fn calculate_entropy(password: &str) -> f64 {
     }
 
     let charset_size = calculate_charset_size(password);
+    // Password lengths are always small enough for exact f64 representation
+    #[allow(clippy::cast_precision_loss)]
     let base_entropy = password.len() as f64 * (charset_size as f64).log2();
 
     // Apply pattern penalties
@@ -312,10 +314,12 @@ pub fn warn_if_weak(password: &str, min_entropy: f64) -> Option<String> {
         );
 
         if !result.suggestions.is_empty() {
-            msg.push_str(&format!(
+            use std::fmt::Write;
+            let _ = write!(
+                msg,
                 " Suggestions: {}",
                 result.suggestions.iter().take(2).cloned().collect::<Vec<_>>().join("; ")
-            ));
+            );
         }
 
         Some(msg)

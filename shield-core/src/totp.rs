@@ -9,6 +9,7 @@ use ring::hmac;
 use ring::rand::{SecureRandom, SystemRandom};
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{Result, ShieldError};
 
@@ -16,9 +17,14 @@ use crate::error::{Result, ShieldError};
 const DEFAULT_SECRET_LEN: usize = 20;
 
 /// TOTP generator and validator.
+///
+/// Secret is securely zeroized from memory when dropped.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct TOTP {
     secret: Vec<u8>,
+    #[zeroize(skip)]
     digits: usize,
+    #[zeroize(skip)]
     interval: u64,
 }
 

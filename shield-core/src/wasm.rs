@@ -51,6 +51,7 @@ pub struct WasmShield {
 impl WasmShield {
     /// Create a new Shield instance from password and service.
     #[wasm_bindgen(constructor)]
+    #[must_use] 
     pub fn new(password: &str, service: &str) -> Self {
         Self {
             inner: Shield::new(password, service),
@@ -83,6 +84,7 @@ impl WasmShield {
 
     /// Get the derived key (for interop testing).
     #[wasm_bindgen]
+    #[must_use] 
     pub fn key(&self) -> Vec<u8> {
         self.inner.key().to_vec()
     }
@@ -126,6 +128,7 @@ pub struct WasmTOTP {
 impl WasmTOTP {
     /// Create TOTP with secret (default: 6 digits, 30 second interval).
     #[wasm_bindgen(constructor)]
+    #[must_use] 
     pub fn new(secret: &[u8]) -> Self {
         Self {
             inner: TOTP::with_secret(secret.to_vec()),
@@ -134,6 +137,7 @@ impl WasmTOTP {
 
     /// Create TOTP with custom settings.
     #[wasm_bindgen(js_name = withSettings)]
+    #[must_use] 
     pub fn with_settings(secret: &[u8], digits: usize, interval: u64) -> Self {
         Self {
             inner: TOTP::new(secret.to_vec(), digits, interval),
@@ -148,30 +152,35 @@ impl WasmTOTP {
 
     /// Generate TOTP code for given timestamp (seconds since epoch).
     #[wasm_bindgen]
+    #[must_use] 
     pub fn generate(&self, timestamp: u64) -> String {
         self.inner.generate(Some(timestamp))
     }
 
     /// Generate TOTP code for current time.
     #[wasm_bindgen(js_name = generateNow)]
+    #[must_use] 
     pub fn generate_now(&self) -> String {
         self.inner.generate(None)
     }
 
     /// Verify TOTP code with time window.
     #[wasm_bindgen]
+    #[must_use] 
     pub fn verify(&self, code: &str, timestamp: u64, window: u32) -> bool {
         self.inner.verify(code, Some(timestamp), window)
     }
 
     /// Verify TOTP code for current time.
     #[wasm_bindgen(js_name = verifyNow)]
+    #[must_use] 
     pub fn verify_now(&self, code: &str, window: u32) -> bool {
         self.inner.verify(code, None, window)
     }
 
     /// Encode secret to Base32.
     #[wasm_bindgen(js_name = toBase32)]
+    #[must_use] 
     pub fn to_base32(&self) -> String {
         TOTP::secret_to_base32(self.inner.secret())
     }
@@ -184,6 +193,7 @@ impl WasmTOTP {
 
     /// Get provisioning URI for authenticator apps.
     #[wasm_bindgen(js_name = provisioningUri)]
+    #[must_use] 
     pub fn provisioning_uri(&self, account: &str, issuer: &str) -> String {
         self.inner.provisioning_uri(account, issuer)
     }
@@ -193,7 +203,7 @@ impl WasmTOTP {
 // RatchetSession - Forward secrecy
 // ============================================================================
 
-/// WASM-compatible RatchetSession wrapper.
+/// WASM-compatible `RatchetSession` wrapper.
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub struct WasmRatchetSession {
@@ -229,12 +239,14 @@ impl WasmRatchetSession {
 
     /// Get send counter.
     #[wasm_bindgen(getter, js_name = sendCounter)]
+    #[must_use] 
     pub fn send_counter(&self) -> u64 {
         self.inner.send_counter()
     }
 
     /// Get receive counter.
     #[wasm_bindgen(getter, js_name = recvCounter)]
+    #[must_use] 
     pub fn recv_counter(&self) -> u64 {
         self.inner.recv_counter()
     }
@@ -270,24 +282,28 @@ impl WasmLamportSignature {
 
     /// Verify a Lamport signature (static method).
     #[wasm_bindgen(js_name = verifySignature)]
+    #[must_use] 
     pub fn verify_signature(message: &[u8], signature: &[u8], public_key: &[u8]) -> bool {
         LamportSignature::verify(message, signature, public_key)
     }
 
     /// Get public key.
     #[wasm_bindgen(getter, js_name = publicKey)]
+    #[must_use] 
     pub fn public_key(&self) -> Vec<u8> {
         self.inner.public_key().to_vec()
     }
 
     /// Check if key has been used.
     #[wasm_bindgen(getter, js_name = isUsed)]
+    #[must_use] 
     pub fn is_used(&self) -> bool {
         self.inner.is_used()
     }
 
     /// Get key fingerprint.
     #[wasm_bindgen]
+    #[must_use] 
     pub fn fingerprint(&self) -> String {
         self.inner.fingerprint()
     }
@@ -311,6 +327,7 @@ pub fn wasm_random_bytes(size: usize) -> Result<Vec<u8>, JsError> {
 /// SHA-256 hash.
 #[cfg(feature = "wasm")]
 #[wasm_bindgen(js_name = sha256)]
+#[must_use] 
 pub fn wasm_sha256(data: &[u8]) -> Vec<u8> {
     use ring::digest;
     digest::digest(&digest::SHA256, data).as_ref().to_vec()
@@ -319,6 +336,7 @@ pub fn wasm_sha256(data: &[u8]) -> Vec<u8> {
 /// HMAC-SHA256.
 #[cfg(feature = "wasm")]
 #[wasm_bindgen(js_name = hmacSha256)]
+#[must_use] 
 pub fn wasm_hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
     use ring::hmac;
     let key = hmac::Key::new(hmac::HMAC_SHA256, key);
@@ -328,6 +346,7 @@ pub fn wasm_hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
 /// Constant-time comparison.
 #[cfg(feature = "wasm")]
 #[wasm_bindgen(js_name = constantTimeEquals)]
+#[must_use] 
 pub fn wasm_constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     use subtle::ConstantTimeEq;
     if a.len() != b.len() {

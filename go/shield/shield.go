@@ -23,10 +23,14 @@ const (
 	NonceSize = 16
 	// MACSize is the size of authentication tags in bytes.
 	MACSize = 16
+	// CounterSize is the size of the counter prefix in bytes.
+	CounterSize = 8
 	// Iterations is the PBKDF2 iteration count.
 	Iterations = 100000
-	// MinCiphertextSize is the minimum valid ciphertext size.
-	MinCiphertextSize = NonceSize + 8 + MACSize
+	// MinCiphertextSize is the minimum valid ciphertext size (Shield with counter).
+	MinCiphertextSize = NonceSize + CounterSize + MACSize
+	// MinQuickCiphertextSize is the minimum valid ciphertext size (QuickEncrypt without counter).
+	MinQuickCiphertextSize = NonceSize + MACSize
 )
 
 var (
@@ -79,20 +83,75 @@ func (s *Shield) Key() []byte {
 	return s.key[:]
 }
 
-// QuickEncrypt encrypts with a pre-shared key.
+// QuickEncrypt encrypts with a pre-shared key (no counter prefix).
+// Format: nonce(16) || ciphertext || mac(16)
+// This is interoperable with Python/JavaScript quick_encrypt.
 func QuickEncrypt(key, plaintext []byte) ([]byte, error) {
 	if len(key) != KeySize {
 		return nil, ErrInvalidKeySize
 	}
-	return EncryptWithKey(key, plaintext)
+
+	// Generate random nonce
+	nonce := make([]byte, NonceSize)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+
+	// Generate keystream and XOR (no counter prefix)
+	keystream := generateKeystream(key, nonce, len(plaintext))
+	ciphertext := make([]byte, len(plaintext))
+	for i := range plaintext {
+		ciphertext[i] = plaintext[i] ^ keystream[i]
+	}
+
+	// Compute HMAC over nonce || ciphertext
+	mac := hmac.New(sha256.New, key)
+	mac.Write(nonce)
+	mac.Write(ciphertext)
+	tag := mac.Sum(nil)[:MACSize]
+
+	// Format: nonce || ciphertext || mac
+	result := make([]byte, NonceSize+len(ciphertext)+MACSize)
+	copy(result[:NonceSize], nonce)
+	copy(result[NonceSize:NonceSize+len(ciphertext)], ciphertext)
+	copy(result[NonceSize+len(ciphertext):], tag)
+
+	return result, nil
 }
 
-// QuickDecrypt decrypts with a pre-shared key.
-func QuickDecrypt(key, ciphertext []byte) ([]byte, error) {
+// QuickDecrypt decrypts with a pre-shared key (no counter prefix).
+// This is interoperable with Python/JavaScript quick_decrypt.
+func QuickDecrypt(key, encrypted []byte) ([]byte, error) {
 	if len(key) != KeySize {
 		return nil, ErrInvalidKeySize
 	}
-	return DecryptWithKey(key, ciphertext)
+	if len(encrypted) < MinQuickCiphertextSize {
+		return nil, ErrCiphertextTooShort
+	}
+
+	// Parse components
+	nonce := encrypted[:NonceSize]
+	ciphertext := encrypted[NonceSize : len(encrypted)-MACSize]
+	receivedMAC := encrypted[len(encrypted)-MACSize:]
+
+	// Verify MAC
+	mac := hmac.New(sha256.New, key)
+	mac.Write(nonce)
+	mac.Write(ciphertext)
+	expectedMAC := mac.Sum(nil)[:MACSize]
+
+	if subtle.ConstantTimeCompare(receivedMAC, expectedMAC) != 1 {
+		return nil, ErrAuthenticationFailed
+	}
+
+	// Decrypt (no counter prefix to skip)
+	keystream := generateKeystream(key, nonce, len(ciphertext))
+	decrypted := make([]byte, len(ciphertext))
+	for i := range ciphertext {
+		decrypted[i] = ciphertext[i] ^ keystream[i]
+	}
+
+	return decrypted, nil
 }
 
 // EncryptWithKey encrypts using an explicit key.

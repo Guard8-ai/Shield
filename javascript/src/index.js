@@ -27,6 +27,7 @@ const { PAKEExchange, QRExchange, KeySplitter } = require('./exchange');
 const { KeyRotationManager } = require('./rotation');
 const { GroupEncryption, BroadcastEncryption } = require('./group');
 const { IdentityProvider, Identity, Session, SecureSession } = require('./identity');
+const { ShieldChannel, ChannelConfig, ShieldListener } = require('./channel');
 
 module.exports = {
     // Core encryption
@@ -64,5 +65,10 @@ module.exports = {
     IdentityProvider,
     Identity,
     Session,
-    SecureSession
+    SecureSession,
+
+    // Secure channel
+    ShieldChannel,
+    ChannelConfig,
+    ShieldListener
 };

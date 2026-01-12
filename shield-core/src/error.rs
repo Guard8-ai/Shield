@@ -67,4 +67,12 @@ pub enum ShieldError {
     /// Member not found.
     #[error("member not found in group")]
     MemberNotFound,
+
+    /// Channel/transport error.
+    #[error("channel error: {0}")]
+    ChannelError(String),
+
+    /// Connection closed.
+    #[error("connection closed")]
+    ConnectionClosed,
 }

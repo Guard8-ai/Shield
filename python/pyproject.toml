@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shield-crypto"
-version = "0.1.0"
+version = "1.0.0"
 description = "EXPTIME-secure encryption library - symmetric crypto with proven exponential-time security"
 readme = "README.md"
 license = {text = "CC0-1.0"}

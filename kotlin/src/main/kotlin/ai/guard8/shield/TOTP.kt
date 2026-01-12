@@ -69,41 +69,6 @@ class TOTP(
     }
 }
 
-/**
- * Recovery codes for backup authentication.
- */
-class RecoveryCodes(count: Int = 10) {
-    private val codes = mutableSetOf<String>()
-
-    init {
-        repeat(count) {
-            codes.add(generateCode())
-        }
-    }
-
-    private fun generateCode(): String {
-        val bytes = Shield.randomBytes(4)
-        val part1 = ((bytes[0].toInt() and 0xff) shl 8) or (bytes[1].toInt() and 0xff)
-        val part2 = ((bytes[2].toInt() and 0xff) shl 8) or (bytes[3].toInt() and 0xff)
-        return String.format("%04X-%04X", part1, part2)
-    }
-
-    fun verify(code: String): Boolean {
-        val normalized = code.uppercase().replace(" ", "")
-        val formatted = if (normalized.length == 8) "${normalized.take(4)}-${normalized.takeLast(4)}" else normalized
-
-        return if (codes.contains(formatted)) {
-            codes.remove(formatted)
-            true
-        } else {
-            false
-        }
-    }
-
-    val allCodes: List<String> get() = codes.toList()
-    val remaining: Int get() = codes.size
-}
-
 // Simple Base32 encoder/decoder
 private object Base32 {
     private const val ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"

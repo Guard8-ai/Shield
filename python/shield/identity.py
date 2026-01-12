@@ -100,7 +100,7 @@ class IdentityProvider:
         user_id: str,
         password: str,
         display_name: str,
-        attributes: Dict = None
+        attributes: Optional[Dict] = None
     ) -> Identity:
         """
         Register new user identity.
@@ -139,8 +139,8 @@ class IdentityProvider:
         self,
         user_id: str,
         password: str,
-        permissions: List[str] = None,
-        ttl: int = None
+        permissions: Optional[List[str]] = None,
+        ttl: Optional[int] = None
     ) -> Optional[str]:
         """
         Authenticate user and return session token.
@@ -209,7 +209,7 @@ class IdentityProvider:
         self,
         session_token: str,
         service: str,
-        permissions: List[str] = None,
+        permissions: Optional[List[str]] = None,
         ttl: int = 300
     ) -> Optional[str]:
         """
@@ -274,7 +274,7 @@ class IdentityProvider:
             metadata={'service': service}
         )
 
-    def refresh_token(self, token: str, ttl: int = None) -> Optional[str]:
+    def refresh_token(self, token: str, ttl: Optional[int] = None) -> Optional[str]:
         """
         Refresh session token.
 

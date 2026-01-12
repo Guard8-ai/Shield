@@ -1,7 +1,7 @@
 ---
 id: backend-009
 title: Apply REAL_FIXES methodology to integrations
-status: todo
+status: done
 priority: medium
 tags:
 - backend
