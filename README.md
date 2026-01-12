@@ -8,6 +8,8 @@
 
 [![CI](https://github.com/Guard8-ai/Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/Guard8-ai/Shield/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Crates.io](https://img.shields.io/crates/v/shield-core.svg)](https://crates.io/crates/shield-core)
+[![npm](https://img.shields.io/npm/v/@guard8/shield.svg)](https://www.npmjs.com/package/@guard8/shield)
 [![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](shield-core/)
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](python/)
 [![JavaScript](https://img.shields.io/badge/JavaScript-ES6+-yellow.svg)](javascript/)
