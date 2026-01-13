@@ -170,9 +170,9 @@ def shield_required(view_func=None, password=None, service=None):
                         {'error': 'Encrypted request required'},
                         status=400
                     )
-            except Exception as e:
+            except Exception:
                 return JsonResponse(
-                    {'error': f'Decryption failed: {str(e)}'},
+                    {'error': 'Decryption failed'},
                     status=400
                 )
 
