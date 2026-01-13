@@ -11,8 +11,6 @@ mod test_vectors {
     pub const PASSWORD: &str = "test_password";
     /// Service name
     pub const SERVICE: &str = "test.service";
-    /// Expected salt (SHA256 of service)
-    pub const SALT_HEX: &str = "f5ea0149b793335d9f93b1c436a8ae306ecbecd6751f68f8e27b3fba11200ed7";
     /// Expected derived key (PBKDF2-SHA256, 100k rounds)
     pub const KEY_HEX: &str = "4f1f99907e7f158dd282599d8a1be05b74d385eb79ba35971d884cc4ef172e87";
     /// Test nonce (0x00..0x0F)
