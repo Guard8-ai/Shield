@@ -138,7 +138,7 @@ jobs:
   # Create GitHub Release with binaries
   release:
     name: Create Release
-    needs: [build-binaries, build-wasm]
+    needs: [build-binaries]  # TODO: Re-add build-wasm when ring WASM support is fixed
     runs-on: ubuntu-latest
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
