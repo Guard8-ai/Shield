@@ -1,6 +1,6 @@
 {
   "name": "@guard8/shield",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "EXPTIME-secure encryption library - symmetric cryptography with proven exponential-time security",
   "main": "src/index.js",
   "types": "src/index.d.ts",
