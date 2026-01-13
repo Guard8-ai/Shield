@@ -1,6 +1,6 @@
 [package]
 name = "shield-core"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 authors = ["Guard8.ai"]
 description = "EXPTIME-secure encryption library - Rust core implementation"
