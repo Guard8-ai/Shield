@@ -1,6 +1,11 @@
+# ============================================================================
+# Guard8.ai - High Quality Code -> Great Results
+# YOU ARE NOT ALLOWED TO CHANGE THIS FILE UNLESS EXPLICITLY ASKED.
+# ============================================================================
+
 [package]
 name = "shield-core"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 authors = ["Guard8.ai"]
 description = "EXPTIME-secure encryption library - Rust core implementation"
@@ -48,6 +53,7 @@ base64 = "0.21"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
+# YOU ARE NOT ALLOWED TO CHANGE THIS FILE UNLESS EXPLICITLY ASKED.
 [dev-dependencies]
 criterion = "0.5"
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "macros", "io-util", "net", "sync"] }
@@ -62,7 +68,8 @@ codegen-units = 1
 panic = "abort"
 
 # ============================================================================
-# Lints - Strict mode: fail on warnings and clippy
+# Lints - High Quality Code -> Great Results
+# YOU ARE NOT ALLOWED TO CHANGE THIS FILE UNLESS EXPLICITLY ASKED.
 # ============================================================================
 [lints.rust]
 dead_code = "deny"
