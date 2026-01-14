@@ -56,7 +56,7 @@ pub struct Session {
 
 impl Session {
     /// Check if session is expired.
-    #[must_use] 
+    #[must_use]
     pub fn is_expired(&self) -> bool {
         match self.expires_at {
             None => false,
@@ -71,7 +71,7 @@ impl Session {
     }
 
     /// Check if session has permission.
-    #[must_use] 
+    #[must_use]
     pub fn has_permission(&self, permission: &str) -> bool {
         self.permissions.contains(&permission.to_string())
     }
@@ -95,7 +95,7 @@ impl IdentityProvider {
     const ITERATIONS: u32 = 100_000;
 
     /// Create new identity provider.
-    #[must_use] 
+    #[must_use]
     pub fn new(master_key: [u8; 32], token_ttl: u64) -> Self {
         Self {
             master_key,
@@ -158,7 +158,7 @@ impl IdentityProvider {
             user_id: user_id.to_string(),
             display_name: display_name.unwrap_or(user_id).to_string(),
             verification_key,
-            attributes,  // Consume owned value, no clone needed
+            attributes, // Consume owned value, no clone needed
             created_at: now,
         };
 
@@ -250,7 +250,7 @@ impl IdentityProvider {
     }
 
     /// Validate session token.
-    #[must_use] 
+    #[must_use]
     pub fn validate_token(&self, token: &str) -> Option<Session> {
         let data = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(token)
@@ -296,7 +296,8 @@ impl IdentityProvider {
         let permissions: Vec<String> = serde_json::from_str(&perms_json).ok()?;
 
         let exp_offset = offset + 2 + perms_len;
-        let expires_at = u64::from_le_bytes(token_data[exp_offset..exp_offset + 8].try_into().ok()?);
+        let expires_at =
+            u64::from_le_bytes(token_data[exp_offset..exp_offset + 8].try_into().ok()?);
 
         let session = Session {
             user_id,
@@ -372,7 +373,7 @@ impl IdentityProvider {
     }
 
     /// Validate service token.
-    #[must_use] 
+    #[must_use]
     pub fn validate_service_token(&self, token: &str, service: &str) -> Option<Session> {
         let data = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(token)
@@ -426,8 +427,7 @@ impl IdentityProvider {
 
         let perms_len = u16::from_le_bytes([token_data[offset], token_data[offset + 1]]) as usize;
         offset += 2;
-        let perms_json =
-            String::from_utf8(token_data[offset..offset + perms_len].to_vec()).ok()?;
+        let perms_json = String::from_utf8(token_data[offset..offset + perms_len].to_vec()).ok()?;
         let permissions: Vec<String> = serde_json::from_str(&perms_json).ok()?;
         offset += perms_len;
 
@@ -448,14 +448,14 @@ impl IdentityProvider {
     }
 
     /// Refresh session token.
-    #[must_use] 
+    #[must_use]
     pub fn refresh_token(&self, token: &str) -> Option<String> {
         let session = self.validate_token(token)?;
         Some(self.create_token(&session.user_id, &session.permissions, self.token_ttl))
     }
 
     /// Get user identity.
-    #[must_use] 
+    #[must_use]
     pub fn get_identity(&self, user_id: &str) -> Option<&Identity> {
         self.users.get(user_id).map(|u| &u.identity)
     }
@@ -478,7 +478,7 @@ pub struct SecureSession {
 
 impl SecureSession {
     /// Create new secure session.
-    #[must_use] 
+    #[must_use]
     pub fn new(master_key: [u8; 32], rotation_interval: u64, max_old_keys: usize) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -541,10 +541,15 @@ impl SecureSession {
         let key = self.keys.get(&self.key_version).unwrap();
         let rng = SystemRandom::new();
         let mut nonce = [0u8; 16];
-        rng.fill(&mut nonce).map_err(|_| ShieldError::RandomFailed)?;
+        rng.fill(&mut nonce)
+            .map_err(|_| ShieldError::RandomFailed)?;
 
         let keystream = generate_keystream(key, &nonce, data.len());
-        let ciphertext: Vec<u8> = data.iter().zip(keystream.iter()).map(|(p, k)| p ^ k).collect();
+        let ciphertext: Vec<u8> = data
+            .iter()
+            .zip(keystream.iter())
+            .map(|(p, k)| p ^ k)
+            .collect();
 
         let version_bytes = self.key_version.to_le_bytes();
 
@@ -598,7 +603,7 @@ impl SecureSession {
     }
 
     /// Get current key version (for testing).
-    #[must_use] 
+    #[must_use]
     pub fn key_version(&self) -> u32 {
         self.key_version
     }
@@ -678,7 +683,12 @@ mod tests {
             .unwrap();
 
         let service_token = provider
-            .create_service_token(&session_token, "api.example.com", &["read".to_string()], 300)
+            .create_service_token(
+                &session_token,
+                "api.example.com",
+                &["read".to_string()],
+                300,
+            )
             .unwrap();
 
         let session = provider.validate_service_token(&service_token, "api.example.com");

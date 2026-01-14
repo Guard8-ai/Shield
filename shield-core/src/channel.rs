@@ -27,7 +27,10 @@
 // Crypto block counters are intentionally u32
 #![allow(clippy::cast_possible_truncation)]
 
-use ring::{hmac, rand::{SecureRandom, SystemRandom}};
+use ring::{
+    hmac,
+    rand::{SecureRandom, SystemRandom},
+};
 use std::io::{Read, Write};
 use subtle::ConstantTimeEq;
 
@@ -138,17 +141,18 @@ impl HandshakeState {
     }
 
     fn derive_contribution(&mut self, config: &ChannelConfig) {
-        let role = if self.is_initiator { "client" } else { "server" };
-        self.local_contribution = PAKEExchange::derive(
-            &config.password,
-            &self.salt,
-            role,
-            Some(config.iterations),
-        );
+        let role = if self.is_initiator {
+            "client"
+        } else {
+            "server"
+        };
+        self.local_contribution =
+            PAKEExchange::derive(&config.password, &self.salt, role, Some(config.iterations));
     }
 
     fn compute_session_key(&self, config: &ChannelConfig) -> Result<[u8; 32]> {
-        let remote = self.remote_contribution
+        let remote = self
+            .remote_contribution
             .ok_or_else(|| ShieldError::ChannelError("handshake incomplete".into()))?;
 
         // CRITICAL: Include password-derived key in session key computation
@@ -217,7 +221,11 @@ impl<S: Read + Write> ShieldChannel<S> {
         state.remote_contribution = Some(remote);
 
         // Step 3: Send client contribution
-        Self::send_handshake(&mut stream, HandshakeType::Finished, &state.local_contribution)?;
+        Self::send_handshake(
+            &mut stream,
+            HandshakeType::Finished,
+            &state.local_contribution,
+        )?;
 
         // Derive session key and create ratchet
         let session_key = state.compute_session_key(config)?;
@@ -344,14 +352,20 @@ impl<S: Read + Write> ShieldChannel<S> {
         frame.extend_from_slice(&(data.len() as u16).to_be_bytes());
         frame.extend_from_slice(data);
 
-        stream.write_all(&frame).map_err(|e| ShieldError::ChannelError(e.to_string()))?;
-        stream.flush().map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .write_all(&frame)
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .flush()
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
         Ok(())
     }
 
     fn recv_handshake(stream: &mut S, expected_type: HandshakeType) -> Result<Vec<u8>> {
         let mut header = [0u8; 4];
-        stream.read_exact(&mut header).map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .read_exact(&mut header)
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
 
         if header[0] != PROTOCOL_VERSION {
             return Err(ShieldError::ChannelError(format!(
@@ -363,37 +377,52 @@ impl<S: Read + Write> ShieldChannel<S> {
         if header[1] != expected_type as u8 {
             return Err(ShieldError::ChannelError(format!(
                 "unexpected message type: expected {}, got {}",
-                expected_type as u8,
-                header[1]
+                expected_type as u8, header[1]
             )));
         }
 
         let len = u16::from_be_bytes([header[2], header[3]]) as usize;
         if len > 1024 {
-            return Err(ShieldError::ChannelError("handshake message too large".into()));
+            return Err(ShieldError::ChannelError(
+                "handshake message too large".into(),
+            ));
         }
 
         let mut data = vec![0u8; len];
-        stream.read_exact(&mut data).map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .read_exact(&mut data)
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
 
         Ok(data)
     }
 
     fn send_confirmation(stream: &mut S, session_key: &[u8; 32], is_client: bool) -> Result<()> {
-        let label = if is_client { b"client-confirm" } else { b"server-confirm" };
+        let label = if is_client {
+            b"client-confirm"
+        } else {
+            b"server-confirm"
+        };
         let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, session_key);
         let confirm = hmac::sign(&hmac_key, label);
 
         Self::write_frame(stream, &confirm.as_ref()[..16])
     }
 
-    fn verify_confirmation(stream: &mut S, session_key: &[u8; 32], expect_client: bool) -> Result<()> {
+    fn verify_confirmation(
+        stream: &mut S,
+        session_key: &[u8; 32],
+        expect_client: bool,
+    ) -> Result<()> {
         let received = Self::read_frame(stream)?;
         if received.len() != 16 {
             return Err(ShieldError::ChannelError("invalid confirmation".into()));
         }
 
-        let label = if expect_client { b"client-confirm" } else { b"server-confirm" };
+        let label = if expect_client {
+            b"client-confirm"
+        } else {
+            b"server-confirm"
+        };
         let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, session_key);
         let expected = hmac::sign(&hmac_key, label);
 
@@ -408,15 +437,23 @@ impl<S: Read + Write> ShieldChannel<S> {
 
     fn write_frame(stream: &mut S, data: &[u8]) -> Result<()> {
         let len = data.len() as u32;
-        stream.write_all(&len.to_be_bytes()).map_err(|e| ShieldError::ChannelError(e.to_string()))?;
-        stream.write_all(data).map_err(|e| ShieldError::ChannelError(e.to_string()))?;
-        stream.flush().map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .write_all(&len.to_be_bytes())
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .write_all(data)
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .flush()
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
         Ok(())
     }
 
     fn read_frame(stream: &mut S) -> Result<Vec<u8>> {
         let mut len_buf = [0u8; 4];
-        stream.read_exact(&mut len_buf).map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .read_exact(&mut len_buf)
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
 
         let len = u32::from_be_bytes(len_buf) as usize;
         if len > MAX_MESSAGE_SIZE {
@@ -426,7 +463,9 @@ impl<S: Read + Write> ShieldChannel<S> {
         }
 
         let mut data = vec![0u8; len];
-        stream.read_exact(&mut data).map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .read_exact(&mut data)
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
 
         Ok(data)
     }
@@ -474,10 +513,7 @@ mod tests {
             let (tx1, rx1) = mpsc::channel();
             let (tx2, rx2) = mpsc::channel();
 
-            (
-                Self { tx: tx1, rx: rx2 },
-                Self { tx: tx2, rx: rx1 },
-            )
+            (Self { tx: tx1, rx: rx2 }, Self { tx: tx2, rx: rx1 })
         }
     }
 
@@ -513,9 +549,8 @@ mod tests {
         let config = ChannelConfig::new("test-password", "test.service");
 
         let server_config = config.clone();
-        let server_handle = thread::spawn(move || {
-            ShieldChannel::accept(server_stream, &server_config)
-        });
+        let server_handle =
+            thread::spawn(move || ShieldChannel::accept(server_stream, &server_config));
 
         let client = ShieldChannel::connect(client_stream, &config).unwrap();
         let server = server_handle.join().unwrap().unwrap();
@@ -580,9 +615,8 @@ mod tests {
         let client_config = ChannelConfig::new("password1", "service");
         let server_config = ChannelConfig::new("password2", "service");
 
-        let server_handle = thread::spawn(move || {
-            ShieldChannel::accept(server_stream, &server_config)
-        });
+        let server_handle =
+            thread::spawn(move || ShieldChannel::accept(server_stream, &server_config));
 
         let client_result = ShieldChannel::connect(client_stream, &client_config);
         let server_result = server_handle.join().unwrap();
@@ -684,9 +718,8 @@ mod tests {
         let client_config = ChannelConfig::new("password", "service1");
         let server_config = ChannelConfig::new("password", "service2");
 
-        let server_handle = thread::spawn(move || {
-            ShieldChannel::accept(server_stream, &server_config)
-        });
+        let server_handle =
+            thread::spawn(move || ShieldChannel::accept(server_stream, &server_config));
 
         let client_result = ShieldChannel::connect(client_stream, &client_config);
         let server_result = server_handle.join().unwrap();

@@ -26,9 +26,12 @@
 // Crypto block counters are intentionally u32
 #![allow(clippy::cast_possible_truncation)]
 
-use ring::{hmac, rand::{SecureRandom, SystemRandom}};
+use ring::{
+    hmac,
+    rand::{SecureRandom, SystemRandom},
+};
 use subtle::ConstantTimeEq;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::error::{Result, ShieldError};
 use crate::exchange::PAKEExchange;
@@ -76,7 +79,11 @@ impl HandshakeState {
     }
 
     fn derive_contribution(&mut self, config: &ChannelConfig) {
-        let role = if self.is_initiator { "client" } else { "server" };
+        let role = if self.is_initiator {
+            "client"
+        } else {
+            "server"
+        };
         self.local_contribution = PAKEExchange::derive(
             config.password(),
             &self.salt,
@@ -86,7 +93,8 @@ impl HandshakeState {
     }
 
     fn compute_session_key(&self, config: &ChannelConfig) -> Result<[u8; 32]> {
-        let remote = self.remote_contribution
+        let remote = self
+            .remote_contribution
             .ok_or_else(|| ShieldError::ChannelError("handshake incomplete".into()))?;
 
         // Include password-derived key in session key computation
@@ -144,7 +152,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
         state.remote_contribution = Some(remote);
 
         // Step 3: Send client contribution
-        Self::send_handshake(&mut stream, HandshakeType::Finished, &state.local_contribution).await?;
+        Self::send_handshake(
+            &mut stream,
+            HandshakeType::Finished,
+            &state.local_contribution,
+        )
+        .await?;
 
         // Derive session key and create ratchet
         let session_key = state.compute_session_key(config)?;
@@ -263,14 +276,23 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
         frame.extend_from_slice(&(data.len() as u16).to_be_bytes());
         frame.extend_from_slice(data);
 
-        stream.write_all(&frame).await.map_err(|e| ShieldError::ChannelError(e.to_string()))?;
-        stream.flush().await.map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .write_all(&frame)
+            .await
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .flush()
+            .await
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
         Ok(())
     }
 
     async fn recv_handshake(stream: &mut S, expected_type: HandshakeType) -> Result<Vec<u8>> {
         let mut header = [0u8; 4];
-        stream.read_exact(&mut header).await.map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .read_exact(&mut header)
+            .await
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
 
         if header[0] != PROTOCOL_VERSION {
             return Err(ShieldError::ChannelError(format!(
@@ -282,37 +304,57 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
         if header[1] != expected_type as u8 {
             return Err(ShieldError::ChannelError(format!(
                 "unexpected message type: expected {}, got {}",
-                expected_type as u8,
-                header[1]
+                expected_type as u8, header[1]
             )));
         }
 
         let len = u16::from_be_bytes([header[2], header[3]]) as usize;
         if len > 1024 {
-            return Err(ShieldError::ChannelError("handshake message too large".into()));
+            return Err(ShieldError::ChannelError(
+                "handshake message too large".into(),
+            ));
         }
 
         let mut data = vec![0u8; len];
-        stream.read_exact(&mut data).await.map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .read_exact(&mut data)
+            .await
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
 
         Ok(data)
     }
 
-    async fn send_confirmation(stream: &mut S, session_key: &[u8; 32], is_client: bool) -> Result<()> {
-        let label = if is_client { b"client-confirm" } else { b"server-confirm" };
+    async fn send_confirmation(
+        stream: &mut S,
+        session_key: &[u8; 32],
+        is_client: bool,
+    ) -> Result<()> {
+        let label = if is_client {
+            b"client-confirm"
+        } else {
+            b"server-confirm"
+        };
         let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, session_key);
         let confirm = hmac::sign(&hmac_key, label);
 
         Self::write_frame(stream, &confirm.as_ref()[..16]).await
     }
 
-    async fn verify_confirmation(stream: &mut S, session_key: &[u8; 32], expect_client: bool) -> Result<()> {
+    async fn verify_confirmation(
+        stream: &mut S,
+        session_key: &[u8; 32],
+        expect_client: bool,
+    ) -> Result<()> {
         let received = Self::read_frame(stream).await?;
         if received.len() != 16 {
             return Err(ShieldError::ChannelError("invalid confirmation".into()));
         }
 
-        let label = if expect_client { b"client-confirm" } else { b"server-confirm" };
+        let label = if expect_client {
+            b"client-confirm"
+        } else {
+            b"server-confirm"
+        };
         let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, session_key);
         let expected = hmac::sign(&hmac_key, label);
 
@@ -325,15 +367,27 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
 
     async fn write_frame(stream: &mut S, data: &[u8]) -> Result<()> {
         let len = data.len() as u32;
-        stream.write_all(&len.to_be_bytes()).await.map_err(|e| ShieldError::ChannelError(e.to_string()))?;
-        stream.write_all(data).await.map_err(|e| ShieldError::ChannelError(e.to_string()))?;
-        stream.flush().await.map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .write_all(&len.to_be_bytes())
+            .await
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .write_all(data)
+            .await
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .flush()
+            .await
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
         Ok(())
     }
 
     async fn read_frame(stream: &mut S) -> Result<Vec<u8>> {
         let mut len_buf = [0u8; 4];
-        stream.read_exact(&mut len_buf).await.map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .read_exact(&mut len_buf)
+            .await
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
 
         let len = u32::from_be_bytes(len_buf) as usize;
         if len > MAX_MESSAGE_SIZE {
@@ -343,7 +397,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
         }
 
         let mut data = vec![0u8; len];
-        stream.read_exact(&mut data).await.map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .read_exact(&mut data)
+            .await
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
 
         Ok(data)
     }
@@ -362,11 +419,12 @@ mod tests {
         let config = ChannelConfig::new("test-password", "test.service");
 
         let server_config = config.clone();
-        let server_handle = tokio::spawn(async move {
-            DuplexChannel::accept(server_stream, &server_config).await
-        });
+        let server_handle =
+            tokio::spawn(async move { DuplexChannel::accept(server_stream, &server_config).await });
 
-        let client = DuplexChannel::connect(client_stream, &config).await.unwrap();
+        let client = DuplexChannel::connect(client_stream, &config)
+            .await
+            .unwrap();
         let server = server_handle.await.unwrap().unwrap();
 
         assert_eq!(client.service(), "test.service");
@@ -380,13 +438,17 @@ mod tests {
 
         let server_config = config.clone();
         let server_handle = tokio::spawn(async move {
-            let mut server = DuplexChannel::accept(server_stream, &server_config).await.unwrap();
+            let mut server = DuplexChannel::accept(server_stream, &server_config)
+                .await
+                .unwrap();
             let msg = server.recv().await.unwrap();
             server.send(b"Hello client!").await.unwrap();
             msg
         });
 
-        let mut client = DuplexChannel::connect(client_stream, &config).await.unwrap();
+        let mut client = DuplexChannel::connect(client_stream, &config)
+            .await
+            .unwrap();
         client.send(b"Hello server!").await.unwrap();
         let response = client.recv().await.unwrap();
 
@@ -402,9 +464,8 @@ mod tests {
         let client_config = ChannelConfig::new("password1", "service");
         let server_config = ChannelConfig::new("password2", "service");
 
-        let server_handle = tokio::spawn(async move {
-            DuplexChannel::accept(server_stream, &server_config).await
-        });
+        let server_handle =
+            tokio::spawn(async move { DuplexChannel::accept(server_stream, &server_config).await });
 
         let client_result = DuplexChannel::connect(client_stream, &client_config).await;
         let server_result = server_handle.await.unwrap();
@@ -420,11 +481,15 @@ mod tests {
 
         let server_config = config.clone();
         let server_handle = tokio::spawn(async move {
-            let mut server = DuplexChannel::accept(server_stream, &server_config).await.unwrap();
+            let mut server = DuplexChannel::accept(server_stream, &server_config)
+                .await
+                .unwrap();
             server.recv().await.unwrap()
         });
 
-        let mut client = DuplexChannel::connect(client_stream, &config).await.unwrap();
+        let mut client = DuplexChannel::connect(client_stream, &config)
+            .await
+            .unwrap();
         client.send(b"").await.unwrap();
 
         let received = server_handle.await.unwrap();
@@ -442,13 +507,17 @@ mod tests {
         let server_config = config.clone();
         let expected_len = large_data.len();
         let server_handle = tokio::spawn(async move {
-            let mut server = DuplexChannel::accept(server_stream, &server_config).await.unwrap();
+            let mut server = DuplexChannel::accept(server_stream, &server_config)
+                .await
+                .unwrap();
             let received = server.recv().await.unwrap();
             assert_eq!(received.len(), expected_len);
             received
         });
 
-        let mut client = DuplexChannel::connect(client_stream, &config).await.unwrap();
+        let mut client = DuplexChannel::connect(client_stream, &config)
+            .await
+            .unwrap();
         client.send(&large_data).await.unwrap();
 
         let received = server_handle.await.unwrap();
@@ -462,7 +531,9 @@ mod tests {
 
         let server_config = config.clone();
         let server_handle = tokio::spawn(async move {
-            let mut server = DuplexChannel::accept(server_stream, &server_config).await.unwrap();
+            let mut server = DuplexChannel::accept(server_stream, &server_config)
+                .await
+                .unwrap();
 
             server.send(b"Server first").await.unwrap();
             let msg = server.recv().await.unwrap();
@@ -470,7 +541,9 @@ mod tests {
             msg
         });
 
-        let mut client = DuplexChannel::connect(client_stream, &config).await.unwrap();
+        let mut client = DuplexChannel::connect(client_stream, &config)
+            .await
+            .unwrap();
 
         let msg1 = client.recv().await.unwrap();
         assert_eq!(msg1, b"Server first");
@@ -491,7 +564,9 @@ mod tests {
 
         let server_config = config.clone();
         let server_handle = tokio::spawn(async move {
-            let mut server = DuplexChannel::accept(server_stream, &server_config).await.unwrap();
+            let mut server = DuplexChannel::accept(server_stream, &server_config)
+                .await
+                .unwrap();
             let mut messages = Vec::new();
             for _ in 0..5 {
                 messages.push(server.recv().await.unwrap());
@@ -499,10 +574,15 @@ mod tests {
             messages
         });
 
-        let mut client = DuplexChannel::connect(client_stream, &config).await.unwrap();
+        let mut client = DuplexChannel::connect(client_stream, &config)
+            .await
+            .unwrap();
 
         for i in 0..5 {
-            client.send(format!("Message {}", i).as_bytes()).await.unwrap();
+            client
+                .send(format!("Message {}", i).as_bytes())
+                .await
+                .unwrap();
         }
 
         let messages = server_handle.await.unwrap();
@@ -518,7 +598,9 @@ mod tests {
 
         let server_config = config.clone();
         let server_handle = tokio::spawn(async move {
-            let mut server = DuplexChannel::accept(server_stream, &server_config).await.unwrap();
+            let mut server = DuplexChannel::accept(server_stream, &server_config)
+                .await
+                .unwrap();
             assert_eq!(server.messages_received(), 0);
             let _ = server.recv().await.unwrap();
             assert_eq!(server.messages_received(), 1);
@@ -526,7 +608,9 @@ mod tests {
             assert_eq!(server.messages_sent(), 1);
         });
 
-        let mut client = DuplexChannel::connect(client_stream, &config).await.unwrap();
+        let mut client = DuplexChannel::connect(client_stream, &config)
+            .await
+            .unwrap();
         assert_eq!(client.messages_sent(), 0);
 
         client.send(b"hello").await.unwrap();

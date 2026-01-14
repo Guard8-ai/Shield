@@ -109,7 +109,10 @@ fn cmd_encrypt(args: &[String]) -> ExitCode {
 
     // Check password strength
     let strength = check_password(&password);
-    if matches!(strength.level, StrengthLevel::Critical | StrengthLevel::Weak) {
+    if matches!(
+        strength.level,
+        StrengthLevel::Critical | StrengthLevel::Weak
+    ) {
         eprintln!(
             "Warning: Weak password ({:.0} bits). {}",
             strength.entropy,
@@ -415,14 +418,22 @@ fn prompt_password(prompt: &str, confirm: bool) -> Option<String> {
     Some(password)
 }
 
-fn encrypt_file(shield: &Shield, input: &str, output: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn encrypt_file(
+    shield: &Shield,
+    input: &str,
+    output: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let data = fs::read(input)?;
     let encrypted = shield.encrypt(&data)?;
     fs::write(output, encrypted)?;
     Ok(())
 }
 
-fn decrypt_file(shield: &Shield, input: &str, output: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn decrypt_file(
+    shield: &Shield,
+    input: &str,
+    output: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let data = fs::read(input)?;
     let decrypted = shield.decrypt(&data)?;
     fs::write(output, decrypted)?;

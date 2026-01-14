@@ -20,7 +20,7 @@ pub struct KeyRotationManager {
 
 impl KeyRotationManager {
     /// Create new manager with initial key.
-    #[must_use] 
+    #[must_use]
     pub fn new(key: [u8; 32], version: u32) -> Self {
         let mut keys = HashMap::new();
         keys.insert(version, key);
@@ -32,13 +32,13 @@ impl KeyRotationManager {
     }
 
     /// Get current key version.
-    #[must_use] 
+    #[must_use]
     pub fn current_version(&self) -> u32 {
         self.current_version
     }
 
     /// Get all available versions.
-    #[must_use] 
+    #[must_use]
     pub fn versions(&self) -> Vec<u32> {
         let mut v: Vec<u32> = self.keys.keys().copied().collect();
         v.sort_unstable();
@@ -74,7 +74,8 @@ impl KeyRotationManager {
         let rng = SystemRandom::new();
 
         let mut nonce = [0u8; 16];
-        rng.fill(&mut nonce).map_err(|_| ShieldError::RandomFailed)?;
+        rng.fill(&mut nonce)
+            .map_err(|_| ShieldError::RandomFailed)?;
 
         // Generate keystream
         let keystream = generate_keystream(key, &nonce, plaintext.len());

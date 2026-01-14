@@ -8,7 +8,10 @@
 // Crypto block counters are intentionally u32 - data >4GB would have other issues
 #![allow(clippy::cast_possible_truncation)]
 
-use ring::{digest, hmac, rand::{SecureRandom, SystemRandom}};
+use ring::{
+    digest, hmac,
+    rand::{SecureRandom, SystemRandom},
+};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -147,7 +150,8 @@ fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8], counter: u64) -> Result<Ve
 
     // Generate nonce
     let mut nonce = [0u8; 16];
-    rng.fill(&mut nonce).map_err(|_| ShieldError::RandomFailed)?;
+    rng.fill(&mut nonce)
+        .map_err(|_| ShieldError::RandomFailed)?;
 
     // Counter header
     let counter_bytes = counter.to_le_bytes();
@@ -234,8 +238,14 @@ fn decrypt_with_key(key: &[u8; 32], encrypted: &[u8]) -> Result<(Vec<u8>, u64)> 
 
     // Parse counter
     let counter = u64::from_le_bytes([
-        decrypted[0], decrypted[1], decrypted[2], decrypted[3],
-        decrypted[4], decrypted[5], decrypted[6], decrypted[7],
+        decrypted[0],
+        decrypted[1],
+        decrypted[2],
+        decrypted[3],
+        decrypted[4],
+        decrypted[5],
+        decrypted[6],
+        decrypted[7],
     ]);
 
     Ok((decrypted[8..].to_vec(), counter))

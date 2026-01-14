@@ -22,7 +22,7 @@ pub struct SymmetricSignature {
 
 impl SymmetricSignature {
     /// Create from signing key.
-    #[must_use] 
+    #[must_use]
     pub fn new(signing_key: [u8; 32]) -> Self {
         let verification_key = {
             let mut data = Vec::with_capacity(7 + 32);
@@ -49,7 +49,7 @@ impl SymmetricSignature {
     }
 
     /// Derive from password and identity.
-    #[must_use] 
+    #[must_use]
     pub fn from_password(password: &str, identity: &str) -> Self {
         let salt_data = format!("sign:{identity}");
         let salt = ring::digest::digest(&ring::digest::SHA256, salt_data.as_bytes());
@@ -67,7 +67,7 @@ impl SymmetricSignature {
     }
 
     /// Sign a message.
-    #[must_use] 
+    #[must_use]
     pub fn sign(&self, message: &[u8], include_timestamp: bool) -> Vec<u8> {
         if include_timestamp {
             let timestamp = SystemTime::now()
@@ -94,7 +94,7 @@ impl SymmetricSignature {
     }
 
     /// Verify a signature.
-    #[must_use] 
+    #[must_use]
     pub fn verify(
         &self,
         message: &[u8],
@@ -138,13 +138,13 @@ impl SymmetricSignature {
     }
 
     /// Get verification key.
-    #[must_use] 
+    #[must_use]
     pub fn verification_key(&self) -> &[u8; 32] {
         &self.verification_key
     }
 
     /// Get key fingerprint.
-    #[must_use] 
+    #[must_use]
     pub fn fingerprint(&self) -> String {
         let hash = ring::digest::digest(&ring::digest::SHA256, &self.verification_key);
         hex::encode(&hash.as_ref()[..8])
@@ -221,7 +221,7 @@ impl LamportSignature {
     }
 
     /// Verify a Lamport signature.
-    #[must_use] 
+    #[must_use]
     pub fn verify(message: &[u8], signature: &[u8], public_key: &[u8]) -> bool {
         if signature.len() != 256 * 32 || public_key.len() != 256 * 64 {
             return false;
@@ -253,19 +253,19 @@ impl LamportSignature {
     }
 
     /// Check if key has been used.
-    #[must_use] 
+    #[must_use]
     pub fn is_used(&self) -> bool {
         self.used
     }
 
     /// Get public key.
-    #[must_use] 
+    #[must_use]
     pub fn public_key(&self) -> &[u8] {
         &self.public_key
     }
 
     /// Get key fingerprint.
-    #[must_use] 
+    #[must_use]
     pub fn fingerprint(&self) -> String {
         let hash = ring::digest::digest(&ring::digest::SHA256, &self.public_key);
         hex::encode(&hash.as_ref()[..8])
@@ -305,7 +305,11 @@ mod tests {
         let mut lamport = LamportSignature::generate().unwrap();
         let message = b"Test message";
         let signature = lamport.sign(message).unwrap();
-        assert!(LamportSignature::verify(message, &signature, lamport.public_key()));
+        assert!(LamportSignature::verify(
+            message,
+            &signature,
+            lamport.public_key()
+        ));
     }
 
     #[test]

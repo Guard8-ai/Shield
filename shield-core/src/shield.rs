@@ -5,9 +5,12 @@
 // Crypto block counters are intentionally u32 - data >4GB would have other issues
 #![allow(clippy::cast_possible_truncation)]
 
-use ring::{hmac, pbkdf2, rand::{SecureRandom, SystemRandom}};
-use subtle::ConstantTimeEq;
+use ring::{
+    hmac, pbkdf2,
+    rand::{SecureRandom, SystemRandom},
+};
 use std::num::NonZeroU32;
+use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{Result, ShieldError};
@@ -91,7 +94,8 @@ impl Shield {
 
         // Generate random nonce
         let mut nonce = [0u8; NONCE_SIZE];
-        rng.fill(&mut nonce).map_err(|_| ShieldError::RandomFailed)?;
+        rng.fill(&mut nonce)
+            .map_err(|_| ShieldError::RandomFailed)?;
 
         // Counter prefix (matches Python format)
         let counter_bytes = 0u64.to_le_bytes();
