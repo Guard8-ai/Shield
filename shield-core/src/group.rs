@@ -38,10 +38,15 @@ fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
 fn encrypt_block(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>> {
     let rng = SystemRandom::new();
     let mut nonce = [0u8; 16];
-    rng.fill(&mut nonce).map_err(|_| ShieldError::RandomFailed)?;
+    rng.fill(&mut nonce)
+        .map_err(|_| ShieldError::RandomFailed)?;
 
     let keystream = generate_keystream(key, &nonce, data.len());
-    let ciphertext: Vec<u8> = data.iter().zip(keystream.iter()).map(|(p, k)| p ^ k).collect();
+    let ciphertext: Vec<u8> = data
+        .iter()
+        .zip(keystream.iter())
+        .map(|(p, k)| p ^ k)
+        .collect();
 
     let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
     let mut hmac_data = Vec::with_capacity(16 + ciphertext.len());
@@ -107,7 +112,9 @@ pub struct GroupEncryption {
 impl GroupEncryption {
     /// Create new group encryption.
     pub fn new(group_key: Option<[u8; 32]>) -> Result<Self> {
-        let key = if let Some(k) = group_key { k } else {
+        let key = if let Some(k) = group_key {
+            k
+        } else {
             let rng = SystemRandom::new();
             let mut k = [0u8; 32];
             rng.fill(&mut k).map_err(|_| ShieldError::RandomFailed)?;
@@ -188,7 +195,7 @@ impl GroupEncryption {
     }
 
     /// Get the group key.
-    #[must_use] 
+    #[must_use]
     pub fn group_key(&self) -> &[u8; 32] {
         &self.group_key
     }
@@ -222,7 +229,9 @@ pub struct BroadcastEncryption {
 impl BroadcastEncryption {
     /// Create new broadcast encryption.
     pub fn new(master_key: Option<[u8; 32]>, subgroup_size: usize) -> Result<Self> {
-        let key = if let Some(k) = master_key { k } else {
+        let key = if let Some(k) = master_key {
+            k
+        } else {
             let rng = SystemRandom::new();
             let mut k = [0u8; 32];
             rng.fill(&mut k).map_err(|_| ShieldError::RandomFailed)?;
@@ -231,7 +240,11 @@ impl BroadcastEncryption {
 
         Ok(Self {
             master_key: key,
-            subgroup_size: if subgroup_size == 0 { 16 } else { subgroup_size },
+            subgroup_size: if subgroup_size == 0 {
+                16
+            } else {
+                subgroup_size
+            },
             members: HashMap::new(),
             subgroup_keys: HashMap::new(),
             next_subgroup: 0,
@@ -252,7 +265,9 @@ impl BroadcastEncryption {
             }
         }
 
-        let sg_id = if let Some(id) = subgroup_id { id } else {
+        let sg_id = if let Some(id) = subgroup_id {
+            id
+        } else {
             let id = self.next_subgroup;
             let mut sg_key = [0u8; 32];
             rng.fill(&mut sg_key)
@@ -262,7 +277,8 @@ impl BroadcastEncryption {
             id
         };
 
-        self.members.insert(member_id.to_string(), (sg_id, member_key));
+        self.members
+            .insert(member_id.to_string(), (sg_id, member_key));
         Ok(sg_id)
     }
 
@@ -280,7 +296,10 @@ impl BroadcastEncryption {
         let mut subgroups = HashMap::new();
         for (sg_id, sg_key) in &self.subgroup_keys {
             let encrypted_msg_key = encrypt_block(sg_key, &message_key)?;
-            subgroups.insert(sg_id.to_string(), URL_SAFE_NO_PAD.encode(&encrypted_msg_key));
+            subgroups.insert(
+                sg_id.to_string(),
+                URL_SAFE_NO_PAD.encode(&encrypted_msg_key),
+            );
         }
 
         // Encrypt subgroup keys for each member

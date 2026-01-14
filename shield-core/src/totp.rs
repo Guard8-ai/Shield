@@ -30,7 +30,7 @@ pub struct TOTP {
 
 impl TOTP {
     /// Create new TOTP with secret.
-    #[must_use] 
+    #[must_use]
     pub fn new(secret: Vec<u8>, digits: usize, interval: u64) -> Self {
         Self {
             secret,
@@ -40,7 +40,7 @@ impl TOTP {
     }
 
     /// Create with default settings (6 digits, 30 second interval).
-    #[must_use] 
+    #[must_use]
     pub fn with_secret(secret: Vec<u8>) -> Self {
         Self::new(secret, 6, 30)
     }
@@ -49,12 +49,13 @@ impl TOTP {
     pub fn generate_secret() -> Result<Vec<u8>> {
         let rng = SystemRandom::new();
         let mut secret = vec![0u8; DEFAULT_SECRET_LEN];
-        rng.fill(&mut secret).map_err(|_| ShieldError::RandomFailed)?;
+        rng.fill(&mut secret)
+            .map_err(|_| ShieldError::RandomFailed)?;
         Ok(secret)
     }
 
     /// Generate TOTP code for given time.
-    #[must_use] 
+    #[must_use]
     pub fn generate(&self, timestamp: Option<u64>) -> String {
         let time = timestamp.unwrap_or_else(|| {
             SystemTime::now()
@@ -88,7 +89,7 @@ impl TOTP {
     }
 
     /// Verify TOTP code with time window.
-    #[must_use] 
+    #[must_use]
     pub fn verify(&self, code: &str, timestamp: Option<u64>, window: u32) -> bool {
         let time = timestamp.unwrap_or_else(|| {
             SystemTime::now()
@@ -115,7 +116,7 @@ impl TOTP {
     }
 
     /// Convert secret to Base32.
-    #[must_use] 
+    #[must_use]
     pub fn secret_to_base32(secret: &[u8]) -> String {
         const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
         let mut result = String::new();
@@ -168,7 +169,7 @@ impl TOTP {
     }
 
     /// Generate provisioning URI for QR codes.
-    #[must_use] 
+    #[must_use]
     pub fn provisioning_uri(&self, account: &str, issuer: &str) -> String {
         let secret_b32 = Self::secret_to_base32(&self.secret);
         format!(
@@ -178,7 +179,7 @@ impl TOTP {
     }
 
     /// Get the secret.
-    #[must_use] 
+    #[must_use]
     pub fn secret(&self) -> &[u8] {
         &self.secret
     }
@@ -208,7 +209,8 @@ impl RecoveryCodes {
 
         for _ in 0..count {
             let mut bytes = [0u8; 4];
-            rng.fill(&mut bytes).map_err(|_| ShieldError::RandomFailed)?;
+            rng.fill(&mut bytes)
+                .map_err(|_| ShieldError::RandomFailed)?;
             let code = format!(
                 "{:04X}-{:04X}",
                 u16::from_be_bytes([bytes[0], bytes[1]]),
@@ -233,31 +235,31 @@ impl RecoveryCodes {
     }
 
     /// Get remaining code count.
-    #[must_use] 
+    #[must_use]
     pub fn remaining(&self) -> usize {
         self.codes.len()
     }
 
     /// Get original code count (how many were initially generated).
-    #[must_use] 
+    #[must_use]
     pub fn original_count(&self) -> usize {
         self.original_count
     }
 
     /// Get used code count (original - remaining).
-    #[must_use] 
+    #[must_use]
     pub fn used_count(&self) -> usize {
         self.original_count - self.codes.len()
     }
 
     /// Get all codes (for display to user).
-    #[must_use] 
+    #[must_use]
     pub fn codes(&self) -> Vec<String> {
         self.codes.iter().cloned().collect()
     }
 
     /// Check if any codes remain.
-    #[must_use] 
+    #[must_use]
     pub fn has_codes(&self) -> bool {
         !self.codes.is_empty()
     }

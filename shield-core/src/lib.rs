@@ -40,36 +40,36 @@
 // Error/panic docs are centralized above; individual function docs are concise
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
-mod error;
-mod shield;
-mod stream;
-mod ratchet;
-mod totp;
-mod signatures;
-mod exchange;
-mod rotation;
-mod group;
-mod identity;
-pub mod password;
 pub mod channel;
 #[cfg(feature = "async")]
 pub mod channel_async;
+mod error;
+mod exchange;
+mod group;
+mod identity;
+pub mod password;
+mod ratchet;
+mod rotation;
+mod shield;
+mod signatures;
+mod stream;
+mod totp;
 #[cfg(feature = "wasm")]
 mod wasm;
 
-pub use error::{ShieldError, Result};
-pub use shield::Shield;
-pub use stream::StreamCipher;
-pub use ratchet::RatchetSession;
-pub use totp::{TOTP, RecoveryCodes};
-pub use signatures::{SymmetricSignature, LamportSignature};
-pub use exchange::{PAKEExchange, QRExchange, KeySplitter};
-pub use rotation::KeyRotationManager;
-pub use group::{GroupEncryption, BroadcastEncryption, EncryptedGroupMessage, EncryptedBroadcast};
-pub use identity::{IdentityProvider, Identity, Session, SecureSession};
-pub use channel::{ShieldChannel, ChannelConfig, ShieldListener};
+pub use channel::{ChannelConfig, ShieldChannel, ShieldListener};
 #[cfg(feature = "async")]
 pub use channel_async::AsyncShieldChannel;
+pub use error::{Result, ShieldError};
+pub use exchange::{KeySplitter, PAKEExchange, QRExchange};
+pub use group::{BroadcastEncryption, EncryptedBroadcast, EncryptedGroupMessage, GroupEncryption};
+pub use identity::{Identity, IdentityProvider, SecureSession, Session};
+pub use ratchet::RatchetSession;
+pub use rotation::KeyRotationManager;
+pub use shield::Shield;
+pub use signatures::{LamportSignature, SymmetricSignature};
+pub use stream::StreamCipher;
+pub use totp::{RecoveryCodes, TOTP};
 
 #[cfg(feature = "wasm")]
 pub use wasm::*;

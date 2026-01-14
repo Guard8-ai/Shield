@@ -6,7 +6,10 @@
 // Crypto block/chunk counters are intentionally u32 - data >4GB would have other issues
 #![allow(clippy::cast_possible_truncation)]
 
-use ring::{hmac, digest, rand::{SecureRandom, SystemRandom}};
+use ring::{
+    digest, hmac,
+    rand::{SecureRandom, SystemRandom},
+};
 use subtle::ConstantTimeEq;
 
 use crate::error::{Result, ShieldError};
@@ -51,10 +54,7 @@ impl StreamCipher {
     ///
     /// Returns an iterator over encrypted chunks.
     /// First chunk is the header containing stream salt.
-    pub fn encrypt_stream<'a>(
-        &'a self,
-        data: &'a [u8],
-    ) -> Result<StreamEncryptor<'a>> {
+    pub fn encrypt_stream<'a>(&'a self, data: &'a [u8]) -> Result<StreamEncryptor<'a>> {
         StreamEncryptor::new(&self.key, data, self.chunk_size)
     }
 
@@ -65,9 +65,8 @@ impl StreamCipher {
         }
 
         // Parse header: chunk_size(4) || stream_salt(16)
-        let _chunk_size = u32::from_le_bytes([
-            encrypted[0], encrypted[1], encrypted[2], encrypted[3],
-        ]) as usize;
+        let _chunk_size =
+            u32::from_le_bytes([encrypted[0], encrypted[1], encrypted[2], encrypted[3]]) as usize;
         let stream_salt = &encrypted[4..20];
 
         let mut output = Vec::new();
@@ -147,7 +146,8 @@ impl<'a> StreamEncryptor<'a> {
     fn new(key: &'a [u8; 32], data: &'a [u8], chunk_size: usize) -> Result<Self> {
         let rng = SystemRandom::new();
         let mut stream_salt = [0u8; 16];
-        rng.fill(&mut stream_salt).map_err(|_| ShieldError::RandomFailed)?;
+        rng.fill(&mut stream_salt)
+            .map_err(|_| ShieldError::RandomFailed)?;
 
         Ok(Self {
             key,
@@ -227,7 +227,8 @@ fn encrypt_chunk(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>> {
 
     // Generate nonce
     let mut nonce = [0u8; 16];
-    rng.fill(&mut nonce).map_err(|_| ShieldError::RandomFailed)?;
+    rng.fill(&mut nonce)
+        .map_err(|_| ShieldError::RandomFailed)?;
 
     // Generate keystream
     let mut keystream = Vec::with_capacity(data.len().div_ceil(32) * 32);

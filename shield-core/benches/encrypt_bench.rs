@@ -5,7 +5,7 @@
 //! Results show operations per second and throughput in MB/s.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305, AES_256_GCM};
+use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM, CHACHA20_POLY1305};
 use shield_core::Shield;
 
 const KB: usize = 1024;
@@ -13,12 +13,12 @@ const MB: usize = 1024 * KB;
 
 /// Test data sizes
 const SIZES: &[usize] = &[
-    64,          // Tiny: API token
-    256,         // Small: JSON payload
-    1 * KB,      // 1 KB: Config file
-    16 * KB,     // 16 KB: Small document
-    64 * KB,     // 64 KB: Image thumbnail
-    1 * MB,      // 1 MB: Document
+    64,      // Tiny: API token
+    256,     // Small: JSON payload
+    1 * KB,  // 1 KB: Config file
+    16 * KB, // 16 KB: Small document
+    64 * KB, // 64 KB: Image thumbnail
+    1 * MB,  // 1 MB: Document
 ];
 
 fn generate_data(size: usize) -> Vec<u8> {

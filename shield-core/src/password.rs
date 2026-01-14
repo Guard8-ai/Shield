@@ -101,12 +101,45 @@ impl PasswordStrength {
 
 /// Common passwords to check against.
 const COMMON_PASSWORDS: &[&str] = &[
-    "password", "123456", "12345678", "qwerty", "abc123", "monkey", "master",
-    "dragon", "letmein", "login", "admin", "welcome", "shadow", "sunshine",
-    "princess", "football", "baseball", "iloveyou", "trustno1", "superman",
-    "batman", "passw0rd", "hello", "charlie", "donald", "password1",
-    "123456789", "1234567890", "1234567", "12345", "1234", "111111", "000000",
-    "qwerty123", "password123", "letmein123", "welcome1", "admin123", "root",
+    "password",
+    "123456",
+    "12345678",
+    "qwerty",
+    "abc123",
+    "monkey",
+    "master",
+    "dragon",
+    "letmein",
+    "login",
+    "admin",
+    "welcome",
+    "shadow",
+    "sunshine",
+    "princess",
+    "football",
+    "baseball",
+    "iloveyou",
+    "trustno1",
+    "superman",
+    "batman",
+    "passw0rd",
+    "hello",
+    "charlie",
+    "donald",
+    "password1",
+    "123456789",
+    "1234567890",
+    "1234567",
+    "12345",
+    "1234",
+    "111111",
+    "000000",
+    "qwerty123",
+    "password123",
+    "letmein123",
+    "welcome1",
+    "admin123",
+    "root",
 ];
 
 /// Calculate character set size used in password.
@@ -117,10 +150,18 @@ fn calculate_charset_size(password: &str) -> usize {
     let has_special = password.chars().any(|c| !c.is_ascii_alphanumeric());
 
     let mut size = 0;
-    if has_lower { size += 26; }
-    if has_upper { size += 26; }
-    if has_digit { size += 10; }
-    if has_special { size += 32; }
+    if has_lower {
+        size += 26;
+    }
+    if has_upper {
+        size += 26;
+    }
+    if has_digit {
+        size += 10;
+    }
+    if has_special {
+        size += 32;
+    }
 
     size.max(1)
 }
@@ -138,7 +179,9 @@ fn has_common_pattern(password: &str) -> bool {
     }
 
     // Check for sequential digits
-    let sequential_digits = ["012", "123", "234", "345", "456", "567", "678", "789", "890"];
+    let sequential_digits = [
+        "012", "123", "234", "345", "456", "567", "678", "789", "890",
+    ];
     for seq in sequential_digits {
         if lower.contains(seq) {
             return true;
@@ -318,7 +361,13 @@ pub fn warn_if_weak(password: &str, min_entropy: f64) -> Option<String> {
             let _ = write!(
                 msg,
                 " Suggestions: {}",
-                result.suggestions.iter().take(2).cloned().collect::<Vec<_>>().join("; ")
+                result
+                    .suggestions
+                    .iter()
+                    .take(2)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("; ")
             );
         }
 
@@ -359,13 +408,19 @@ mod tests {
     #[test]
     fn test_fair_password() {
         let result = check_password("MyPassword1");
-        assert!(matches!(result.level, StrengthLevel::Weak | StrengthLevel::Fair));
+        assert!(matches!(
+            result.level,
+            StrengthLevel::Weak | StrengthLevel::Fair
+        ));
     }
 
     #[test]
     fn test_strong_password() {
         let result = check_password("MyStr0ng!P@ssw0rd#2024");
-        assert!(matches!(result.level, StrengthLevel::Strong | StrengthLevel::VeryStrong));
+        assert!(matches!(
+            result.level,
+            StrengthLevel::Strong | StrengthLevel::VeryStrong
+        ));
     }
 
     #[test]
@@ -401,7 +456,10 @@ mod tests {
         assert!(!result.crack_time_display().is_empty());
 
         let strong = check_password("ThisIsAVeryStrongPasswordWithLotsOfEntropy!@#$");
-        assert!(strong.crack_time_display().contains("year") || strong.crack_time_display().contains("billion"));
+        assert!(
+            strong.crack_time_display().contains("year")
+                || strong.crack_time_display().contains("billion")
+        );
     }
 
     #[test]
