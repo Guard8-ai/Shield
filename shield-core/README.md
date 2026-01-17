@@ -17,14 +17,21 @@ Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Bre
 
 ```toml
 [dependencies]
-shield-core = "0.1"
+shield-core = "1.1"
 ```
 
 For WebAssembly:
 
 ```toml
 [dependencies]
-shield-core = { version = "0.1", features = ["wasm"] }
+shield-core = { version = "1.1", features = ["wasm"] }
+```
+
+For Confidential Computing (TEE attestation):
+
+```toml
+[dependencies]
+shield-core = { version = "1.1", features = ["confidential"] }
 ```
 
 ## Quick Start
@@ -81,6 +88,9 @@ let decrypted = bob.decrypt(&encrypted)?;
 - `std` (default): Standard library support
 - `cli` (default): Command-line interface (`shield` binary)
 - `wasm`: WebAssembly support via wasm-bindgen
+- `async`: Async runtime support (Tokio)
+- `confidential`: Confidential Computing with TEE attestation
+- `openapi`: OpenAPI/Swagger schema generation for APIs
 
 ## CLI Tool
 
@@ -120,6 +130,54 @@ if !result.is_acceptable() {
         println!("Suggestion: {}", suggestion);
     }
 }
+```
+
+## Confidential Computing
+
+Hardware-based attestation for Trusted Execution Environments (requires `confidential` feature).
+
+### Supported Platforms
+
+| Platform | Provider | Attestation |
+|----------|----------|-------------|
+| AWS Nitro Enclaves | `NitroAttestationProvider` | COSE-signed PCR measurements |
+| GCP Confidential VMs | `SEVAttestationProvider` | AMD SEV-SNP + vTPM |
+| Azure Confidential | `MAAAttestationProvider` | Microsoft Azure Attestation |
+| Intel SGX | `SGXAttestationProvider` | DCAP quotes (MRENCLAVE/MRSIGNER) |
+
+### Usage
+
+```rust
+use shield_core::confidential::{
+    AttestationProvider, NitroAttestationProvider,
+    TEEKeyManager, KeyReleasePolicy,
+};
+use std::sync::Arc;
+
+// Create provider for your platform
+let provider = Arc::new(NitroAttestationProvider::new()
+    .with_expected_pcr(0, "expected_pcr0_hash")
+    .with_max_age(300));
+
+// Key manager with attestation gating
+let key_manager = TEEKeyManager::new(
+    "master_password",
+    "my-service",
+    provider,
+);
+
+// Get keys only after attestation verification
+let key = key_manager.derive_key(&attestation_evidence).await?;
+```
+
+### SGX Sealed Storage
+
+```rust
+use shield_core::confidential::{SealedStorage, SGXSealPolicy};
+
+let storage = SealedStorage::new(SGXSealPolicy::MRENCLAVE);
+storage.store("my_key", &secret_data).await?;
+let data = storage.load("my_key").await?;
 ```
 
 ## API Reference

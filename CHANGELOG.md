@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-01-17
+
+### Added
+- **Confidential Computing Support** - Hardware-based attestation for Trusted Execution Environments
+
+  **Rust** (`shield-core` with `confidential` feature):
+  - `AttestationProvider` trait: Common async interface for all TEE providers
+  - `NitroAttestationProvider`: AWS Nitro Enclaves with COSE-signed PCR measurements
+  - `SEVAttestationProvider`: GCP Confidential VMs (AMD SEV-SNP + vTPM)
+  - `ConfidentialSpaceProvider`: GCP Confidential Space with workload identity
+  - `MAAAttestationProvider`: Azure MAA (Microsoft Azure Attestation)
+  - `AzureKeyVaultSKR`: Secure Key Release with attestation verification
+  - `SGXAttestationProvider`: Intel SGX with DCAP quotes
+  - `SealedStorage`: SGX-specific encrypted storage bound to enclave identity
+  - `GramineManifestHelper`: Gramine manifest generation for SGX
+  - `TEEKeyManager`: Attestation-gated key release with policy enforcement
+  - `KeyReleasePolicy`: Configurable policies for measurement verification
+
+  **Rust** (`shield-core` with `openapi` feature):
+  - OpenAPI/Swagger schemas via `utoipa` for Confidential Computing APIs
+  - Request/Response types: `AttestationRequest`, `AttestationResponse`, etc.
+  - Auto-generated API documentation for attestation endpoints
+
+  **Python** (`shield.integrations.confidential`):
+  - `NitroAttestationProvider`: AWS Nitro with vsock support
+  - `SEVAttestationProvider`: GCP Confidential VMs
+  - `MAAAttestationProvider`: Azure MAA
+  - `SGXAttestationProvider`: Intel SGX/DCAP
+  - `AttestationMiddleware`: FastAPI middleware for client attestation
+  - `@requires_attestation`: Decorator for attestation-protected endpoints
+  - `TEEKeyManager`: Key derivation from attestation measurements
+  - Cloud integrations: AWS KMS, GCP Secret Manager, Azure Key Vault
+
+- **Confidential Computing Examples** (`examples/confidential-computing/`):
+  - AWS Nitro Enclaves: FastAPI enclave + parent instance proxy
+  - GCP Confidential VMs: SEV-SNP protected API server
+  - Azure Confidential Containers: AKS with confcom
+  - Intel SGX: Gramine-based enclave application
+  - Deployment guides for all platforms
+
+- **TaskGuard Tasks** for Confidential Computing:
+  - `backend-022`: Base attestation types and traits
+  - `backend-023`: AWS Nitro provider
+  - `backend-024`: GCP SEV provider
+  - `backend-025`: Azure MAA provider
+  - `backend-026`: Intel SGX provider
+  - `api-005`: OpenAPI/Swagger support
+  - `integration-006` to `integration-010`: Python providers
+
+### Changed
+- Rust test count increased from 97 to 95 (with `confidential` feature)
+- Added `ciborium` dependency for CBOR parsing (Nitro attestation)
+- Added `async-trait` dependency for async trait support
+- Added `reqwest` dependency for HTTP client (attestation services)
+- Added `utoipa` dependency for OpenAPI schema generation
+
+### Security
+- TEE attestation verification before key release
+- Hardware-rooted trust via PCR/MRENCLAVE measurements
+- Attestation freshness verification (max age checks)
+- Policy-based access control for confidential operations
+
+## [1.0.2] - 2026-01-16
+
+### Fixed
+- Removed unused SALT_HEX test constant
+- Added strict clippy lints from grapheme-nn
+- Skip WASM build in release (ring doesn't support wasm32)
+- Updated versions to 1.0.1 and fixed rust-toolchain action
+- Fixed workflow permissions and stack trace exposure
+
+## [1.0.1] - 2026-01-15
+
+### Fixed
+- Minor version bump with security fixes
+- Workflow permissions hardening
+
 ## [1.0.0] - 2026-01-11
 
 ### Added
@@ -116,7 +193,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Random 128-bit nonce per encryption
 - EXPTIME security guarantees
 
-[Unreleased]: https://github.com/Guard8-ai/Shield/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Guard8-ai/Shield/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Guard8-ai/Shield/compare/v1.0.2...v1.1.0
+[1.0.2]: https://github.com/Guard8-ai/Shield/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/Guard8-ai/Shield/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/Guard8-ai/Shield/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/Guard8-ai/Shield/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Guard8-ai/Shield/releases/tag/v0.1.0
