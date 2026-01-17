@@ -22,7 +22,9 @@ default = ["std", "cli"]
 std = []
 cli = ["dep:rpassword", "dep:getrandom"]
 wasm = ["dep:wasm-bindgen", "getrandom/js"]
-async = ["dep:tokio"]
+async = ["dep:tokio", "dep:reqwest"]
+confidential = ["async", "dep:ciborium", "dep:async-trait"]
+openapi = ["confidential", "dep:utoipa"]
 
 [[bin]]
 name = "shield"
@@ -52,6 +54,12 @@ base64 = "0.21"
 # JSON serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# Confidential Computing dependencies
+ciborium = { version = "0.2", optional = true }
+async-trait = { version = "0.1", optional = true }
+reqwest = { version = "0.11", features = ["json"], optional = true }
+# OpenAPI/Swagger support
+utoipa = { version = "4.2", features = ["chrono"], optional = true }
 
 # YOU ARE NOT ALLOWED TO CHANGE THIS FILE UNLESS EXPLICITLY ASKED.
 [dev-dependencies]

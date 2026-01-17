@@ -25,6 +25,7 @@ SHIELD is an EXPTIME-secure encryption library providing symmetric cryptography 
 | `swift/` | Swift Package |
 | `kotlin/` | Kotlin/JVM project |
 | `wasm/` | WebAssembly module (re-exports shield-core with wasm feature) |
+| `examples/` | Usage examples (browser-integration, hsm, confidential-computing) |
 | `tests/` | Cross-language interoperability tests |
 | `BENCHMARKS.md` | Performance benchmarks vs AES-GCM, ChaCha20 |
 | `MIGRATION.md` | Migration guides from Fernet, NaCl, PyCryptodome |
@@ -87,6 +88,25 @@ SHIELD is an EXPTIME-secure encryption library providing symmetric cryptography 
 - `EncryptedCookie`: Tamper-proof encrypted cookies
 - `SecureCORS`: CORS with signed request validation
 
+### Confidential Computing (Rust + Python)
+Hardware-based attestation and encryption for Trusted Execution Environments (TEEs).
+
+**Rust** (`shield-core/src/confidential/` with `confidential` feature):
+- `AttestationProvider` trait: Common interface for all TEE providers
+- `NitroAttestationProvider`: AWS Nitro Enclaves (COSE-signed PCR measurements)
+- `SEVAttestationProvider`: GCP Confidential VMs (AMD SEV-SNP + vTPM)
+- `MAAAttestationProvider`: Azure MAA (Microsoft Attestation, Secure Key Release)
+- `SGXAttestationProvider`: Intel SGX (DCAP quotes, MRENCLAVE/MRSIGNER)
+- `TEEKeyManager`: Attestation-gated key release with policy enforcement
+- `SealedStorage`: SGX-specific encrypted storage bound to enclave identity
+- OpenAPI schemas via `utoipa` (`openapi` feature)
+
+**Python** (`shield.integrations.confidential`):
+- Same provider classes with async support
+- `AttestationMiddleware`: FastAPI middleware for client attestation
+- `@requires_attestation`: Decorator for attestation-protected endpoints
+- Platform-specific integrations (AWS KMS, GCP Secret Manager, Azure Key Vault)
+
 ## Architecture
 
 ### Encryption Flow
@@ -107,8 +127,11 @@ Format: `nonce(16 bytes) || ciphertext || MAC(16 bytes)`
 ## Running Tests
 
 ```bash
-# Rust core (97 tests)
-cd shield-core && cargo test --features async
+# Rust core (95 tests with confidential computing)
+cd shield-core && cargo test --features confidential
+
+# Rust with OpenAPI support
+cd shield-core && cargo test --features openapi
 
 # Python (153 tests - includes 33 integration tests)
 cd python && python -m pytest

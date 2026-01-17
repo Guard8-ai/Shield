@@ -13,6 +13,7 @@ Features:
 - Rate limiting with encrypted counters
 - CORS with encrypted cookies
 - Browser-side encryption helpers
+- Confidential Computing: TEE attestation for AWS Nitro, GCP SEV, Azure MAA, Intel SGX
 """
 
 from shield.integrations.fastapi import (
@@ -37,6 +38,27 @@ from shield.integrations.browser import (
     SecureCORS,
 )
 
+# Confidential Computing (lazy import to avoid dependency issues)
+def __getattr__(name):
+    """Lazy import for confidential computing modules."""
+    confidential_exports = {
+        "AttestationProvider",
+        "AttestationResult",
+        "AttestationError",
+        "TEEType",
+        "TEEKeyManager",
+        "NitroAttestationProvider",
+        "SEVAttestationProvider",
+        "MAAAttestationProvider",
+        "SGXAttestationProvider",
+        "AttestationMiddleware",
+        "requires_attestation",
+    }
+    if name in confidential_exports:
+        from shield.integrations import confidential
+        return getattr(confidential, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 __all__ = [
     # FastAPI
     "ShieldMiddleware",
@@ -55,4 +77,16 @@ __all__ = [
     "BrowserBridge",
     "EncryptedCookie",
     "SecureCORS",
+    # Confidential Computing
+    "AttestationProvider",
+    "AttestationResult",
+    "AttestationError",
+    "TEEType",
+    "TEEKeyManager",
+    "NitroAttestationProvider",
+    "SEVAttestationProvider",
+    "MAAAttestationProvider",
+    "SGXAttestationProvider",
+    "AttestationMiddleware",
+    "requires_attestation",
 ]

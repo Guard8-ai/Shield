@@ -43,6 +43,8 @@
 pub mod channel;
 #[cfg(feature = "async")]
 pub mod channel_async;
+#[cfg(feature = "confidential")]
+pub mod confidential;
 mod error;
 mod exchange;
 mod group;
