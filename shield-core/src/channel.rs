@@ -27,10 +27,7 @@
 // Crypto block counters are intentionally u32
 #![allow(clippy::cast_possible_truncation)]
 
-use ring::{
-    hmac,
-    rand::{SecureRandom, SystemRandom},
-};
+use ring::hmac;
 use std::io::{Read, Write};
 use subtle::ConstantTimeEq;
 
@@ -127,10 +124,7 @@ struct HandshakeState {
 
 impl HandshakeState {
     fn new(is_initiator: bool) -> Result<Self> {
-        let rng = SystemRandom::new();
-
-        let mut salt = [0u8; 16];
-        rng.fill(&mut salt).map_err(|_| ShieldError::RandomFailed)?;
+        let salt: [u8; 16] = crate::random::random_bytes()?;
 
         Ok(Self {
             salt,

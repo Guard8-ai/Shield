@@ -7,7 +7,6 @@
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ring::hmac;
-use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use subtle::ConstantTimeEq;
@@ -36,10 +35,7 @@ fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
 
 /// Encrypt a block with HMAC authentication.
 fn encrypt_block(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>> {
-    let rng = SystemRandom::new();
-    let mut nonce = [0u8; 16];
-    rng.fill(&mut nonce)
-        .map_err(|_| ShieldError::RandomFailed)?;
+    let nonce: [u8; 16] = crate::random::random_bytes()?;
 
     let keystream = generate_keystream(key, &nonce, data.len());
     let ciphertext: Vec<u8> = data
@@ -115,10 +111,7 @@ impl GroupEncryption {
         let key = if let Some(k) = group_key {
             k
         } else {
-            let rng = SystemRandom::new();
-            let mut k = [0u8; 32];
-            rng.fill(&mut k).map_err(|_| ShieldError::RandomFailed)?;
-            k
+            crate::random::random_bytes()?
         };
 
         Ok(Self {
@@ -188,9 +181,7 @@ impl GroupEncryption {
     /// Rotate the group key.
     pub fn rotate_key(&mut self) -> Result<[u8; 32]> {
         let old_key = self.group_key;
-        let rng = SystemRandom::new();
-        rng.fill(&mut self.group_key)
-            .map_err(|_| ShieldError::RandomFailed)?;
+        self.group_key = crate::random::random_bytes()?;
         Ok(old_key)
     }
 
@@ -232,10 +223,7 @@ impl BroadcastEncryption {
         let key = if let Some(k) = master_key {
             k
         } else {
-            let rng = SystemRandom::new();
-            let mut k = [0u8; 32];
-            rng.fill(&mut k).map_err(|_| ShieldError::RandomFailed)?;
-            k
+            crate::random::random_bytes()?
         };
 
         Ok(Self {
@@ -253,8 +241,6 @@ impl BroadcastEncryption {
 
     /// Add member to broadcast group.
     pub fn add_member(&mut self, member_id: &str, member_key: [u8; 32]) -> Result<u32> {
-        let rng = SystemRandom::new();
-
         // Find subgroup with space
         let mut subgroup_id = None;
         for sg_id in self.subgroup_keys.keys() {
@@ -269,9 +255,7 @@ impl BroadcastEncryption {
             id
         } else {
             let id = self.next_subgroup;
-            let mut sg_key = [0u8; 32];
-            rng.fill(&mut sg_key)
-                .map_err(|_| ShieldError::RandomFailed)?;
+            let sg_key: [u8; 32] = crate::random::random_bytes()?;
             self.subgroup_keys.insert(id, sg_key);
             self.next_subgroup += 1;
             id
@@ -284,10 +268,7 @@ impl BroadcastEncryption {
 
     /// Encrypt for broadcast.
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<EncryptedBroadcast> {
-        let rng = SystemRandom::new();
-        let mut message_key = [0u8; 32];
-        rng.fill(&mut message_key)
-            .map_err(|_| ShieldError::RandomFailed)?;
+        let message_key: [u8; 32] = crate::random::random_bytes()?;
 
         // Encrypt message
         let ciphertext = encrypt_block(&message_key, plaintext)?;

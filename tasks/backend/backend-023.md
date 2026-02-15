@@ -1,7 +1,7 @@
 ---
 id: backend-023
 title: Rust AWS Nitro Enclaves Attestation Provider
-status: todo
+status: done
 priority: high
 tags:
 - backend

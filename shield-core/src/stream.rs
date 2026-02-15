@@ -6,10 +6,7 @@
 // Crypto block/chunk counters are intentionally u32 - data >4GB would have other issues
 #![allow(clippy::cast_possible_truncation)]
 
-use ring::{
-    digest, hmac,
-    rand::{SecureRandom, SystemRandom},
-};
+use ring::{digest, hmac};
 use subtle::ConstantTimeEq;
 
 use crate::error::{Result, ShieldError};
@@ -144,10 +141,7 @@ pub struct StreamEncryptor<'a> {
 
 impl<'a> StreamEncryptor<'a> {
     fn new(key: &'a [u8; 32], data: &'a [u8], chunk_size: usize) -> Result<Self> {
-        let rng = SystemRandom::new();
-        let mut stream_salt = [0u8; 16];
-        rng.fill(&mut stream_salt)
-            .map_err(|_| ShieldError::RandomFailed)?;
+        let stream_salt: [u8; 16] = crate::random::random_bytes()?;
 
         Ok(Self {
             key,
@@ -223,12 +217,8 @@ fn derive_chunk_key(key: &[u8], stream_salt: &[u8], chunk_num: u64) -> [u8; 32] 
 
 /// Encrypt a single chunk.
 fn encrypt_chunk(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>> {
-    let rng = SystemRandom::new();
-
     // Generate nonce
-    let mut nonce = [0u8; 16];
-    rng.fill(&mut nonce)
-        .map_err(|_| ShieldError::RandomFailed)?;
+    let nonce: [u8; 16] = crate::random::random_bytes()?;
 
     // Generate keystream
     let mut keystream = Vec::with_capacity(data.len().div_ceil(32) * 32);

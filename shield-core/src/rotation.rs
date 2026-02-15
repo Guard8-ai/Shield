@@ -6,7 +6,6 @@
 #![allow(clippy::cast_possible_truncation)]
 
 use ring::hmac;
-use ring::rand::{SecureRandom, SystemRandom};
 use std::collections::HashMap;
 use subtle::ConstantTimeEq;
 
@@ -71,11 +70,7 @@ impl KeyRotationManager {
     /// Format: version(4) || nonce(16) || ciphertext || mac(16)
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
         let key = self.keys.get(&self.current_version).unwrap();
-        let rng = SystemRandom::new();
-
-        let mut nonce = [0u8; 16];
-        rng.fill(&mut nonce)
-            .map_err(|_| ShieldError::RandomFailed)?;
+        let nonce: [u8; 16] = crate::random::random_bytes()?;
 
         // Generate keystream
         let keystream = generate_keystream(key, &nonce, plaintext.len());

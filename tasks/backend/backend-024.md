@@ -1,7 +1,7 @@
 ---
 id: backend-024
 title: Rust GCP Confidential VMs (SEV-SNP) Attestation Provider
-status: todo
+status: done
 priority: high
 tags:
 - backend

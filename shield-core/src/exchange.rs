@@ -3,7 +3,6 @@
 //! Provides PAKE, QR exchange, and key splitting.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
 
@@ -59,10 +58,7 @@ impl PAKEExchange {
 
     /// Generate random salt.
     pub fn generate_salt() -> Result<[u8; 16]> {
-        let rng = SystemRandom::new();
-        let mut salt = [0u8; 16];
-        rng.fill(&mut salt).map_err(|_| ShieldError::RandomFailed)?;
-        Ok(salt)
+        crate::random::random_bytes()
     }
 }
 
@@ -123,13 +119,10 @@ impl KeySplitter {
             return Err(ShieldError::InvalidShareCount);
         }
 
-        let rng = SystemRandom::new();
         let mut shares = Vec::with_capacity(num_shares);
 
         for _ in 0..num_shares - 1 {
-            let mut share = vec![0u8; key.len()];
-            rng.fill(&mut share)
-                .map_err(|_| ShieldError::RandomFailed)?;
+            let share = crate::random::random_vec(key.len())?;
             shares.push(share);
         }
 

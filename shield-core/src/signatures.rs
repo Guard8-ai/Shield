@@ -3,7 +3,6 @@
 //! Provides HMAC-based signatures and Lamport one-time signatures.
 
 use ring::hmac;
-use ring::rand::{SecureRandom, SystemRandom};
 use std::num::NonZeroU32;
 use std::time::{SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
@@ -42,9 +41,7 @@ impl SymmetricSignature {
 
     /// Generate new random signing identity.
     pub fn generate() -> Result<Self> {
-        let rng = SystemRandom::new();
-        let mut key = [0u8; 32];
-        rng.fill(&mut key).map_err(|_| ShieldError::RandomFailed)?;
+        let key: [u8; 32] = crate::random::random_bytes()?;
         Ok(Self::new(key))
     }
 
@@ -168,15 +165,12 @@ impl LamportSignature {
 
     /// Generate new Lamport key pair.
     pub fn generate() -> Result<Self> {
-        let rng = SystemRandom::new();
         let mut private_key = Vec::with_capacity(Self::BITS);
         let mut public_key = Vec::with_capacity(Self::BITS * 64);
 
         for _ in 0..Self::BITS {
-            let mut key0 = [0u8; 32];
-            let mut key1 = [0u8; 32];
-            rng.fill(&mut key0).map_err(|_| ShieldError::RandomFailed)?;
-            rng.fill(&mut key1).map_err(|_| ShieldError::RandomFailed)?;
+            let key0: [u8; 32] = crate::random::random_bytes()?;
+            let key1: [u8; 32] = crate::random::random_bytes()?;
 
             let hash0 = ring::digest::digest(&ring::digest::SHA256, &key0);
             let hash1 = ring::digest::digest(&ring::digest::SHA256, &key1);

@@ -6,7 +6,6 @@
 #![allow(clippy::cast_possible_truncation)]
 
 use ring::hmac;
-use ring::rand::{SecureRandom, SystemRandom};
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -47,11 +46,7 @@ impl TOTP {
 
     /// Generate a random secret.
     pub fn generate_secret() -> Result<Vec<u8>> {
-        let rng = SystemRandom::new();
-        let mut secret = vec![0u8; DEFAULT_SECRET_LEN];
-        rng.fill(&mut secret)
-            .map_err(|_| ShieldError::RandomFailed)?;
-        Ok(secret)
+        crate::random::random_vec(DEFAULT_SECRET_LEN)
     }
 
     /// Generate TOTP code for given time.
@@ -204,13 +199,10 @@ impl RecoveryCodes {
 
     /// Generate codes list.
     pub fn generate_codes(count: usize) -> Result<Vec<String>> {
-        let rng = SystemRandom::new();
         let mut codes = Vec::with_capacity(count);
 
         for _ in 0..count {
-            let mut bytes = [0u8; 4];
-            rng.fill(&mut bytes)
-                .map_err(|_| ShieldError::RandomFailed)?;
+            let bytes: [u8; 4] = crate::random::random_bytes()?;
             let code = format!(
                 "{:04X}-{:04X}",
                 u16::from_be_bytes([bytes[0], bytes[1]]),

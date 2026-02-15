@@ -1,7 +1,7 @@
 ---
 id: backend-022
 title: Rust Confidential Computing - Base Types and Traits
-status: todo
+status: done
 priority: high
 tags:
 - backend

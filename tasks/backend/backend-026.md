@@ -1,7 +1,7 @@
 ---
 id: backend-026
 title: Rust Intel SGX Attestation Provider
-status: todo
+status: done
 priority: high
 tags:
 - backend

@@ -1,7 +1,7 @@
 ---
 id: backend-025
 title: Rust Azure MAA Attestation Provider
-status: todo
+status: done
 priority: high
 tags:
 - backend

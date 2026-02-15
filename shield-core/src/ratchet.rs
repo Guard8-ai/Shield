@@ -8,10 +8,7 @@
 // Crypto block counters are intentionally u32 - data >4GB would have other issues
 #![allow(clippy::cast_possible_truncation)]
 
-use ring::{
-    digest, hmac,
-    rand::{SecureRandom, SystemRandom},
-};
+use ring::{digest, hmac};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -146,12 +143,8 @@ fn ratchet_chain(chain_key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
 
 /// Encrypt with message key (includes counter).
 fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8], counter: u64) -> Result<Vec<u8>> {
-    let rng = SystemRandom::new();
-
     // Generate nonce
-    let mut nonce = [0u8; 16];
-    rng.fill(&mut nonce)
-        .map_err(|_| ShieldError::RandomFailed)?;
+    let nonce: [u8; 16] = crate::random::random_bytes()?;
 
     // Counter header
     let counter_bytes = counter.to_le_bytes();
