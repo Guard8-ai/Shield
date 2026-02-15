@@ -25,6 +25,8 @@ wasm = ["dep:wasm-bindgen", "dep:getrandom", "getrandom/js"]
 async = ["dep:tokio", "dep:reqwest"]
 confidential = ["async", "dep:ciborium", "dep:async-trait"]
 openapi = ["confidential", "dep:utoipa"]
+fido2 = ["std", "dep:webauthn-rs", "dep:webauthn-rs-proto"]
+pgvector = ["async", "dep:tokio-postgres", "dep:postgres-types", "dep:chrono"]
 
 [[bin]]
 name = "shield"
@@ -60,6 +62,13 @@ async-trait = { version = "0.1", optional = true }
 reqwest = { version = "0.11", features = ["json"], optional = true }
 # OpenAPI/Swagger support
 utoipa = { version = "4.2", features = ["chrono"], optional = true }
+# FIDO2/WebAuthn dependencies
+webauthn-rs = { version = "0.4", optional = true }
+webauthn-rs-proto = { version = "0.4", optional = true }
+# pgvector dependencies
+tokio-postgres = { version = "0.7", optional = true }
+postgres-types = { version = "0.2", optional = true }
+chrono = { version = "0.4", optional = true }
 
 # YOU ARE NOT ALLOWED TO CHANGE THIS FILE UNLESS EXPLICITLY ASKED.
 [dev-dependencies]
