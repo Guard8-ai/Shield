@@ -47,6 +47,7 @@ pub mod channel_async;
 pub mod confidential;
 mod error;
 mod exchange;
+mod random;
 mod group;
 mod identity;
 pub mod password;

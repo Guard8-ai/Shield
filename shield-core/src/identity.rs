@@ -7,7 +7,6 @@
 
 use base64::Engine;
 use ring::hmac;
-use ring::rand::{SecureRandom, SystemRandom};
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -127,9 +126,7 @@ impl IdentityProvider {
             return Err(ShieldError::UserExists(user_id.to_string()));
         }
 
-        let rng = SystemRandom::new();
-        let mut salt = [0u8; 16];
-        rng.fill(&mut salt).map_err(|_| ShieldError::RandomFailed)?;
+        let salt: [u8; 16] = crate::random::random_bytes()?;
 
         let mut password_hash = [0u8; 32];
         ring::pbkdf2::derive(
@@ -203,9 +200,7 @@ impl IdentityProvider {
 
     /// Create session token.
     fn create_token(&self, user_id: &str, permissions: &[String], ttl: u64) -> String {
-        let rng = SystemRandom::new();
-        let mut nonce = [0u8; 16];
-        rng.fill(&mut nonce).unwrap();
+        let nonce: [u8; 16] = crate::random::random_bytes().unwrap();
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -324,9 +319,7 @@ impl IdentityProvider {
     ) -> Option<String> {
         let session = self.validate_token(session_token)?;
 
-        let rng = SystemRandom::new();
-        let mut nonce = [0u8; 16];
-        rng.fill(&mut nonce).ok()?;
+        let nonce: [u8; 16] = crate::random::random_bytes().ok()?;
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -539,10 +532,7 @@ impl SecureSession {
         self.maybe_rotate();
 
         let key = self.keys.get(&self.key_version).unwrap();
-        let rng = SystemRandom::new();
-        let mut nonce = [0u8; 16];
-        rng.fill(&mut nonce)
-            .map_err(|_| ShieldError::RandomFailed)?;
+        let nonce: [u8; 16] = crate::random::random_bytes()?;
 
         let keystream = generate_keystream(key, &nonce, data.len());
         let ciphertext: Vec<u8> = data

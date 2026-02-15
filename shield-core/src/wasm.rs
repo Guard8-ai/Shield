@@ -327,12 +327,7 @@ impl WasmLamportSignature {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen(js_name = randomBytes)]
 pub fn wasm_random_bytes(size: usize) -> Result<Vec<u8>, JsError> {
-    use ring::rand::{SecureRandom, SystemRandom};
-    let rng = SystemRandom::new();
-    let mut bytes = vec![0u8; size];
-    rng.fill(&mut bytes)
-        .map_err(|_| JsError::new("Failed to generate random bytes"))?;
-    Ok(bytes)
+    crate::random::random_vec(size).map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// SHA-256 hash.

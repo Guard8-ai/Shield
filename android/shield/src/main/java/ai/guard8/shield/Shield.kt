@@ -183,3 +183,76 @@ class Shield private constructor(private val key: ByteArray) {
         return result == 0
     }
 }
+
+/**
+ * Shield cryptographic utility functions.
+ */
+object ShieldUtils {
+    const val KEY_SIZE = 32
+
+    /**
+     * Generate cryptographically secure random bytes.
+     */
+    @JvmStatic
+    fun randomBytes(length: Int): ByteArray {
+        return ByteArray(length).also { SecureRandom().nextBytes(it) }
+    }
+
+    /**
+     * SHA256 hash.
+     */
+    @JvmStatic
+    fun sha256(data: ByteArray): ByteArray {
+        return MessageDigest.getInstance("SHA-256").digest(data)
+    }
+
+    /**
+     * Constant-time byte array comparison.
+     */
+    @JvmStatic
+    fun constantTimeEquals(a: ByteArray, b: ByteArray): Boolean {
+        if (a.size != b.size) return false
+        var result = 0
+        for (i in a.indices) {
+            result = result or (a[i].toInt() xor b[i].toInt())
+        }
+        return result == 0
+    }
+
+    /**
+     * Securely wipe sensitive data from memory.
+     */
+    @JvmStatic
+    fun secureWipe(data: ByteArray) {
+        data.fill(0)
+    }
+
+    /**
+     * PBKDF2-SHA256 key derivation.
+     */
+    @JvmStatic
+    fun pbkdf2(password: String, salt: ByteArray, iterations: Int, keyLength: Int): ByteArray {
+        val spec = javax.crypto.spec.PBEKeySpec(
+            password.toCharArray(),
+            salt,
+            iterations,
+            keyLength * 8
+        )
+        val factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        return factory.generateSecret(spec).encoded
+    }
+}
+
+/**
+ * Shield exceptions.
+ */
+sealed class ShieldException(message: String) : Exception(message) {
+    class InvalidKeySize : ShieldException("Invalid key size")
+    class CiphertextTooShort : ShieldException("Ciphertext too short")
+    class AuthenticationFailed : ShieldException("Authentication failed")
+    class ReplayDetected : ShieldException("Replay attack detected")
+    class OutOfOrder : ShieldException("Out of order message")
+    class TokenExpired : ShieldException("Token expired")
+    class InvalidToken : ShieldException("Invalid token")
+    class SessionExpired : ShieldException("Session expired")
+}
