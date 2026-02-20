@@ -1,7 +1,7 @@
 ---
 id: backend-027
 title: FIDO2/WebAuthn core implementation
-status: todo
+status: done
 priority: high
 tags:
 - backend
@@ -187,8 +187,31 @@ webauthn-rs-proto = { version = "0.4", optional = true }
 5. Interoperability tests: Test vectors from FIDO Alliance
 
 ---
-**Session Handoff** (fill when done):
-- Changed: [files/functions modified]
-- Causality: [what triggers what]
-- Verify: [how to test this works]
-- Next: [context for dependent tasks]
+**Session Handoff**:
+- Changed:
+  - `shield-core/src/fido2/` - Complete FIDO2/WebAuthn module (5 files, ~700 lines)
+  - `error.rs` - Fido2Error types with Shield integration
+  - `config.rs` - WebAuthnConfig and CredentialStore trait
+  - `credential.rs` - StoredCredential + ShieldCredentialStore with Shield encryption
+  - `manager.rs` - Fido2Manager with registration/authentication flows
+  - `mod.rs` - Public API exports
+  - `shield-core/src/lib.rs` - Added fido2 module export with feature gate
+- Causality:
+  - Fido2Manager generates challenges → stores in memory → validates on verification
+  - Registration: challenge → client creates credential → server verifies → Shield encrypts → store
+  - Authentication: challenge → client signs → server verifies signature + counter → update stored counter
+  - ShieldCredentialStore encrypts all credentials with Shield before storage
+  - Counter validation prevents replay attacks (counter must increase)
+- Verify:
+  - `cargo test --features fido2` - All 6 tests pass ✅
+  - test_registration_flow - Complete registration workflow
+  - test_authentication_flow - Complete auth workflow
+  - test_counter_replay_protection - Prevents replay attacks
+  - test_credential_store_roundtrip - Shield encryption/decryption
+  - test_credential_update_counter - Counter updates work
+  - test_credential_delete - Deletion works correctly
+- Next:
+  - **api-006**: Implement FastAPI endpoints for FIDO2 registration/authentication
+  - Use Fido2Manager for challenge generation and verification
+  - Add session management for challenges (Redis recommended for production)
+  - Add rate limiting and CORS for browser clients

@@ -47,6 +47,8 @@ pub mod channel_async;
 pub mod confidential;
 mod error;
 mod exchange;
+#[cfg(feature = "fido2")]
+pub mod fido2;
 mod random;
 mod group;
 mod identity;
