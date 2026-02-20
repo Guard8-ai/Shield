@@ -53,6 +53,8 @@ mod random;
 mod group;
 mod identity;
 pub mod password;
+#[cfg(feature = "pgvector")]
+pub mod pgvector;
 mod ratchet;
 mod rotation;
 mod shield;
