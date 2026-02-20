@@ -1,7 +1,7 @@
 ---
 id: backend-029
 title: Python Shield v2 implementation
-status: todo
+status: done
 priority: critical
 tags:
 - backend
