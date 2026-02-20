@@ -51,11 +51,6 @@ function shieldMiddleware(options) {
             return next();
         }
 
-        // Check for bypass header
-        if (req.headers['x-shield-bypass'] === 'true') {
-            return next();
-        }
-
         // Store original json method
         const originalJson = res.json.bind(res);
 
