@@ -187,6 +187,11 @@ class Shield:
             if MIN_TIMESTAMP_MS <= timestamp_ms <= MAX_TIMESTAMP_MS:
                 # v2 format detected
                 pad_len = decrypted[16]
+
+                # Validate padding length is within protocol bounds (SECURITY: CVE-PENDING)
+                if pad_len < MIN_PADDING or pad_len > MAX_PADDING:
+                    return None
+
                 data_start = V2_HEADER_SIZE + pad_len
 
                 if len(decrypted) < data_start:

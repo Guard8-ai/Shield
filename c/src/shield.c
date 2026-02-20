@@ -496,6 +496,14 @@ uint8_t *shield_decrypt(const shield_t *ctx, const uint8_t *ciphertext, size_t c
         if (timestamp_ms >= SHIELD_MIN_TIMESTAMP_MS && timestamp_ms <= SHIELD_MAX_TIMESTAMP_MS) {
             /* v2 format detected */
             pad_len = decrypted[16];
+
+            /* Validate padding length is within protocol bounds (SECURITY: CVE-PENDING) */
+            if (pad_len < SHIELD_MIN_PADDING || pad_len > SHIELD_MAX_PADDING) {
+                free(decrypted);
+                if (err) *err = SHIELD_ERR_AUTHENTICATION_FAILED;
+                return NULL;
+            }
+
             data_start = SHIELD_V2_HEADER_SIZE + pad_len;
 
             if (data_len < data_start) {

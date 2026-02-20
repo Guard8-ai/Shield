@@ -278,6 +278,12 @@ func DecryptWithKey(key, encrypted []byte, maxAgeMs *int64) ([]byte, error) {
 		if timestampMs >= MinTimestampMs && timestampMs <= MaxTimestampMs {
 			// v2 format detected
 			padLen := int(decrypted[16])
+
+			// Validate padding length is within protocol bounds (SECURITY: CVE-PENDING)
+			if padLen < MinPadding || padLen > MaxPadding {
+				return nil, ErrAuthenticationFailed
+			}
+
 			dataStart := V2HeaderSize + padLen
 
 			if len(decrypted) < dataStart {
