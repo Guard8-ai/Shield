@@ -304,7 +304,7 @@ func (s *Session) Decrypt(ciphertext []byte) ([]byte, error) {
 	if s.IsExpired() {
 		return nil, ErrSessionExpired
 	}
-	return DecryptWithKey(s.key[:], ciphertext)
+	return DecryptWithKey(s.key[:], ciphertext, nil)
 }
 
 // Key returns the session key.

@@ -17,6 +17,7 @@ import os
 import hmac
 import hashlib
 import struct
+import time
 from typing import Optional, Union
 
 # Key derivation iterations (higher = more secure, slower)
@@ -27,6 +28,15 @@ NONCE_SIZE = 16
 MAC_SIZE = 16
 COUNTER_SIZE = 8
 
+# V2 constants
+V2_HEADER_SIZE = 17  # counter(8) + timestamp(8) + pad_len(1)
+MIN_PADDING = 32
+MAX_PADDING = 128
+
+# Timestamp range for v2 detection (2020-2100 in milliseconds)
+MIN_TIMESTAMP_MS = 1_577_836_800_000
+MAX_TIMESTAMP_MS = 4_102_444_800_000
+
 
 class Shield:
     """
@@ -35,6 +45,10 @@ class Shield:
     Uses password-derived keys with PBKDF2 and encrypts using
     a SHA256-based stream cipher with HMAC-SHA256 authentication.
     Breaking requires 2^256 operations - no shortcut exists.
+
+    Version 2 adds replay protection and length obfuscation:
+    - Timestamp validation prevents replay attacks
+    - Random padding (32-128 bytes) obfuscates message length
 
     Example:
         >>> s = Shield("my_password", "github.com")
@@ -49,6 +63,7 @@ class Shield:
         service: str,
         salt: Optional[bytes] = None,
         iterations: int = PBKDF2_ITERATIONS,
+        max_age_ms: Optional[int] = 60_000,
     ):
         """
         Initialize Shield with password and service name.
@@ -58,6 +73,8 @@ class Shield:
             service: Service identifier (e.g., "github.com")
             salt: Optional custom salt (defaults to SHA256(service))
             iterations: PBKDF2 iterations (default: 100,000)
+            max_age_ms: Maximum message age in milliseconds for replay protection
+                       (default: 60000 = 60 seconds, None = disabled)
         """
         if salt is None:
             salt = hashlib.sha256(service.encode()).digest()
@@ -66,6 +83,7 @@ class Shield:
             "sha256", password.encode(), salt, iterations
         )
         self._counter = 0
+        self._max_age_ms = max_age_ms
 
     @classmethod
     def with_key(cls, key: bytes) -> "Shield":
@@ -87,11 +105,14 @@ class Shield:
         instance = cls.__new__(cls)
         instance._key = key
         instance._counter = 0
+        instance._max_age_ms = 60_000
         return instance
 
     def encrypt(self, plaintext: bytes) -> bytes:
         """
-        Encrypt data.
+        Encrypt data (v2 format with replay protection and length obfuscation).
+
+        Inner format: counter(8) || timestamp_ms(8) || pad_len(1) || random_padding(32-128) || plaintext
 
         Args:
             plaintext: Data to encrypt
@@ -103,8 +124,17 @@ class Shield:
         counter_bytes = struct.pack("<Q", self._counter)
         self._counter += 1
 
-        # Data to encrypt: counter || plaintext
-        data = counter_bytes + plaintext
+        # Timestamp in milliseconds since Unix epoch
+        timestamp_ms = int(time.time() * 1000)
+        timestamp_bytes = struct.pack("<Q", timestamp_ms)
+
+        # Random padding: 32-128 bytes
+        pad_len = int.from_bytes(os.urandom(1), "little") % (MAX_PADDING - MIN_PADDING + 1) + MIN_PADDING
+        pad_len_byte = struct.pack("B", pad_len)
+        padding = os.urandom(pad_len)
+
+        # Data to encrypt: counter || timestamp || pad_len || padding || plaintext
+        data = counter_bytes + timestamp_bytes + pad_len_byte + padding + plaintext
 
         # Generate keystream
         keystream = _generate_keystream(self._key, nonce, len(data))
@@ -121,7 +151,64 @@ class Shield:
 
     def decrypt(self, encrypted: bytes) -> Optional[bytes]:
         """
-        Decrypt and verify data.
+        Decrypt and verify data (auto-detects v1/v2 format).
+
+        Args:
+            encrypted: Ciphertext from encrypt()
+
+        Returns:
+            Plaintext bytes, or None if authentication fails or replay detected
+        """
+        min_size = NONCE_SIZE + COUNTER_SIZE + MAC_SIZE
+        if len(encrypted) < min_size:
+            return None
+
+        nonce = encrypted[:NONCE_SIZE]
+        ciphertext = encrypted[NONCE_SIZE:-MAC_SIZE]
+        mac = encrypted[-MAC_SIZE:]
+
+        # Verify MAC first (constant-time)
+        expected_mac = hmac.new(
+            self._key, nonce + ciphertext, hashlib.sha256
+        ).digest()[:MAC_SIZE]
+
+        if not hmac.compare_digest(mac, expected_mac):
+            return None
+
+        # Decrypt
+        keystream = _generate_keystream(self._key, nonce, len(ciphertext))
+        decrypted = bytes(c ^ k for c, k in zip(ciphertext, keystream))
+
+        # Auto-detect v2 by timestamp range (2020-2100)
+        if len(decrypted) >= V2_HEADER_SIZE:
+            timestamp_bytes = decrypted[8:16]
+            timestamp_ms = struct.unpack("<Q", timestamp_bytes)[0]
+
+            if MIN_TIMESTAMP_MS <= timestamp_ms <= MAX_TIMESTAMP_MS:
+                # v2 format detected
+                pad_len = decrypted[16]
+                data_start = V2_HEADER_SIZE + pad_len
+
+                if len(decrypted) < data_start:
+                    return None
+
+                # Replay protection
+                if self._max_age_ms is not None:
+                    now_ms = int(time.time() * 1000)
+                    age = now_ms - timestamp_ms
+
+                    # Reject if too far in future (>5s clock skew) or too old
+                    if timestamp_ms > now_ms + 5000 or age > self._max_age_ms:
+                        return None
+
+                return decrypted[data_start:]
+
+        # v1 format: skip counter (8 bytes)
+        return decrypted[COUNTER_SIZE:]
+
+    def decrypt_v1(self, encrypted: bytes) -> Optional[bytes]:
+        """
+        Decrypt v1 format explicitly (for legacy compatibility).
 
         Args:
             encrypted: Ciphertext from encrypt()
@@ -149,7 +236,7 @@ class Shield:
         keystream = _generate_keystream(self._key, nonce, len(ciphertext))
         decrypted = bytes(c ^ k for c, k in zip(ciphertext, keystream))
 
-        # Skip counter prefix
+        # v1 format: skip counter (8 bytes)
         return decrypted[COUNTER_SIZE:]
 
     @property

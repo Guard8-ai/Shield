@@ -134,7 +134,7 @@ func (km *KeyRotationManager) Decrypt(ciphertext []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	return DecryptWithKey(vk.Key, ciphertext[4:])
+	return DecryptWithKey(vk.Key, ciphertext[4:], nil)
 }
 
 // NeedsRotation checks if rotation is due.

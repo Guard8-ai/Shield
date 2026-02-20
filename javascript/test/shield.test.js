@@ -68,6 +68,195 @@ describe('Shield', () => {
         const s2 = new Shield('password', 'service');
         assert.deepEqual(s1.key, s2.key);
     });
+
+    test('v2 roundtrip', () => {
+        const s = new Shield('password', 'service', { maxAgeMs: 60000 });
+        const plaintext = Buffer.from('Test v2 message');
+        const encrypted = s.encrypt(plaintext);
+        const decrypted = s.decrypt(encrypted);
+        assert.deepEqual(decrypted, plaintext);
+    });
+
+    test('v2 replay protection fresh', () => {
+        const s = new Shield('password', 'service', { maxAgeMs: 60000 });
+        const plaintext = Buffer.from('Fresh message');
+        const encrypted = s.encrypt(plaintext);
+        const decrypted = s.decrypt(encrypted);
+        assert.deepEqual(decrypted, plaintext);
+    });
+
+    test('v2 replay protection expired', () => {
+        const s = new Shield('password', 'service', { maxAgeMs: 1000 });
+        const plaintext = Buffer.from('Old message');
+
+        // Manually create expired message (2 seconds old)
+        const nonce = crypto.randomBytes(16);
+        const counterBytes = Buffer.alloc(8);
+        counterBytes.writeBigUInt64LE(BigInt(0));
+        const oldTimestampMs = Date.now() - 2000;
+        const timestampBytes = Buffer.alloc(8);
+        timestampBytes.writeBigUInt64LE(BigInt(oldTimestampMs));
+        const padLen = 32;
+        const padLenByte = Buffer.alloc(1);
+        padLenByte[0] = padLen;
+        const padding = crypto.randomBytes(padLen);
+
+        const data = Buffer.concat([counterBytes, timestampBytes, padLenByte, padding, plaintext]);
+
+        const { generateKeystream } = require('../src/shield');
+        const keystream = generateKeystream(s.key, nonce, data.length);
+        const ciphertext = Buffer.alloc(data.length);
+        for (let i = 0; i < data.length; i++) {
+            ciphertext[i] = data[i] ^ keystream[i];
+        }
+        const mac = crypto.createHmac('sha256', s.key)
+            .update(Buffer.concat([nonce, ciphertext]))
+            .digest()
+            .slice(0, 16);
+        const encrypted = Buffer.concat([nonce, ciphertext, mac]);
+
+        // Should reject expired message
+        const decrypted = s.decrypt(encrypted);
+        assert.equal(decrypted, null);
+    });
+
+    test('v2 length variation', () => {
+        const s = new Shield('password', 'service');
+        const plaintext = Buffer.from('Same message');
+
+        const lengths = new Set();
+        for (let i = 0; i < 10; i++) {
+            const encrypted = s.encrypt(plaintext);
+            lengths.add(encrypted.length);
+        }
+
+        // Should have multiple different lengths due to random padding (32-128)
+        assert.ok(lengths.size > 1);
+    });
+
+    test('v1 backward compatibility', () => {
+        const s = new Shield('password', 'service');
+        const plaintext = Buffer.from('v1 message');
+
+        // Manually create v1 ciphertext: counter(8) || plaintext
+        const nonce = crypto.randomBytes(16);
+        const counterBytes = Buffer.alloc(8);
+        counterBytes.writeBigUInt64LE(BigInt(0));
+        const data = Buffer.concat([counterBytes, plaintext]);
+
+        const { generateKeystream } = require('../src/shield');
+        const keystream = generateKeystream(s.key, nonce, data.length);
+        const ciphertext = Buffer.alloc(data.length);
+        for (let i = 0; i < data.length; i++) {
+            ciphertext[i] = data[i] ^ keystream[i];
+        }
+        const mac = crypto.createHmac('sha256', s.key)
+            .update(Buffer.concat([nonce, ciphertext]))
+            .digest()
+            .slice(0, 16);
+        const encrypted = Buffer.concat([nonce, ciphertext, mac]);
+
+        // Should auto-detect and decrypt as v1
+        const decrypted = s.decrypt(encrypted);
+        assert.deepEqual(decrypted, plaintext);
+    });
+
+    test('decrypt v1 explicit', () => {
+        const s = new Shield('password', 'service');
+        const plaintext = Buffer.from('v1 explicit');
+
+        // Create v1 ciphertext
+        const nonce = crypto.randomBytes(16);
+        const counterBytes = Buffer.alloc(8);
+        counterBytes.writeBigUInt64LE(BigInt(0));
+        const data = Buffer.concat([counterBytes, plaintext]);
+
+        const { generateKeystream } = require('../src/shield');
+        const keystream = generateKeystream(s.key, nonce, data.length);
+        const ciphertext = Buffer.alloc(data.length);
+        for (let i = 0; i < data.length; i++) {
+            ciphertext[i] = data[i] ^ keystream[i];
+        }
+        const mac = crypto.createHmac('sha256', s.key)
+            .update(Buffer.concat([nonce, ciphertext]))
+            .digest()
+            .slice(0, 16);
+        const encrypted = Buffer.concat([nonce, ciphertext, mac]);
+
+        // Decrypt using explicit v1 method
+        const decrypted = s.decryptV1(encrypted);
+        assert.deepEqual(decrypted, plaintext);
+    });
+
+    test('no fallback on expired v2', () => {
+        const s = new Shield('password', 'service', { maxAgeMs: 500 });
+        const plaintext = Buffer.from('expired v2');
+
+        // Create expired v2 message (2 seconds old)
+        const oldTimestampMs = Date.now() - 2000;
+        const nonce = crypto.randomBytes(16);
+        const counterBytes = Buffer.alloc(8);
+        counterBytes.writeBigUInt64LE(BigInt(0));
+        const timestampBytes = Buffer.alloc(8);
+        timestampBytes.writeBigUInt64LE(BigInt(oldTimestampMs));
+        const padLen = 32;
+        const padLenByte = Buffer.alloc(1);
+        padLenByte[0] = padLen;
+        const padding = crypto.randomBytes(padLen);
+
+        const data = Buffer.concat([counterBytes, timestampBytes, padLenByte, padding, plaintext]);
+
+        const { generateKeystream } = require('../src/shield');
+        const keystream = generateKeystream(s.key, nonce, data.length);
+        const ciphertext = Buffer.alloc(data.length);
+        for (let i = 0; i < data.length; i++) {
+            ciphertext[i] = data[i] ^ keystream[i];
+        }
+        const mac = crypto.createHmac('sha256', s.key)
+            .update(Buffer.concat([nonce, ciphertext]))
+            .digest()
+            .slice(0, 16);
+        const encrypted = Buffer.concat([nonce, ciphertext, mac]);
+
+        // Should reject (not fallback to v1)
+        const decrypted = s.decrypt(encrypted);
+        assert.equal(decrypted, null);
+    });
+
+    test('v2 disabled replay protection', () => {
+        const s = new Shield('password', 'service', { maxAgeMs: null });
+        const plaintext = Buffer.from('old but valid');
+
+        // Create message with very old timestamp
+        const oldTimestampMs = Date.now() - 100000;
+        const nonce = crypto.randomBytes(16);
+        const counterBytes = Buffer.alloc(8);
+        counterBytes.writeBigUInt64LE(BigInt(0));
+        const timestampBytes = Buffer.alloc(8);
+        timestampBytes.writeBigUInt64LE(BigInt(oldTimestampMs));
+        const padLen = 32;
+        const padLenByte = Buffer.alloc(1);
+        padLenByte[0] = padLen;
+        const padding = crypto.randomBytes(padLen);
+
+        const data = Buffer.concat([counterBytes, timestampBytes, padLenByte, padding, plaintext]);
+
+        const { generateKeystream } = require('../src/shield');
+        const keystream = generateKeystream(s.key, nonce, data.length);
+        const ciphertext = Buffer.alloc(data.length);
+        for (let i = 0; i < data.length; i++) {
+            ciphertext[i] = data[i] ^ keystream[i];
+        }
+        const mac = crypto.createHmac('sha256', s.key)
+            .update(Buffer.concat([nonce, ciphertext]))
+            .digest()
+            .slice(0, 16);
+        const encrypted = Buffer.concat([nonce, ciphertext, mac]);
+
+        // Should decrypt successfully (no age check)
+        const decrypted = s.decrypt(encrypted);
+        assert.deepEqual(decrypted, plaintext);
+    });
 });
 
 describe('quickEncrypt/quickDecrypt', () => {

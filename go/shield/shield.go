@@ -12,6 +12,7 @@ import (
 	"crypto/subtle"
 	"encoding/binary"
 	"errors"
+	"time"
 
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -31,6 +32,20 @@ const (
 	MinCiphertextSize = NonceSize + CounterSize + MACSize
 	// MinQuickCiphertextSize is the minimum valid ciphertext size (QuickEncrypt without counter).
 	MinQuickCiphertextSize = NonceSize + MACSize
+
+	// V2 constants
+	// V2HeaderSize is the size of v2 header (counter + timestamp + pad_len).
+	V2HeaderSize = 17 // counter(8) + timestamp(8) + pad_len(1)
+	// MinPadding is the minimum padding size in v2 format.
+	MinPadding = 32
+	// MaxPadding is the maximum padding size in v2 format.
+	MaxPadding = 128
+	// MinTimestampMs is the minimum valid timestamp for v2 detection (2020-01-01 in ms).
+	MinTimestampMs = 1577836800000
+	// MaxTimestampMs is the maximum valid timestamp for v2 detection (2100-01-01 in ms).
+	MaxTimestampMs = 4102444800000
+	// DefaultMaxAgeMs is the default maximum message age in milliseconds.
+	DefaultMaxAgeMs = 60000
 )
 
 var (
@@ -44,15 +59,17 @@ var (
 
 // Shield provides password-based encryption.
 type Shield struct {
-	key [KeySize]byte
+	key      [KeySize]byte
+	maxAgeMs *int64 // nil = disabled, otherwise maximum age in milliseconds
 }
 
 // New creates a Shield instance from password and service name.
-func New(password, service string) *Shield {
+// maxAgeMs: maximum message age in milliseconds (use nil to disable replay protection).
+func New(password, service string, maxAgeMs *int64) *Shield {
 	salt := sha256.Sum256([]byte(service))
 	key := pbkdf2.Key([]byte(password), salt[:], Iterations, KeySize, sha256.New)
 
-	s := &Shield{}
+	s := &Shield{maxAgeMs: maxAgeMs}
 	copy(s.key[:], key)
 	return s
 }
@@ -62,20 +79,26 @@ func WithKey(key []byte) (*Shield, error) {
 	if len(key) != KeySize {
 		return nil, ErrInvalidKeySize
 	}
-	s := &Shield{}
+	defaultMaxAge := int64(DefaultMaxAgeMs)
+	s := &Shield{maxAgeMs: &defaultMaxAge}
 	copy(s.key[:], key)
 	return s, nil
 }
 
-// Encrypt encrypts plaintext and returns authenticated ciphertext.
-// Format: nonce(16) || counter(8) || encrypted_plaintext || mac(16)
+// Encrypt encrypts plaintext and returns authenticated ciphertext (v2 format).
+// Format: nonce(16) || encrypted(counter(8) || timestamp(8) || pad_len(1) || padding(32-128) || plaintext) || mac(16)
 func (s *Shield) Encrypt(plaintext []byte) ([]byte, error) {
 	return EncryptWithKey(s.key[:], plaintext)
 }
 
-// Decrypt decrypts and verifies ciphertext.
+// Decrypt decrypts and verifies ciphertext (auto-detects v1/v2).
 func (s *Shield) Decrypt(ciphertext []byte) ([]byte, error) {
-	return DecryptWithKey(s.key[:], ciphertext)
+	return DecryptWithKey(s.key[:], ciphertext, s.maxAgeMs)
+}
+
+// DecryptV1 explicitly decrypts v1 format (for legacy compatibility).
+func (s *Shield) DecryptV1(ciphertext []byte) ([]byte, error) {
+	return DecryptV1WithKey(s.key[:], ciphertext)
 }
 
 // Key returns the derived key.
@@ -154,7 +177,8 @@ func QuickDecrypt(key, encrypted []byte) ([]byte, error) {
 	return decrypted, nil
 }
 
-// EncryptWithKey encrypts using an explicit key.
+// EncryptWithKey encrypts using an explicit key (v2 format).
+// Inner format: counter(8) || timestamp_ms(8) || pad_len(1) || random_padding(32-128) || plaintext
 func EncryptWithKey(key, plaintext []byte) ([]byte, error) {
 	// Generate random nonce
 	nonce := make([]byte, NonceSize)
@@ -166,10 +190,35 @@ func EncryptWithKey(key, plaintext []byte) ([]byte, error) {
 	counter := make([]byte, 8)
 	binary.LittleEndian.PutUint64(counter, 0)
 
-	// Data to encrypt: counter || plaintext
-	dataToEncrypt := make([]byte, 8+len(plaintext))
-	copy(dataToEncrypt[:8], counter)
-	copy(dataToEncrypt[8:], plaintext)
+	// Timestamp in milliseconds since Unix epoch
+	timestampMs := time.Now().UnixMilli()
+	timestamp := make([]byte, 8)
+	binary.LittleEndian.PutUint64(timestamp, uint64(timestampMs))
+
+	// Random padding: 32-128 bytes
+	randomByte := make([]byte, 1)
+	if _, err := rand.Read(randomByte); err != nil {
+		return nil, err
+	}
+	padLen := int(randomByte[0])%(MaxPadding-MinPadding+1) + MinPadding
+	padLenByte := []byte{byte(padLen)}
+	padding := make([]byte, padLen)
+	if _, err := rand.Read(padding); err != nil {
+		return nil, err
+	}
+
+	// Data to encrypt: counter || timestamp || pad_len || padding || plaintext
+	dataToEncrypt := make([]byte, 8+8+1+padLen+len(plaintext))
+	pos := 0
+	copy(dataToEncrypt[pos:], counter)
+	pos += 8
+	copy(dataToEncrypt[pos:], timestamp)
+	pos += 8
+	copy(dataToEncrypt[pos:], padLenByte)
+	pos += 1
+	copy(dataToEncrypt[pos:], padding)
+	pos += padLen
+	copy(dataToEncrypt[pos:], plaintext)
 
 	// Generate keystream and XOR
 	keystream := generateKeystream(key, nonce, len(dataToEncrypt))
@@ -193,8 +242,8 @@ func EncryptWithKey(key, plaintext []byte) ([]byte, error) {
 	return result, nil
 }
 
-// DecryptWithKey decrypts using an explicit key.
-func DecryptWithKey(key, encrypted []byte) ([]byte, error) {
+// DecryptWithKey decrypts using an explicit key (auto-detects v1/v2).
+func DecryptWithKey(key, encrypted []byte, maxAgeMs *int64) ([]byte, error) {
 	if len(encrypted) < MinCiphertextSize {
 		return nil, ErrCiphertextTooShort
 	}
@@ -221,7 +270,68 @@ func DecryptWithKey(key, encrypted []byte) ([]byte, error) {
 		decrypted[i] = ciphertext[i] ^ keystream[i]
 	}
 
-	// Skip counter prefix (8 bytes)
+	// Auto-detect v2 by timestamp range (2020-2100)
+	if len(decrypted) >= V2HeaderSize {
+		timestampBytes := decrypted[8:16]
+		timestampMs := binary.LittleEndian.Uint64(timestampBytes)
+
+		if timestampMs >= MinTimestampMs && timestampMs <= MaxTimestampMs {
+			// v2 format detected
+			padLen := int(decrypted[16])
+			dataStart := V2HeaderSize + padLen
+
+			if len(decrypted) < dataStart {
+				return nil, ErrCiphertextTooShort
+			}
+
+			// Replay protection
+			if maxAgeMs != nil {
+				nowMs := time.Now().UnixMilli()
+				age := nowMs - int64(timestampMs)
+
+				// Reject if too far in future (>5s clock skew) or too old
+				if int64(timestampMs) > nowMs+5000 || age > *maxAgeMs {
+					return nil, ErrAuthenticationFailed
+				}
+			}
+
+			return decrypted[dataStart:], nil
+		}
+	}
+
+	// v1 format: skip counter (8 bytes)
+	return decrypted[8:], nil
+}
+
+// DecryptV1WithKey explicitly decrypts v1 format (for legacy compatibility).
+func DecryptV1WithKey(key, encrypted []byte) ([]byte, error) {
+	if len(encrypted) < MinCiphertextSize {
+		return nil, ErrCiphertextTooShort
+	}
+
+	// Parse components
+	nonce := encrypted[:NonceSize]
+	ciphertext := encrypted[NonceSize : len(encrypted)-MACSize]
+	receivedMAC := encrypted[len(encrypted)-MACSize:]
+
+	// Verify MAC
+	mac := hmac.New(sha256.New, key)
+	mac.Write(nonce)
+	mac.Write(ciphertext)
+	expectedMAC := mac.Sum(nil)[:MACSize]
+
+	if subtle.ConstantTimeCompare(receivedMAC, expectedMAC) != 1 {
+		return nil, ErrAuthenticationFailed
+	}
+
+	// Decrypt
+	keystream := generateKeystream(key, nonce, len(ciphertext))
+	decrypted := make([]byte, len(ciphertext))
+	for i := range ciphertext {
+		decrypted[i] = ciphertext[i] ^ keystream[i]
+	}
+
+	// v1 format: skip counter (8 bytes)
 	return decrypted[8:], nil
 }
 

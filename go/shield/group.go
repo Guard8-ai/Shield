@@ -63,7 +63,7 @@ func JoinGroup(memberID string, memberKey, encryptedGroupKey []byte) (*GroupEncr
 	copy(ge.memberKey[:], memberKey)
 
 	// Decrypt group key
-	groupKey, err := DecryptWithKey(memberKey, encryptedGroupKey)
+	groupKey, err := DecryptWithKey(memberKey, encryptedGroupKey, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (ge *GroupEncryption) Encrypt(plaintext []byte) ([]byte, error) {
 
 // Decrypt decrypts a group message.
 func (ge *GroupEncryption) Decrypt(ciphertext []byte) ([]byte, error) {
-	return DecryptWithKey(ge.groupKey[:], ciphertext)
+	return DecryptWithKey(ge.groupKey[:], ciphertext, nil)
 }
 
 // GroupKey returns the group key (for backup/admin).
@@ -219,13 +219,13 @@ func ReceiveBroadcast(msg *BroadcastMessage, recipientID string, recipientKey []
 	}
 
 	// Decrypt session key
-	sessionKey, err := DecryptWithKey(recipientKey, encryptedSessionKey)
+	sessionKey, err := DecryptWithKey(recipientKey, encryptedSessionKey, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	// Decrypt message
-	return DecryptWithKey(sessionKey, msg.EncryptedMessage)
+	return DecryptWithKey(sessionKey, msg.EncryptedMessage, nil)
 }
 
 // VerifySender verifies the sender proof.
