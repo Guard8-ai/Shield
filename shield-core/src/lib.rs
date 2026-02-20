@@ -49,6 +49,7 @@ mod error;
 mod exchange;
 #[cfg(feature = "fido2")]
 pub mod fido2;
+pub mod fingerprint;
 mod random;
 mod group;
 mod identity;
@@ -69,6 +70,7 @@ pub use channel::{ChannelConfig, ShieldChannel, ShieldListener};
 pub use channel_async::AsyncShieldChannel;
 pub use error::{Result, ShieldError};
 pub use exchange::{KeySplitter, PAKEExchange, QRExchange};
+pub use fingerprint::FingerprintMode;
 pub use group::{BroadcastEncryption, EncryptedBroadcast, EncryptedGroupMessage, GroupEncryption};
 pub use identity::{Identity, IdentityProvider, SecureSession, Session};
 pub use ratchet::RatchetSession;

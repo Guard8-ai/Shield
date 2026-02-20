@@ -103,6 +103,65 @@ impl Shield {
         }
     }
 
+    /// Create Shield with hardware fingerprinting (device-bound encryption).
+    ///
+    /// Derives keys from password + hardware identifier, binding encryption to the physical device.
+    /// Keys cannot be transferred to other hardware without the correct fingerprint.
+    ///
+    /// # Arguments
+    /// * `password` - User's password
+    /// * `service` - Service identifier (e.g., "github.com")
+    /// * `mode` - Fingerprint collection mode (Motherboard, CPU, or Combined)
+    ///
+    /// # Example
+    /// ```
+    /// use shield_core::{Shield, FingerprintMode};
+    /// let shield = Shield::with_fingerprint("password", "example.com", FingerprintMode::Combined)?;
+    /// # Ok::<(), shield_core::ShieldError>(())
+    /// ```
+    ///
+    /// # Errors
+    /// Returns error if hardware fingerprint cannot be collected.
+    ///
+    /// # Security
+    /// - **Binding Strength**: MEDIUM (hardware IDs are stable but replaceable)
+    /// - **Spoofability**: LOW-MEDIUM (requires hardware access or VM manipulation)
+    /// - **Portability**: NONE (keys are device-bound by design)
+    pub fn with_fingerprint(
+        password: &str,
+        service: &str,
+        mode: crate::fingerprint::FingerprintMode,
+    ) -> Result<Self> {
+        // Collect hardware fingerprint
+        let fingerprint = crate::fingerprint::collect_fingerprint(mode)?;
+
+        // Combine password with fingerprint
+        let combined_password = if fingerprint.is_empty() {
+            password.to_string()
+        } else {
+            format!("{}:{}", password, fingerprint)
+        };
+
+        // Derive salt from service name
+        let salt = ring::digest::digest(&ring::digest::SHA256, service.as_bytes());
+
+        // Derive key using PBKDF2 with combined password
+        let mut key = [0u8; 32];
+        pbkdf2::derive(
+            pbkdf2::PBKDF2_HMAC_SHA256,
+            NonZeroU32::new(PBKDF2_ITERATIONS).unwrap(),
+            salt.as_ref(),
+            combined_password.as_bytes(),
+            &mut key,
+        );
+
+        Ok(Self {
+            key,
+            counter: 0,
+            max_age_ms: Some(60_000),
+        })
+    }
+
     /// Set maximum message age for replay protection.
     ///
     /// # Arguments

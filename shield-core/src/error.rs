@@ -75,4 +75,8 @@ pub enum ShieldError {
     /// Connection closed.
     #[error("connection closed")]
     ConnectionClosed,
+
+    /// Hardware fingerprint unavailable.
+    #[error("hardware fingerprint unavailable (VM or restricted access)")]
+    FingerprintUnavailable,
 }

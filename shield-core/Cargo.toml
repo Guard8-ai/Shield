@@ -69,6 +69,8 @@ webauthn-rs-proto = { version = "0.4", optional = true }
 tokio-postgres = { version = "0.7", optional = true }
 postgres-types = { version = "0.2", optional = true }
 chrono = { version = "0.4", optional = true }
+# Hardware fingerprinting (v2.1)
+md5 = "0.7"
 
 # YOU ARE NOT ALLOWED TO CHANGE THIS FILE UNLESS EXPLICITLY ASKED.
 [dev-dependencies]

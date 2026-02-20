@@ -36,6 +36,7 @@ from shield.rotation import KeyRotationManager
 from shield.group import GroupEncryption, BroadcastEncryption
 from shield.identity import IdentityProvider, Identity, Session, SecureSession
 from shield.channel import ShieldChannel, ChannelConfig, ShieldListener
+from shield.fingerprint import FingerprintMode, FingerprintError
 
 __all__ = [
     # Core
@@ -70,4 +71,7 @@ __all__ = [
     "ShieldChannel",
     "ChannelConfig",
     "ShieldListener",
+    # Hardware Fingerprinting (v2.1)
+    "FingerprintMode",
+    "FingerprintError",
 ]

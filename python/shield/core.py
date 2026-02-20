@@ -108,6 +108,57 @@ class Shield:
         instance._max_age_ms = 60_000
         return instance
 
+    @classmethod
+    def with_fingerprint(cls, password: str, service: str, mode: str = "combined") -> "Shield":
+        """
+        Create Shield with hardware fingerprinting (device-bound encryption).
+
+        Derives keys from password + hardware identifier, binding encryption to
+        the physical device. Keys cannot be transferred to other hardware without
+        the correct fingerprint.
+
+        Args:
+            password: User's password
+            service: Service identifier (e.g., "github.com")
+            mode: Fingerprint mode - "none", "motherboard", "cpu", or "combined"
+
+        Returns:
+            Shield instance with device-bound key
+
+        Raises:
+            FingerprintError: If hardware identifiers cannot be collected
+
+        Security:
+            - Binding Strength: MEDIUM (hardware IDs are stable but replaceable)
+            - Spoofability: LOW-MEDIUM (requires hardware access or VM manipulation)
+            - Portability: NONE (keys are device-bound by design)
+
+        Example:
+            >>> s = Shield.with_fingerprint("password", "github.com", "combined")
+            >>> encrypted = s.encrypt(b"secret")
+        """
+        from .fingerprint import collect_fingerprint, FingerprintMode
+
+        # Map string mode to enum
+        mode_map = {
+            "none": FingerprintMode.NONE,
+            "motherboard": FingerprintMode.MOTHERBOARD,
+            "cpu": FingerprintMode.CPU,
+            "combined": FingerprintMode.COMBINED,
+        }
+        fingerprint_mode = mode_map.get(mode.lower())
+        if fingerprint_mode is None:
+            raise ValueError(f"Invalid fingerprint mode: {mode}")
+
+        # Collect hardware fingerprint
+        fingerprint = collect_fingerprint(fingerprint_mode)
+
+        # Combine password with fingerprint
+        combined_password = f"{password}:{fingerprint}" if fingerprint else password
+
+        # Create instance with combined password
+        return cls(combined_password, service)
+
     def encrypt(self, plaintext: bytes) -> bytes:
         """
         Encrypt data (v2 format with replay protection and length obfuscation).
