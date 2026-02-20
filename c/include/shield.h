@@ -24,6 +24,14 @@ extern "C" {
 #define SHIELD_ITERATIONS    100000
 #define SHIELD_MIN_CIPHERTEXT_SIZE (SHIELD_NONCE_SIZE + 8 + SHIELD_MAC_SIZE)
 
+/* V2 constants */
+#define SHIELD_V2_HEADER_SIZE  17  /* counter(8) + timestamp(8) + pad_len(1) */
+#define SHIELD_MIN_PADDING     32
+#define SHIELD_MAX_PADDING     128
+#define SHIELD_MIN_TIMESTAMP_MS 1577836800000LL  /* 2020-01-01 in ms */
+#define SHIELD_MAX_TIMESTAMP_MS 4102444800000LL  /* 2100-01-01 in ms */
+#define SHIELD_DEFAULT_MAX_AGE_MS 60000LL
+
 /* Error codes */
 typedef enum {
     SHIELD_OK = 0,
@@ -44,6 +52,7 @@ typedef enum {
 /* Shield context */
 typedef struct {
     uint8_t key[SHIELD_KEY_SIZE];
+    int64_t max_age_ms;  /* -1 = disabled */
 } shield_t;
 
 /* Stream cipher context */
@@ -97,14 +106,16 @@ typedef struct {
 /**
  * Initialize Shield from password and service name.
  * Uses PBKDF2-SHA256 with 100,000 iterations.
+ * max_age_ms: -1 to disable replay protection, or milliseconds (default: 60000)
  */
-void shield_init(shield_t *ctx, const char *password, const char *service);
+void shield_init(shield_t *ctx, const char *password, const char *service, int64_t max_age_ms);
 
 /**
  * Initialize Shield with a pre-shared key.
  * Key must be exactly SHIELD_KEY_SIZE bytes.
+ * max_age_ms: -1 to disable replay protection, or milliseconds (default: 60000)
  */
-shield_error_t shield_init_with_key(shield_t *ctx, const uint8_t *key, size_t key_len);
+shield_error_t shield_init_with_key(shield_t *ctx, const uint8_t *key, size_t key_len, int64_t max_age_ms);
 
 /**
  * Encrypt plaintext.
@@ -114,11 +125,18 @@ shield_error_t shield_init_with_key(shield_t *ctx, const uint8_t *key, size_t ke
 uint8_t *shield_encrypt(const shield_t *ctx, const uint8_t *plaintext, size_t plaintext_len, size_t *out_len);
 
 /**
- * Decrypt ciphertext.
+ * Decrypt ciphertext (auto-detects v1/v2).
  * Returns allocated plaintext. Caller must free.
  * out_len receives the plaintext length.
  */
 uint8_t *shield_decrypt(const shield_t *ctx, const uint8_t *ciphertext, size_t ciphertext_len, size_t *out_len, shield_error_t *err);
+
+/**
+ * Decrypt v1 format explicitly (for legacy compatibility).
+ * Returns allocated plaintext. Caller must free.
+ * out_len receives the plaintext length.
+ */
+uint8_t *shield_decrypt_v1(const shield_t *ctx, const uint8_t *ciphertext, size_t ciphertext_len, size_t *out_len, shield_error_t *err);
 
 /**
  * Quick encrypt with explicit key.
