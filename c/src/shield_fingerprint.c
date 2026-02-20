@@ -216,25 +216,97 @@ static shield_fp_error_t get_cpu_id(char *buffer, size_t size) {
 }
 #endif
 
-/* Simple MD5 implementation (for fingerprinting only, not cryptographic use) */
+/* MD5 implementation - standalone, no external dependencies */
+/* Based on RFC 1321 - for fingerprinting only, not cryptographic security */
+
+#define MD5_F(x, y, z) (((x) & (y)) | ((~x) & (z)))
+#define MD5_G(x, y, z) (((x) & (z)) | ((y) & (~z)))
+#define MD5_H(x, y, z) ((x) ^ (y) ^ (z))
+#define MD5_I(x, y, z) ((y) ^ ((x) | (~z)))
+#define MD5_ROTLEFT(a, b) (((a) << (b)) | ((a) >> (32-(b))))
+
+static void md5_transform(uint32_t state[4], const uint8_t block[64]) {
+    uint32_t a, b, c, d, m[16], i, j;
+    static const uint32_t k[64] = {
+        0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+        0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+        0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+        0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+        0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+        0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+        0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+        0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391
+    };
+    static const uint32_t s[64] = {
+        7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+        5,  9, 14, 20, 5,  9, 14, 20, 5,  9, 14, 20, 5,  9, 14, 20,
+        4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+        6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21
+    };
+
+    for (i = 0, j = 0; i < 16; ++i, j += 4)
+        m[i] = (block[j]) | (block[j+1] << 8) | (block[j+2] << 16) | (block[j+3] << 24);
+
+    a = state[0]; b = state[1]; c = state[2]; d = state[3];
+
+    for (i = 0; i < 64; ++i) {
+        uint32_t f, g;
+        if (i < 16) {
+            f = MD5_F(b, c, d); g = i;
+        } else if (i < 32) {
+            f = MD5_G(b, c, d); g = (5*i + 1) % 16;
+        } else if (i < 48) {
+            f = MD5_H(b, c, d); g = (3*i + 5) % 16;
+        } else {
+            f = MD5_I(b, c, d); g = (7*i) % 16;
+        }
+        uint32_t temp = d;
+        d = c; c = b;
+        b = b + MD5_ROTLEFT((a + f + k[i] + m[g]), s[i]);
+        a = temp;
+    }
+
+    state[0] += a; state[1] += b; state[2] += c; state[3] += d;
+}
+
 static void md5_hash(const char *input, char *output) {
-    /* Use system MD5 if available, otherwise return input as-is */
-    /* This is a simplified version - in production, link against OpenSSL or similar */
+    size_t input_len = strlen(input);
+    uint32_t state[4] = {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476};
+    uint8_t buffer[64];
+    size_t i;
+    uint64_t bit_len = input_len * 8;
 
-    /* For now, just copy input (will be replaced with actual MD5 in production) */
-    /* This allows the code to compile without external dependencies */
-    size_t len = strlen(input);
-    if (len > 32) len = 32;
-    strncpy(output, input, len);
-    output[len] = '\0';
+    /* Process full blocks */
+    size_t offset = 0;
+    while (offset + 64 <= input_len) {
+        md5_transform(state, (const uint8_t*)(input + offset));
+        offset += 64;
+    }
 
-    /* TODO: Implement actual MD5 or link against crypto library */
-    /* Example with OpenSSL:
-     * unsigned char digest[16];
-     * MD5((unsigned char*)input, strlen(input), digest);
-     * for (int i = 0; i < 16; i++) {
-     *     sprintf(output + (i * 2), "%02x", digest[i]);
-     * }
-     * output[32] = '\0';
-     */
+    /* Final block with padding */
+    size_t remaining = input_len - offset;
+    memset(buffer, 0, 64);
+    memcpy(buffer, input + offset, remaining);
+    buffer[remaining] = 0x80;
+
+    if (remaining >= 56) {
+        md5_transform(state, buffer);
+        memset(buffer, 0, 64);
+    }
+
+    /* Append length in bits */
+    for (i = 0; i < 8; ++i)
+        buffer[56 + i] = (bit_len >> (i * 8)) & 0xFF;
+
+    md5_transform(state, buffer);
+
+    /* Convert to hex string */
+    for (i = 0; i < 4; ++i) {
+        sprintf(output + (i * 8), "%02x%02x%02x%02x",
+                (state[i]) & 0xFF,
+                (state[i] >> 8) & 0xFF,
+                (state[i] >> 16) & 0xFF,
+                (state[i] >> 24) & 0xFF);
+    }
+    output[32] = '\0';
 }

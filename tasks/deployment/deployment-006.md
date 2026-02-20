@@ -1,7 +1,7 @@
 ---
 id: deployment-006
 title: Update Shield to version 2.1.0
-status: doing
+status: done
 priority: high
 tags:
 - deployment
