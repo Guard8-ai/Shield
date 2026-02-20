@@ -1,0 +1,119 @@
+{
+  "version": "2.0",
+  "description": "Shield v2 cross-language test vectors for byte-for-byte compatibility validation",
+  "test_vectors": [
+    {
+      "name": "v2_basic_roundtrip",
+      "password": "test-password-123",
+      "service": "test.example.com",
+      "plaintext": "Hello, Shield v2!",
+      "plaintext_hex": "48656c6c6f2c20536869656c64207632",
+      "max_age_ms": 60000,
+      "expected_properties": {
+        "format": "v2",
+        "has_timestamp": true,
+        "has_padding": true,
+        "padding_range": [32, 128],
+        "min_ciphertext_size": 97
+      }
+    },
+    {
+      "name": "v2_empty_plaintext",
+      "password": "empty-test",
+      "service": "empty.example.com",
+      "plaintext": "",
+      "plaintext_hex": "",
+      "max_age_ms": 60000,
+      "expected_properties": {
+        "format": "v2",
+        "min_ciphertext_size": 81
+      }
+    },
+    {
+      "name": "v2_large_plaintext",
+      "password": "large-test",
+      "service": "large.example.com",
+      "plaintext": "AAAAAAAAAA",
+      "plaintext_hex": "41414141414141414141",
+      "max_age_ms": 60000,
+      "expected_properties": {
+        "format": "v2",
+        "min_ciphertext_size": 91
+      }
+    },
+    {
+      "name": "v2_disabled_replay_protection",
+      "password": "no-replay",
+      "service": "noreplay.example.com",
+      "plaintext": "No replay protection",
+      "plaintext_hex": "4e6f207265706c61792070726f74656374696f6e",
+      "max_age_ms": null,
+      "expected_properties": {
+        "format": "v2",
+        "replay_protection": false
+      }
+    },
+    {
+      "name": "v1_backward_compat",
+      "password": "v1-compat",
+      "service": "v1.example.com",
+      "plaintext": "Old v1 message",
+      "plaintext_hex": "4f6c64207631206d657373616765",
+      "format": "v1",
+      "expected_properties": {
+        "format": "v1",
+        "has_timestamp": false,
+        "has_padding": false,
+        "min_ciphertext_size": 54
+      }
+    }
+  ],
+  "constants": {
+    "V2_HEADER_SIZE": 17,
+    "MIN_PADDING": 32,
+    "MAX_PADDING": 128,
+    "MIN_TIMESTAMP_MS": 1577836800000,
+    "MAX_TIMESTAMP_MS": 4102444800000,
+    "DEFAULT_MAX_AGE_MS": 60000,
+    "NONCE_SIZE": 16,
+    "MAC_SIZE": 16,
+    "COUNTER_SIZE": 8
+  },
+  "validation_rules": {
+    "v2_format": {
+      "description": "All v2 implementations must produce ciphertext with correct structure",
+      "rules": [
+        "Ciphertext length = NONCE_SIZE + inner_data_length + MAC_SIZE",
+        "Inner data = counter(8) + timestamp(8) + pad_len(1) + padding(32-128) + plaintext",
+        "Timestamp must be in range [MIN_TIMESTAMP_MS, MAX_TIMESTAMP_MS]",
+        "Padding length must be in range [MIN_PADDING, MAX_PADDING]"
+      ]
+    },
+    "auto_detection": {
+      "description": "All implementations must correctly detect v1 vs v2 format",
+      "rules": [
+        "Extract bytes 8-16 from decrypted data as little-endian int64",
+        "If timestamp in range [1577836800000, 4102444800000], format is v2",
+        "Otherwise format is v1"
+      ]
+    },
+    "replay_protection": {
+      "description": "All implementations must consistently enforce replay protection",
+      "rules": [
+        "If max_age_ms is null/None/-1, no replay protection",
+        "If max_age_ms >= 0, reject messages older than max_age_ms",
+        "Allow up to 5000ms future timestamp (clock skew)",
+        "Expired v2 messages MUST NOT fallback to v1"
+      ]
+    },
+    "cross_language": {
+      "description": "Byte-for-byte compatibility across languages",
+      "rules": [
+        "Same password + service + plaintext must decrypt successfully",
+        "v2 encrypted in Python must decrypt in JavaScript/Go/Java/C",
+        "v1 ciphertext must decrypt correctly in all v2 implementations",
+        "Length variation: multiple encryptions produce different lengths"
+      ]
+    }
+  }
+}
