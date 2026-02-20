@@ -71,6 +71,32 @@ public class Shield {
     }
 
     /**
+     * Create Shield with hardware fingerprinting (device-bound encryption).
+     *
+     * <p>Derives keys from password + hardware identifier, binding encryption to
+     * the physical device. Keys cannot be transferred to other hardware.
+     *
+     * @param password User's password
+     * @param service Service identifier
+     * @param mode Fingerprint mode
+     * @return Shield instance with device-bound key
+     * @throws Exception If hardware fingerprint unavailable
+     *
+     * <p>Example:
+     * <pre>{@code
+     * Shield shield = Shield.withFingerprint("password", "github.com", FingerprintMode.COMBINED);
+     * byte[] encrypted = shield.encrypt("secret".getBytes());
+     * }</pre>
+     */
+    public static Shield withFingerprint(String password, String service, Fingerprint.FingerprintMode mode) throws Exception {
+        String fingerprint = Fingerprint.collect(mode);
+
+        String combinedPassword = fingerprint.isEmpty() ? password : password + ":" + fingerprint;
+
+        return new Shield(combinedPassword, service);
+    }
+
+    /**
      * Encrypt plaintext (v2 format).
      */
     public byte[] encrypt(byte[] plaintext) {

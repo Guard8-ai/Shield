@@ -22,7 +22,7 @@ Security:
     All primitives have EXPTIME-hard security guarantees.
 """
 
-__version__ = "0.1.0"
+__version__ = "2.1.0"
 __author__ = "Guard8.ai"
 __license__ = "CC0-1.0"
 
