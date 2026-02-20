@@ -9,6 +9,7 @@ areas = [
     "docs",
     "frontend",
     "integration",
+    "security",
     "setup",
     "testing",
 ]

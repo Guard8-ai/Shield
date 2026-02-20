@@ -75,10 +75,6 @@ class ShieldMiddleware:
         if 'application/json' not in content_type:
             return response
 
-        # Check for opt-out header
-        if request.headers.get('X-Shield-Bypass') == 'true':
-            return response
-
         # Encrypt response
         try:
             encrypted = self.shield.encrypt(response.content)
