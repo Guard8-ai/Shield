@@ -90,6 +90,34 @@ class Shield {
     }
 
     /**
+     * Create Shield with hardware fingerprinting (device-bound encryption).
+     *
+     * Derives keys from password + hardware identifier, binding encryption to
+     * the physical device. Keys cannot be transferred to other hardware.
+     *
+     * @param {string} password - User's password
+     * @param {string} service - Service identifier
+     * @param {Object} options - Options
+     * @param {string} options.mode - Fingerprint mode ('none', 'motherboard', 'cpu', 'combined')
+     * @returns {Shield} Shield instance with device-bound key
+     * @throws {Error} If hardware fingerprint unavailable
+     *
+     * @example
+     * const shield = Shield.withFingerprint('password', 'github.com', { mode: 'combined' });
+     * const encrypted = shield.encrypt(Buffer.from('secret'));
+     */
+    static withFingerprint(password, service, options = {}) {
+        const { FingerprintMode, collectFingerprint } = require('./fingerprint');
+
+        const mode = options.mode || FingerprintMode.COMBINED;
+        const fingerprint = collectFingerprint(mode);
+
+        const combinedPassword = fingerprint ? `${password}:${fingerprint}` : password;
+
+        return new Shield(combinedPassword, service, options);
+    }
+
+    /**
      * Encrypt data (v2 format with replay protection and length obfuscation).
      *
      * Inner format: counter(8) || timestamp_ms(8) || pad_len(1) || random_padding(32-128) || plaintext

@@ -118,6 +118,34 @@ void shield_init(shield_t *ctx, const char *password, const char *service, int64
 shield_error_t shield_init_with_key(shield_t *ctx, const uint8_t *key, size_t key_len, int64_t max_age_ms);
 
 /**
+ * Initialize Shield with hardware fingerprinting (device-bound encryption).
+ *
+ * Derives keys from password + hardware identifier, binding encryption to
+ * the physical device. Keys cannot be transferred to other hardware.
+ *
+ * Requires: #include "shield_fingerprint.h"
+ *
+ * @param ctx Shield context to initialize
+ * @param password User's password
+ * @param service Service identifier
+ * @param fp_mode Fingerprint mode (see shield_fingerprint.h)
+ * @param max_age_ms Maximum message age (-1 to disable)
+ * @return SHIELD_OK on success, error code on failure
+ *
+ * Example:
+ *   shield_t ctx;
+ *   shield_init_with_fingerprint(&ctx, "password", "github.com",
+ *                                 SHIELD_FP_COMBINED, 60000);
+ */
+shield_error_t shield_init_with_fingerprint(
+    shield_t *ctx,
+    const char *password,
+    const char *service,
+    int fp_mode,  /* shield_fp_mode_t from shield_fingerprint.h */
+    int64_t max_age_ms
+);
+
+/**
  * Encrypt plaintext.
  * Returns allocated ciphertext. Caller must free.
  * out_len receives the ciphertext length.
