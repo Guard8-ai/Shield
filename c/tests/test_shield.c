@@ -21,7 +21,7 @@ void test_shield_encrypt_decrypt(void) {
     TEST("shield_encrypt_decrypt");
 
     shield_t ctx;
-    shield_init(&ctx, "password123", "test-service");
+    shield_init(&ctx, "password123", "test-service", SHIELD_DEFAULT_MAX_AGE_MS);
 
     const char *plaintext = "Hello, Shield!";
     size_t plaintext_len = strlen(plaintext);
@@ -53,7 +53,7 @@ void test_shield_with_key(void) {
     for (int i = 0; i < SHIELD_KEY_SIZE; i++) key[i] = (uint8_t)i;
 
     shield_t ctx;
-    shield_error_t err = shield_init_with_key(&ctx, key, SHIELD_KEY_SIZE);
+    shield_error_t err = shield_init_with_key(&ctx, key, SHIELD_KEY_SIZE, SHIELD_DEFAULT_MAX_AGE_MS);
     assert(err == SHIELD_OK);
 
     const char *plaintext = "Test message";
@@ -102,7 +102,7 @@ void test_invalid_key_size(void) {
     TEST("invalid_key_size");
 
     shield_t ctx;
-    shield_error_t err = shield_init_with_key(&ctx, (uint8_t *)"short", 5);
+    shield_error_t err = shield_init_with_key(&ctx, (uint8_t *)"short", 5, SHIELD_DEFAULT_MAX_AGE_MS);
     assert(err == SHIELD_ERR_INVALID_KEY_SIZE);
 
     PASS();
@@ -112,7 +112,7 @@ void test_authentication_failed(void) {
     TEST("authentication_failed");
 
     shield_t ctx;
-    shield_init(&ctx, "password", "service");
+    shield_init(&ctx, "password", "service", SHIELD_DEFAULT_MAX_AGE_MS);
 
     size_t encrypted_len;
     uint8_t *encrypted = shield_encrypt(&ctx, (const uint8_t *)"test", 4, &encrypted_len);
@@ -127,6 +127,100 @@ void test_authentication_failed(void) {
     assert(err == SHIELD_ERR_AUTHENTICATION_FAILED);
 
     free(encrypted);
+    shield_wipe(&ctx);
+
+    PASS();
+}
+
+/* ============== V2 Format Tests ============== */
+
+void test_v2_roundtrip(void) {
+    TEST("v2_roundtrip");
+
+    shield_t ctx;
+    shield_init(&ctx, "password", "service", 60000);
+
+    const char *plaintext = "Test v2 message";
+    size_t plaintext_len = strlen(plaintext);
+
+    size_t encrypted_len;
+    uint8_t *encrypted = shield_encrypt(&ctx, (const uint8_t *)plaintext, plaintext_len, &encrypted_len);
+    assert(encrypted != NULL);
+
+    size_t decrypted_len;
+    shield_error_t err;
+    uint8_t *decrypted = shield_decrypt(&ctx, encrypted, encrypted_len, &decrypted_len, &err);
+    assert(decrypted != NULL);
+    assert(err == SHIELD_OK);
+    assert(memcmp(decrypted, plaintext, plaintext_len) == 0);
+
+    free(encrypted);
+    free(decrypted);
+    shield_wipe(&ctx);
+
+    PASS();
+}
+
+void test_v2_length_variation(void) {
+    TEST("v2_length_variation");
+
+    shield_t ctx;
+    shield_init(&ctx, "password", "service", 60000);
+
+    const char *plaintext = "Same message";
+    size_t plaintext_len = strlen(plaintext);
+
+    size_t lengths[10];
+    int unique_lengths = 0;
+
+    for (int i = 0; i < 10; i++) {
+        size_t encrypted_len;
+        uint8_t *encrypted = shield_encrypt(&ctx, (const uint8_t *)plaintext, plaintext_len, &encrypted_len);
+        assert(encrypted != NULL);
+
+        lengths[i] = encrypted_len;
+        free(encrypted);
+
+        /* Check if this length is unique */
+        int is_unique = 1;
+        for (int j = 0; j < i; j++) {
+            if (lengths[j] == encrypted_len) {
+                is_unique = 0;
+                break;
+            }
+        }
+        if (is_unique) unique_lengths++;
+    }
+
+    /* Should have multiple different lengths due to random padding */
+    assert(unique_lengths > 1);
+
+    shield_wipe(&ctx);
+    PASS();
+}
+
+void test_v2_disabled_replay_protection(void) {
+    TEST("v2_disabled_replay_protection");
+
+    shield_t ctx;
+    shield_init(&ctx, "password", "service", -1);  /* Disabled */
+
+    const char *plaintext = "old but valid";
+    size_t plaintext_len = strlen(plaintext);
+
+    size_t encrypted_len;
+    uint8_t *encrypted = shield_encrypt(&ctx, (const uint8_t *)plaintext, plaintext_len, &encrypted_len);
+    assert(encrypted != NULL);
+
+    size_t decrypted_len;
+    shield_error_t err;
+    uint8_t *decrypted = shield_decrypt(&ctx, encrypted, encrypted_len, &decrypted_len, &err);
+    assert(decrypted != NULL);
+    assert(err == SHIELD_OK);
+    assert(memcmp(decrypted, plaintext, plaintext_len) == 0);
+
+    free(encrypted);
+    free(decrypted);
     shield_wipe(&ctx);
 
     PASS();
@@ -431,6 +525,11 @@ int main(void) {
     test_quick_encrypt_decrypt();
     test_invalid_key_size();
     test_authentication_failed();
+
+    printf("\nV2 Format Tests:\n");
+    test_v2_roundtrip();
+    test_v2_length_variation();
+    test_v2_disabled_replay_protection();
 
     printf("\nRatchet Tests:\n");
     test_ratchet_session();
