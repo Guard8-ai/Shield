@@ -1,7 +1,7 @@
 ---
 id: backend-040
 title: JavaScript Shield v2.1 hardware fingerprinting
-status: doing
+status: done
 priority: medium
 tags:
 - backend

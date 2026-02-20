@@ -1,7 +1,7 @@
 ---
 id: backend-042
 title: Java Shield v2.1 hardware fingerprinting
-status: doing
+status: done
 priority: medium
 tags:
 - backend

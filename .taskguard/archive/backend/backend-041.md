@@ -1,20 +1,20 @@
 ---
-id: backend-043
-title: C Shield v2.1 hardware fingerprinting
-status: doing
-priority: low
+id: backend-041
+title: Go Shield v2.1 hardware fingerprinting
+status: done
+priority: medium
 tags:
 - backend
 dependencies:
 - backend-037
 assignee: developer
-created: 2026-02-20T12:43:25.264691211Z
-estimate: 4h
-complexity: 6
+created: 2026-02-20T12:43:25.259991324Z
+estimate: 3h
+complexity: 5
 area: backend
 ---
 
-# C Shield v2.1 hardware fingerprinting
+# Go Shield v2.1 hardware fingerprinting
 
 ## Causation Chain
 > Trace the service orchestration: entry point → dependency injection →

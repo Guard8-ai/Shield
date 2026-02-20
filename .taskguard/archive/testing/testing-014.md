@@ -1,7 +1,7 @@
 ---
 id: testing-014
 title: Shield v2.1 fingerprinting cross-language tests
-status: todo
+status: done
 priority: high
 tags:
 - testing

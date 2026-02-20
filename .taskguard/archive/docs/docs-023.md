@@ -1,31 +1,36 @@
 ---
-id: backend-041
-title: Go Shield v2.1 hardware fingerprinting
-status: doing
-priority: medium
+id: docs-023
+title: Shield v2.1 fingerprinting documentation
+status: done
+priority: high
 tags:
-- backend
+- docs
 dependencies:
-- backend-037
+- backend-038
+- backend-039
+- backend-040
+- backend-041
+- backend-042
+- backend-043
 assignee: developer
-created: 2026-02-20T12:43:25.259991324Z
-estimate: 3h
-complexity: 5
-area: backend
+created: 2026-02-20T12:43:33.008097792Z
+estimate: 2h
+complexity: 3
+area: docs
 ---
 
-# Go Shield v2.1 hardware fingerprinting
+# Shield v2.1 fingerprinting documentation
 
 ## Causation Chain
-> Trace the service orchestration: entry point → dependency injection →
-business logic → side effects → return. Verify actual error propagation
-paths in the codebase.
+> Trace the documentation chain: code signature → docstring → generated
+docs → published output. Check actual code-to-docs sync status - are
+examples runnable?
 
 ## Pre-flight Checks
 - [ ] Read dependency task files for implementation context (Session Handoff)
-- [ ] `grep -r "impl.*Service\|fn.*service" src/` - Find service definitions
-- [ ] Check actual dependency injection patterns
-- [ ] Verify error propagation through service layers
+- [ ] Compare doc examples with actual API signatures
+- [ ] Check that code snippets are runnable
+- [ ] Verify cross-references are valid
 - [ ] `git log --oneline -10` - Check recent related commits
 
 ## Context
