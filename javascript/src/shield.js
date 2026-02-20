@@ -177,6 +177,12 @@ class Shield {
             if (timestampMs >= MIN_TIMESTAMP_MS && timestampMs <= MAX_TIMESTAMP_MS) {
                 // v2 format detected
                 const padLen = decrypted[16];
+
+                // Validate padding length is within protocol bounds (SECURITY: CVE-PENDING)
+                if (padLen < MIN_PADDING || padLen > MAX_PADDING) {
+                    return null;
+                }
+
                 const dataStart = V2_HEADER_SIZE + padLen;
 
                 if (decrypted.length < dataStart) {

@@ -216,6 +216,12 @@ public class Shield {
             if (timestampMs >= MIN_TIMESTAMP_MS && timestampMs <= MAX_TIMESTAMP_MS) {
                 // v2 format detected
                 int padLen = decrypted[16] & 0xFF;
+
+                // Validate padding length is within protocol bounds (SECURITY: CVE-PENDING)
+                if (padLen < MIN_PADDING || padLen > MAX_PADDING) {
+                    throw new SecurityException("Authentication failed");
+                }
+
                 int dataStart = V2_HEADER_SIZE + padLen;
 
                 if (decrypted.length < dataStart) {
