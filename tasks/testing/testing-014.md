@@ -1,31 +1,36 @@
 ---
-id: backend-030
-title: JavaScript Shield v2 implementation
-status: done
+id: testing-014
+title: Shield v2.1 fingerprinting cross-language tests
+status: todo
 priority: high
 tags:
-- backend
+- testing
 dependencies:
-- setup-001
+- backend-038
+- backend-039
+- backend-040
+- backend-041
+- backend-042
+- backend-043
 assignee: developer
-created: 2026-02-20T11:50:48.819088044Z
+created: 2026-02-20T12:43:33.011216188Z
 estimate: 3h
-complexity: 7
-area: backend
+complexity: 4
+area: testing
 ---
 
-# JavaScript Shield v2 implementation
+# Shield v2.1 fingerprinting cross-language tests
 
 ## Causation Chain
-> Trace the service orchestration: entry point → dependency injection →
-business logic → side effects → return. Verify actual error propagation
-paths in the codebase.
+> Trace the test execution flow: fixture setup → precondition → action →
+assertion → teardown. Check actual test isolation - are tests
+independent or order-dependent?
 
 ## Pre-flight Checks
 - [ ] Read dependency task files for implementation context (Session Handoff)
-- [ ] `grep -r "impl.*Service\|fn.*service" src/` - Find service definitions
-- [ ] Check actual dependency injection patterns
-- [ ] Verify error propagation through service layers
+- [ ] Read test files to verify actual assertions
+- [ ] Check test isolation (no shared mutable state)
+- [ ] Verify fixture setup and teardown completeness
 - [ ] `git log --oneline -10` - Check recent related commits
 
 ## Context

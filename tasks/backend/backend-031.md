@@ -1,7 +1,7 @@
 ---
 id: backend-031
 title: Go Shield v2 implementation
-status: todo
+status: done
 priority: high
 tags:
 - backend

@@ -1,7 +1,7 @@
 ---
 id: testing-013
 title: Cross-language v2 interoperability tests
-status: todo
+status: done
 priority: critical
 tags:
 - testing

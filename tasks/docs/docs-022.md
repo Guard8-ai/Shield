@@ -1,7 +1,7 @@
 ---
 id: docs-022
 title: Update PROTOCOL.md with v2 format
-status: todo
+status: done
 priority: high
 tags:
 - docs

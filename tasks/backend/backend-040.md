@@ -1,20 +1,20 @@
 ---
-id: backend-030
-title: JavaScript Shield v2 implementation
-status: done
-priority: high
+id: backend-040
+title: JavaScript Shield v2.1 hardware fingerprinting
+status: doing
+priority: medium
 tags:
 - backend
 dependencies:
-- setup-001
+- backend-037
 assignee: developer
-created: 2026-02-20T11:50:48.819088044Z
+created: 2026-02-20T12:43:25.257726900Z
 estimate: 3h
-complexity: 7
+complexity: 5
 area: backend
 ---
 
-# JavaScript Shield v2 implementation
+# JavaScript Shield v2.1 hardware fingerprinting
 
 ## Causation Chain
 > Trace the service orchestration: entry point → dependency injection →

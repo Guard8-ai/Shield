@@ -1,7 +1,7 @@
 ---
 id: backend-032
 title: Java Shield v2 implementation
-status: todo
+status: done
 priority: high
 tags:
 - backend

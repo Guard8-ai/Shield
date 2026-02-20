@@ -1,7 +1,7 @@
 ---
 id: backend-034
 title: Kotlin Shield v2 implementation
-status: todo
+status: done
 priority: medium
 tags:
 - backend

@@ -1,7 +1,7 @@
 ---
 id: backend-035
 title: Swift Shield v2 implementation
-status: todo
+status: done
 priority: medium
 tags:
 - backend
