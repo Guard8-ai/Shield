@@ -1,0 +1,40 @@
+# Example: Opaque Container Demo
+# This demonstrates a container with "secret" algorithm that will be encrypted
+
+FROM alpine:latest
+
+# This could be your proprietary algorithm, ML model, trading bot, etc.
+# When encrypted, no one can see what this script does
+
+RUN cat > /app/secret-algorithm.sh <<'EOF'
+#!/bin/sh
+echo "================================"
+echo "  SECRET PROPRIETARY ALGORITHM  "
+echo "================================"
+echo ""
+echo "This is your secret sauce that competitors"
+echo "cannot see when the container is encrypted!"
+echo ""
+echo "It could be:"
+echo "  - A profitable trading algorithm"
+echo "  - A trained ML model"
+echo "  - Proprietary business logic"
+echo "  - Licensed software"
+echo ""
+echo "When encrypted with Shield:"
+echo "  ✓ No one can inspect this code"
+echo "  ✓ No one can extract this file"
+echo "  ✓ No one can reverse engineer"
+echo "  ✓ They can only DELETE the container"
+echo ""
+echo "Running 'secret calculation'..."
+sleep 2
+echo "Result: 42 (but you'll never know how we got it!)"
+echo ""
+echo "================================"
+EOF
+
+RUN chmod +x /app/secret-algorithm.sh
+
+# This will run when the container starts
+CMD ["/app/secret-algorithm.sh"]
