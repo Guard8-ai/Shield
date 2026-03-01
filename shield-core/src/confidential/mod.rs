@@ -8,18 +8,26 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```rust,no_run
+//! use std::sync::Arc;
 //! use shield_core::confidential::{
 //!     AttestationProvider, NitroAttestationProvider, TEEKeyManager,
 //! };
 //!
-//! let provider = NitroAttestationProvider::new()
-//!     .with_expected_pcr(0, "abc123...");
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let provider = Arc::new(
+//!     NitroAttestationProvider::new()
+//!         .with_expected_pcr(0, "abc123...")
+//! );
 //!
+//! let attestation_doc = provider.generate_evidence(None).await?;
 //! let result = provider.verify(&attestation_doc).await?;
 //! if result.verified {
-//!     let key = key_manager.get_key(&attestation_doc, "encryption").await?;
+//!     let key_manager = TEEKeyManager::new("password", "service", provider);
+//!     let _key = key_manager.get_key(&attestation_doc, "encryption").await?;
 //! }
+//! # Ok(())
+//! # }
 //! ```
 
 mod base;
@@ -40,4 +48,7 @@ pub use maa::{AzureKeyVaultSKR, ConfidentialContainerSidecar, MAAAttestationProv
 pub use sgx::{GramineManifestHelper, SGXAttestationProvider, SealedStorage};
 
 #[cfg(feature = "openapi")]
-pub use openapi::{AttestationRequest, AttestationResponse, OpenAPISchemas};
+pub use openapi::{
+    AttestationRequest, AttestationResponse, OpenAPISchemas, ShieldConfidentialApi,
+    decrypt_data, encrypt_data, get_attestation, health_check, verify_attestation,
+};

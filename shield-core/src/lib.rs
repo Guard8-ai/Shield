@@ -35,10 +35,7 @@
 //! - System-level failures (e.g., time going backwards)
 
 #![forbid(unsafe_code)]
-#![warn(clippy::all, clippy::pedantic)]
-#![allow(clippy::module_name_repetitions)]
-// Error/panic docs are centralized above; individual function docs are concise
-#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
+// Clippy configuration is in Cargo.toml [lints.clippy]
 
 pub mod channel;
 #[cfg(feature = "async")]

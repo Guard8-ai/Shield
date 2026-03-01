@@ -20,10 +20,9 @@ mod test_vectors {
 }
 
 #[test]
-#[allow(deprecated)]
 fn test_key_derivation_matches_python() {
     let shield = Shield::new(test_vectors::PASSWORD, test_vectors::SERVICE);
-    let key = shield.key();
+    let key = shield.master_key();
     let expected = hex::decode(test_vectors::KEY_HEX).unwrap();
 
     assert_eq!(

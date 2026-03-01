@@ -4,7 +4,7 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use shield_core::channel_async::{AsyncShieldChannel, ChannelConfig};
 //! use tokio::net::TcpStream;
 //!
@@ -17,7 +17,7 @@
 //!     let mut channel = AsyncShieldChannel::connect(stream, &config).await?;
 //!
 //!     channel.send(b"Hello!").await?;
-//!     let response = channel.recv().await?;
+//!     let _response = channel.recv().await?;
 //!
 //!     Ok(())
 //! }

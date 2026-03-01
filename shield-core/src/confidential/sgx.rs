@@ -9,6 +9,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use ring::digest::{digest, SHA256};
+
 use super::base::{
     AttestationError, AttestationProvider, AttestationResult, TEEType,
 };
@@ -43,31 +45,35 @@ impl SGXAttestationProvider {
     }
 
     /// Set expected MRENCLAVE value.
+    #[must_use]
     pub fn with_expected_mrenclave(mut self, value: impl Into<String>) -> Self {
         self.expected_mrenclave = Some(value.into());
         self
     }
 
     /// Set expected MRSIGNER value.
+    #[must_use]
     pub fn with_expected_mrsigner(mut self, value: impl Into<String>) -> Self {
         self.expected_mrsigner = Some(value.into());
         self
     }
 
     /// Set minimum ISV SVN.
+    #[must_use]
     pub fn with_min_isv_svn(mut self, svn: u16) -> Self {
         self.min_isv_svn = svn;
         self
     }
 
     /// Set PCCS URL for quote verification.
+    #[must_use]
     pub fn with_pccs_url(mut self, url: impl Into<String>) -> Self {
         self.pccs_url = Some(url.into());
         self
     }
 
     /// Parse SGX quote header.
-    fn parse_quote_header(&self, data: &[u8]) -> Result<QuoteHeader, AttestationError> {
+    fn parse_quote_header(data: &[u8]) -> Result<QuoteHeader, AttestationError> {
         if data.len() < SGX_QUOTE_HEADER_SIZE {
             return Err(AttestationError::InvalidFormat("Quote header too small".into()));
         }
@@ -82,7 +88,7 @@ impl SGXAttestationProvider {
     }
 
     /// Parse SGX report body.
-    fn parse_report_body(&self, data: &[u8]) -> Result<ReportBody, AttestationError> {
+    fn parse_report_body(data: &[u8]) -> Result<ReportBody, AttestationError> {
         if data.len() < SGX_REPORT_BODY_SIZE {
             return Err(AttestationError::InvalidFormat("Report body too small".into()));
         }
@@ -121,8 +127,8 @@ impl AttestationProvider for SGXAttestationProvider {
             .with_raw_evidence(evidence.to_vec()));
         }
 
-        let header = self.parse_quote_header(&evidence[..SGX_QUOTE_HEADER_SIZE])?;
-        let report_body = self.parse_report_body(
+        let header = Self::parse_quote_header(&evidence[..SGX_QUOTE_HEADER_SIZE])?;
+        let report_body = Self::parse_report_body(
             &evidence[SGX_QUOTE_HEADER_SIZE..SGX_QUOTE_HEADER_SIZE + SGX_REPORT_BODY_SIZE],
         )?;
 
@@ -142,6 +148,8 @@ impl AttestationProvider for SGXAttestationProvider {
         claims.insert("isv_svn".into(), serde_json::json!(report_body.isv_svn));
         claims.insert("attributes".into(), serde_json::json!(report_body.attributes));
         claims.insert("misc_select".into(), serde_json::json!(report_body.misc_select));
+        claims.insert("vendor_id".into(), serde_json::json!(header.vendor_id));
+        claims.insert("user_data".into(), serde_json::json!(header.user_data));
 
         // Verify MRENCLAVE
         if let Some(ref expected) = self.expected_mrenclave {
@@ -204,12 +212,12 @@ impl AttestationProvider for SGXAttestationProvider {
 
         // Try Gramine attestation interface
         if Path::new("/dev/attestation/quote").exists() {
-            return self.gramine_generate_quote(report_data.as_ref()).await;
+            return Self::gramine_generate_quote(report_data.as_ref());
         }
 
         // Try Occlum
         if Path::new("/dev/sgx").exists() {
-            return self.occlum_generate_quote(report_data.as_ref()).await;
+            return Self::occlum_generate_quote(report_data.as_ref());
         }
 
         Err(AttestationError::NotInTEE(
@@ -220,8 +228,7 @@ impl AttestationProvider for SGXAttestationProvider {
 
 impl SGXAttestationProvider {
     /// Generate quote using Gramine's attestation interface.
-    async fn gramine_generate_quote(
-        &self,
+    fn gramine_generate_quote(
         report_data: Option<&[u8; 64]>,
     ) -> Result<Vec<u8>, AttestationError> {
         // Write report data
@@ -240,8 +247,7 @@ impl SGXAttestationProvider {
     }
 
     /// Generate quote using Occlum's interface.
-    async fn occlum_generate_quote(
-        &self,
+    fn occlum_generate_quote(
         _report_data: Option<&[u8; 64]>,
     ) -> Result<Vec<u8>, AttestationError> {
         // Occlum uses a different mechanism
@@ -253,7 +259,6 @@ impl SGXAttestationProvider {
 
 /// SGX quote header.
 #[derive(Debug)]
-#[allow(dead_code)]
 struct QuoteHeader {
     version: u16,
     att_key_type: u16,
@@ -303,7 +308,7 @@ impl SealedStorage {
     }
 
     /// Seal data to enclave identity.
-    pub async fn seal(&self, data: &[u8]) -> Result<Vec<u8>, AttestationError> {
+    pub fn seal(&self, data: &[u8]) -> Result<Vec<u8>, AttestationError> {
         let key_path = match self.seal_policy {
             SealPolicy::MrEnclave => "/dev/attestation/keys/mrenclave",
             SealPolicy::MrSigner => "/dev/attestation/keys/mrsigner",
@@ -325,7 +330,6 @@ impl SealedStorage {
         })?;
 
         // Derive encryption key
-        use ring::digest::{digest, SHA256};
         let derived = digest(&SHA256, &seal_key);
         let mut key = [0u8; 32];
         key.copy_from_slice(derived.as_ref());
@@ -337,7 +341,7 @@ impl SealedStorage {
     }
 
     /// Unseal data.
-    pub async fn unseal(&self, sealed_data: &[u8]) -> Result<Vec<u8>, AttestationError> {
+    pub fn unseal(&self, sealed_data: &[u8]) -> Result<Vec<u8>, AttestationError> {
         let key_path = match self.seal_policy {
             SealPolicy::MrEnclave => "/dev/attestation/keys/mrenclave",
             SealPolicy::MrSigner => "/dev/attestation/keys/mrsigner",
@@ -359,7 +363,6 @@ impl SealedStorage {
         })?;
 
         // Derive encryption key
-        use ring::digest::{digest, SHA256};
         let derived = digest(&SHA256, &seal_key);
         let mut key = [0u8; 32];
         key.copy_from_slice(derived.as_ref());
@@ -371,16 +374,15 @@ impl SealedStorage {
     }
 
     /// Store sealed data with a key.
-    pub async fn store(&self, key: &str, data: &[u8]) -> Result<(), AttestationError> {
+    pub fn store(&self, key: &str, data: &[u8]) -> Result<(), AttestationError> {
+        let sealed = self.seal(data)?;
+
+        let key_hash = hex::encode(&digest(&SHA256, key.as_bytes()).as_ref()[..16]);
+        let path = self.storage_path.join(key_hash);
+
         fs::create_dir_all(&self.storage_path).map_err(|e| {
             AttestationError::IoError(format!("Failed to create directory: {e}"))
         })?;
-
-        let sealed = self.seal(data).await?;
-
-        use ring::digest::{digest, SHA256};
-        let key_hash = hex::encode(&digest(&SHA256, key.as_bytes()).as_ref()[..16]);
-        let path = self.storage_path.join(key_hash);
 
         fs::write(&path, &sealed).map_err(|e| {
             AttestationError::IoError(format!("Failed to write sealed data: {e}"))
@@ -388,8 +390,7 @@ impl SealedStorage {
     }
 
     /// Load and unseal data by key.
-    pub async fn load(&self, key: &str) -> Result<Vec<u8>, AttestationError> {
-        use ring::digest::{digest, SHA256};
+    pub fn load(&self, key: &str) -> Result<Vec<u8>, AttestationError> {
         let key_hash = hex::encode(&digest(&SHA256, key.as_bytes()).as_ref()[..16]);
         let path = self.storage_path.join(key_hash);
 
@@ -397,7 +398,7 @@ impl SealedStorage {
             AttestationError::IoError(format!("Failed to read sealed data: {e}"))
         })?;
 
-        self.unseal(&sealed).await
+        self.unseal(&sealed)
     }
 }
 
@@ -421,18 +422,21 @@ impl GramineManifestHelper {
     }
 
     /// Set enclave size.
+    #[must_use]
     pub fn with_enclave_size(mut self, size: impl Into<String>) -> Self {
         self.enclave_size = size.into();
         self
     }
 
     /// Set thread count.
+    #[must_use]
     pub fn with_thread_num(mut self, num: u32) -> Self {
         self.thread_num = num;
         self
     }
 
     /// Enable EDMM (SGX2 dynamic memory).
+    #[must_use]
     pub fn with_edmm(mut self, enable: bool) -> Self {
         self.enable_edmm = enable;
         self

@@ -39,6 +39,7 @@ impl MAAAttestationProvider {
     }
 
     /// Add an expected measurement.
+    #[must_use]
     pub fn with_expected_measurement(
         mut self,
         name: impl Into<String>,
@@ -49,13 +50,14 @@ impl MAAAttestationProvider {
     }
 
     /// Set allowed TEE types.
+    #[must_use]
     pub fn with_allowed_tee_types(mut self, types: Vec<String>) -> Self {
         self.allowed_tee_types = types;
         self
     }
 
     /// Parse a JWT token.
-    fn parse_jwt(&self, token: &str) -> Result<MaaJwtPayload, AttestationError> {
+    fn parse_jwt(token: &str) -> Result<MaaJwtPayload, AttestationError> {
         let parts: Vec<&str> = token.split('.').collect();
         if parts.len() != 3 {
             return Err(AttestationError::InvalidFormat("Invalid JWT format".into()));
@@ -82,7 +84,7 @@ impl AttestationProvider for MAAAttestationProvider {
             AttestationError::InvalidFormat(format!("Invalid token encoding: {e}"))
         })?;
 
-        let payload = self.parse_jwt(token)?;
+        let payload = Self::parse_jwt(token)?;
 
         // Build measurements
         let mut measurements = HashMap::new();
@@ -137,8 +139,7 @@ impl AttestationProvider for MAAAttestationProvider {
         // Verify expiration
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_secs());
 
         if payload.exp > 0 && now > payload.exp {
             return Ok(
@@ -295,7 +296,6 @@ struct MaaJwtPayload {
 
 /// Azure Key Vault with Secure Key Release (SKR).
 pub struct AzureKeyVaultSKR {
-    #[allow(dead_code)]
     vault_url: String,
     provider: Arc<dyn AttestationProvider>,
 }
@@ -310,10 +310,13 @@ impl AzureKeyVaultSKR {
     }
 
     /// Release a key after verifying attestation.
+    ///
+    /// Verifies the attestation evidence, then calls the Azure Key Vault
+    /// Secure Key Release API to retrieve the key bound to the TEE identity.
     #[cfg(feature = "async")]
     pub async fn release_key(
         &self,
-        _key_name: &str,
+        key_name: &str,
         attestation_evidence: &[u8],
     ) -> Result<Vec<u8>, AttestationError> {
         let result = self.provider.verify(attestation_evidence).await?;
@@ -325,10 +328,78 @@ impl AzureKeyVaultSKR {
             ));
         }
 
-        // In production, use azure-keyvault crate
-        Err(AttestationError::MissingDependency(
-            "azure-keyvault crate required".into(),
-        ))
+        // Get access token from Azure IMDS (Instance Metadata Service)
+        let client = reqwest::Client::new();
+        let token_url = "http://169.254.169.254/metadata/identity/oauth2/token";
+        let token_response = client
+            .get(token_url)
+            .query(&[
+                ("api-version", "2018-02-01"),
+                ("resource", "https://vault.azure.net"),
+            ])
+            .header("Metadata", "true")
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|e| AttestationError::IoError(format!("IMDS token request failed: {e}")))?;
+
+        if !token_response.status().is_success() {
+            return Err(AttestationError::IoError(format!(
+                "IMDS token service returned {}",
+                token_response.status()
+            )));
+        }
+
+        let token_json: serde_json::Value = token_response.json().await.map_err(|e| {
+            AttestationError::IoError(format!("Failed to parse token response: {e}"))
+        })?;
+
+        let access_token = token_json["access_token"]
+            .as_str()
+            .ok_or_else(|| AttestationError::IoError("Missing access_token in IMDS response".into()))?;
+
+        // Encode attestation as base64 for the SKR request
+        let attestation_b64 = base64::engine::general_purpose::STANDARD.encode(attestation_evidence);
+
+        // Call Azure Key Vault Secure Key Release API
+        let release_url = format!(
+            "{}/keys/{}/release?api-version=7.3",
+            self.vault_url.trim_end_matches('/'),
+            key_name
+        );
+
+        let release_body = serde_json::json!({
+            "target": attestation_b64,
+        });
+
+        let release_response = client
+            .post(&release_url)
+            .bearer_auth(access_token)
+            .json(&release_body)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|e| AttestationError::IoError(format!("Key Vault release request failed: {e}")))?;
+
+        if !release_response.status().is_success() {
+            return Err(AttestationError::KeyReleaseFailed(format!(
+                "Key Vault returned {}",
+                release_response.status()
+            )));
+        }
+
+        let release_json: serde_json::Value = release_response.json().await.map_err(|e| {
+            AttestationError::IoError(format!("Failed to parse release response: {e}"))
+        })?;
+
+        // Extract the released key value (base64url-encoded)
+        let key_value = release_json["value"]
+            .as_str()
+            .ok_or_else(|| AttestationError::IoError("Missing value in release response".into()))?;
+
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(key_value).map_err(|e| {
+            AttestationError::IoError(format!("Failed to decode released key: {e}"))
+        })
     }
 }
 
