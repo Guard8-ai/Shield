@@ -8,6 +8,7 @@
 use ring::hmac;
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
+use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{Result, ShieldError};
@@ -95,12 +96,14 @@ impl TOTP {
 
         for i in 0..=window {
             let t = time.saturating_sub(u64::from(i) * self.interval);
-            if self.generate(Some(t)) == code {
+            let expected = self.generate(Some(t));
+            if expected.as_bytes().ct_eq(code.as_bytes()).unwrap_u8() == 1 {
                 return true;
             }
             if i > 0 {
                 let t = time + u64::from(i) * self.interval;
-                if self.generate(Some(t)) == code {
+                let expected = self.generate(Some(t));
+                if expected.as_bytes().ct_eq(code.as_bytes()).unwrap_u8() == 1 {
                     return true;
                 }
             }
@@ -252,6 +255,16 @@ impl RecoveryCodes {
     #[must_use]
     pub fn has_codes(&self) -> bool {
         !self.codes.is_empty()
+    }
+}
+
+impl Drop for RecoveryCodes {
+    fn drop(&mut self) {
+        for code in self.codes.drain() {
+            // Zeroize the String's bytes before dropping
+            let mut bytes = code.into_bytes();
+            bytes.zeroize();
+        }
     }
 }
 

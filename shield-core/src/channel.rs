@@ -49,8 +49,11 @@ use crate::ratchet::RatchetSession;
 /// Channel protocol version.
 const PROTOCOL_VERSION: u8 = 1;
 
-/// Maximum message size (16 MB).
-const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
+/// Absolute maximum message size cap (16 MB).
+const MAX_MESSAGE_SIZE_CAP: usize = 16 * 1024 * 1024;
+
+/// Default maximum message size (1 MB).
+const DEFAULT_MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 
 /// Handshake message types.
 #[repr(u8)]
@@ -72,6 +75,8 @@ pub struct ChannelConfig {
     iterations: u32,
     /// Handshake timeout in milliseconds.
     handshake_timeout_ms: u64,
+    /// Maximum message size in bytes (default 1 MB, capped at 16 MB).
+    max_message_size: usize,
 }
 
 impl ChannelConfig {
@@ -87,6 +92,7 @@ impl ChannelConfig {
             service: service.to_string(),
             iterations: PAKEExchange::ITERATIONS,
             handshake_timeout_ms: 30_000,
+            max_message_size: DEFAULT_MAX_MESSAGE_SIZE,
         }
     }
 
@@ -101,6 +107,13 @@ impl ChannelConfig {
     #[must_use]
     pub fn with_timeout(mut self, timeout_ms: u64) -> Self {
         self.handshake_timeout_ms = timeout_ms;
+        self
+    }
+
+    /// Set maximum message size in bytes (capped at 16 MB).
+    #[must_use]
+    pub fn with_max_message_size(mut self, size: usize) -> Self {
+        self.max_message_size = size.min(MAX_MESSAGE_SIZE_CAP);
         self
     }
 
@@ -129,6 +142,12 @@ impl ChannelConfig {
     #[must_use]
     pub(crate) fn handshake_timeout_ms(&self) -> u64 {
         self.handshake_timeout_ms
+    }
+
+    /// Get maximum message size in bytes.
+    #[must_use]
+    pub fn max_message_size(&self) -> usize {
+        self.max_message_size
     }
 }
 
@@ -210,6 +229,7 @@ pub struct ShieldChannel<S> {
     stream: S,
     session: RatchetSession,
     service: String,
+    max_message_size: usize,
 }
 
 impl<S: Read + Write> ShieldChannel<S> {
@@ -259,6 +279,7 @@ impl<S: Read + Write> ShieldChannel<S> {
             stream,
             session,
             service: config.service.clone(),
+            max_message_size: config.max_message_size,
         })
     }
 
@@ -313,6 +334,7 @@ impl<S: Read + Write> ShieldChannel<S> {
             stream,
             session,
             service: config.service.clone(),
+            max_message_size: config.max_message_size,
         })
     }
 
@@ -320,23 +342,23 @@ impl<S: Read + Write> ShieldChannel<S> {
     ///
     /// Message is encrypted with current ratchet key, then key advances.
     pub fn send(&mut self, data: &[u8]) -> Result<()> {
-        if data.len() > MAX_MESSAGE_SIZE {
+        if data.len() > self.max_message_size {
             return Err(ShieldError::ChannelError(format!(
                 "message too large: {} > {}",
                 data.len(),
-                MAX_MESSAGE_SIZE
+                self.max_message_size
             )));
         }
 
         let encrypted = self.session.encrypt(data)?;
-        Self::write_frame(&mut self.stream, &encrypted)
+        Self::write_frame(&mut self.stream, &encrypted, self.max_message_size)
     }
 
     /// Receive and decrypt message.
     ///
     /// Verifies authentication and advances receive ratchet.
     pub fn recv(&mut self) -> Result<Vec<u8>> {
-        let encrypted = Self::read_frame(&mut self.stream)?;
+        let encrypted = Self::read_frame(&mut self.stream, self.max_message_size)?;
         self.session.decrypt(&encrypted)
     }
 
@@ -425,7 +447,7 @@ impl<S: Read + Write> ShieldChannel<S> {
         let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, session_key);
         let confirm = hmac::sign(&hmac_key, label);
 
-        Self::write_frame(stream, &confirm.as_ref()[..16])
+        Self::write_frame(stream, &confirm.as_ref()[..16], DEFAULT_MAX_MESSAGE_SIZE)
     }
 
     fn verify_confirmation(
@@ -433,7 +455,7 @@ impl<S: Read + Write> ShieldChannel<S> {
         session_key: &[u8; 32],
         expect_client: bool,
     ) -> Result<()> {
-        let received = Self::read_frame(stream)?;
+        let received = Self::read_frame(stream, DEFAULT_MAX_MESSAGE_SIZE)?;
         if received.len() != 16 {
             return Err(ShieldError::ChannelError("invalid confirmation".into()));
         }
@@ -455,7 +477,13 @@ impl<S: Read + Write> ShieldChannel<S> {
 
     // --- Frame helpers ---
 
-    fn write_frame(stream: &mut S, data: &[u8]) -> Result<()> {
+    fn write_frame(stream: &mut S, data: &[u8], max_size: usize) -> Result<()> {
+        if data.len() > max_size {
+            return Err(ShieldError::ChannelError(format!(
+                "frame too large to send: {} > {max_size}",
+                data.len()
+            )));
+        }
         let len = data.len() as u32;
         stream
             .write_all(&len.to_be_bytes())
@@ -469,16 +497,16 @@ impl<S: Read + Write> ShieldChannel<S> {
         Ok(())
     }
 
-    fn read_frame(stream: &mut S) -> Result<Vec<u8>> {
+    fn read_frame(stream: &mut S, max_size: usize) -> Result<Vec<u8>> {
         let mut len_buf = [0u8; 4];
         stream
             .read_exact(&mut len_buf)
             .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
 
         let len = u32::from_be_bytes(len_buf) as usize;
-        if len > MAX_MESSAGE_SIZE {
+        if len > max_size {
             return Err(ShieldError::ChannelError(format!(
-                "frame too large: {len} > {MAX_MESSAGE_SIZE}"
+                "frame too large: {len} > {max_size}"
             )));
         }
 

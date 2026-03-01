@@ -431,12 +431,13 @@ impl Shield {
         Ok(decrypted[8..].to_vec())
     }
 
-    /// Get the master key for advanced use cases.
+    /// Get the master key for internal use cases.
     ///
     /// Used by `TEEKeyManager` for attestation-bound key derivation and
-    /// cross-language interoperability verification.
+    /// pgvector for HMAC-based vector operations.
+    #[cfg(any(feature = "pgvector", feature = "confidential"))]
     #[must_use]
-    pub fn master_key(&self) -> &[u8; 32] {
+    pub(crate) fn master_key(&self) -> &[u8; 32] {
         &self.key
     }
 }

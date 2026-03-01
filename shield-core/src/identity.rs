@@ -114,6 +114,23 @@ impl IdentityProvider {
         key
     }
 
+    /// Derive separated encryption and MAC subkeys for token operations.
+    /// Prevents key reuse between encryption and authentication.
+    fn derive_token_subkeys(&self, purpose: &str) -> ([u8; 32], [u8; 32]) {
+        let base_key = self.derive_key(purpose);
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &base_key);
+
+        let enc_tag = hmac::sign(&hmac_key, b"shield-token-encrypt");
+        let mut enc_key = [0u8; 32];
+        enc_key.copy_from_slice(&enc_tag.as_ref()[..32]);
+
+        let mac_tag = hmac::sign(&hmac_key, b"shield-token-authenticate");
+        let mut mac_key = [0u8; 32];
+        mac_key.copy_from_slice(&mac_tag.as_ref()[..32]);
+
+        (enc_key, mac_key)
+    }
+
     /// Register a new user.
     pub fn register(
         &mut self,
@@ -171,6 +188,9 @@ impl IdentityProvider {
     }
 
     /// Authenticate user and return session token.
+    ///
+    /// Runs PBKDF2 even for non-existent users to prevent timing-based
+    /// user enumeration (CWE-203).
     #[must_use]
     pub fn authenticate(
         &self,
@@ -179,18 +199,28 @@ impl IdentityProvider {
         permissions: &[String],
         ttl: Option<u64>,
     ) -> Option<String> {
-        let user = self.users.get(user_id)?;
+        // Use real salt if user exists, otherwise derive a stable dummy salt
+        // to ensure constant-time behavior regardless of user existence.
+        let dummy_salt = self.derive_key("dummy-salt");
+        let (salt, expected_hash, user_exists) = match self.users.get(user_id) {
+            Some(user) => (user.salt, user.password_hash, true),
+            None => {
+                let mut dummy = [0u8; 16];
+                dummy.copy_from_slice(&dummy_salt[..16]);
+                (dummy, [0u8; 32], false)
+            }
+        };
 
         let mut password_hash = [0u8; 32];
         ring::pbkdf2::derive(
             ring::pbkdf2::PBKDF2_HMAC_SHA256,
             NonZeroU32::new(Self::ITERATIONS).unwrap(),
-            &user.salt,
+            &salt,
             password.as_bytes(),
             &mut password_hash,
         );
 
-        if password_hash.ct_eq(&user.password_hash).unwrap_u8() != 1 {
+        if !user_exists || password_hash.ct_eq(&expected_hash).unwrap_u8() != 1 {
             return None;
         }
 
@@ -218,17 +248,19 @@ impl IdentityProvider {
         token_data.extend_from_slice(perms_bytes);
         token_data.extend_from_slice(&expires_at.to_le_bytes());
 
-        // Encrypt
-        let key = self.derive_key("session");
-        let keystream = generate_keystream(&key, &nonce, token_data.len());
+        // Derive separate encryption and MAC keys
+        let (enc_key, mac_key) = self.derive_token_subkeys("session");
+
+        // Encrypt with enc_key
+        let keystream = generate_keystream(&enc_key, &nonce, token_data.len());
         let encrypted: Vec<u8> = token_data
             .iter()
             .zip(keystream.iter())
             .map(|(p, k)| p ^ k)
             .collect();
 
-        // MAC
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &key);
+        // MAC with mac_key
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
         let mut hmac_data = Vec::with_capacity(16 + encrypted.len());
         hmac_data.extend_from_slice(&nonce);
         hmac_data.extend_from_slice(&encrypted);
@@ -257,10 +289,11 @@ impl IdentityProvider {
         let encrypted = &data[16..data.len() - 16];
         let mac = &data[data.len() - 16..];
 
-        let key = self.derive_key("session");
+        // Derive separate encryption and MAC keys
+        let (enc_key, mac_key) = self.derive_token_subkeys("session");
 
-        // Verify MAC
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &key);
+        // Verify MAC with mac_key
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
         let mut hmac_data = Vec::with_capacity(16 + encrypted.len());
         hmac_data.extend_from_slice(nonce);
         hmac_data.extend_from_slice(encrypted);
@@ -270,20 +303,29 @@ impl IdentityProvider {
             return None;
         }
 
-        // Decrypt
-        let keystream = generate_keystream(&key, nonce, encrypted.len());
+        // Decrypt with enc_key
+        let keystream = generate_keystream(&enc_key, nonce, encrypted.len());
         let token_data: Vec<u8> = encrypted
             .iter()
             .zip(keystream.iter())
             .map(|(c, k)| c ^ k)
             .collect();
 
-        // Parse
+        // Parse with bounds checks to prevent panics on malformed data
+        if token_data.len() < 2 {
+            return None;
+        }
         let user_id_len = u16::from_le_bytes([token_data[0], token_data[1]]) as usize;
+        if token_data.len() < 2 + user_id_len + 2 {
+            return None;
+        }
         let user_id = String::from_utf8(token_data[2..2 + user_id_len].to_vec()).ok()?;
 
         let offset = 2 + user_id_len;
         let perms_len = u16::from_le_bytes([token_data[offset], token_data[offset + 1]]) as usize;
+        if token_data.len() < offset + 2 + perms_len + 8 {
+            return None;
+        }
         let perms_json =
             String::from_utf8(token_data[offset + 2..offset + 2 + perms_len].to_vec()).ok()?;
         let permissions: Vec<String> = serde_json::from_str(&perms_json).ok()?;
@@ -291,6 +333,11 @@ impl IdentityProvider {
         let exp_offset = offset + 2 + perms_len;
         let expires_at =
             u64::from_le_bytes(token_data[exp_offset..exp_offset + 8].try_into().ok()?);
+
+        // Reject tokens for revoked/unregistered users
+        if !self.users.contains_key(&user_id) {
+            return None;
+        }
 
         let session = Session {
             user_id,
@@ -339,16 +386,16 @@ impl IdentityProvider {
         token_data.extend_from_slice(perms_bytes);
         token_data.extend_from_slice(&expires_at.to_le_bytes());
 
-        // Encrypt with service-specific key
-        let key = self.derive_key(&format!("service:{service}"));
-        let keystream = generate_keystream(&key, &nonce, token_data.len());
+        // Derive separate enc/mac keys for service-specific token
+        let (enc_key, mac_key) = self.derive_token_subkeys(&format!("service:{service}"));
+        let keystream = generate_keystream(&enc_key, &nonce, token_data.len());
         let encrypted: Vec<u8> = token_data
             .iter()
             .zip(keystream.iter())
             .map(|(p, k)| p ^ k)
             .collect();
 
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &key);
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
         let mut hmac_data = Vec::with_capacity(16 + encrypted.len());
         hmac_data.extend_from_slice(&nonce);
         hmac_data.extend_from_slice(&encrypted);
@@ -377,10 +424,11 @@ impl IdentityProvider {
         let encrypted = &data[16..data.len() - 16];
         let mac = &data[data.len() - 16..];
 
-        let key = self.derive_key(&format!("service:{service}"));
+        // Derive separate enc/mac keys for service token
+        let (enc_key, mac_key) = self.derive_token_subkeys(&format!("service:{service}"));
 
-        // Verify MAC
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &key);
+        // Verify MAC with mac_key
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
         let mut hmac_data = Vec::with_capacity(16 + encrypted.len());
         hmac_data.extend_from_slice(nonce);
         hmac_data.extend_from_slice(encrypted);
@@ -390,23 +438,32 @@ impl IdentityProvider {
             return None;
         }
 
-        // Decrypt
-        let keystream = generate_keystream(&key, nonce, encrypted.len());
+        // Decrypt with enc_key
+        let keystream = generate_keystream(&enc_key, nonce, encrypted.len());
         let token_data: Vec<u8> = encrypted
             .iter()
             .zip(keystream.iter())
             .map(|(c, k)| c ^ k)
             .collect();
 
-        // Parse
+        // Parse with bounds checks
         let mut offset = 0;
+        if token_data.len() < offset + 2 {
+            return None;
+        }
         let user_id_len = u16::from_le_bytes([token_data[offset], token_data[offset + 1]]) as usize;
         offset += 2;
+        if token_data.len() < offset + user_id_len + 2 {
+            return None;
+        }
         let user_id = String::from_utf8(token_data[offset..offset + user_id_len].to_vec()).ok()?;
         offset += user_id_len;
 
         let service_len = u16::from_le_bytes([token_data[offset], token_data[offset + 1]]) as usize;
         offset += 2;
+        if token_data.len() < offset + service_len + 2 {
+            return None;
+        }
         let token_service =
             String::from_utf8(token_data[offset..offset + service_len].to_vec()).ok()?;
         offset += service_len;
@@ -417,6 +474,9 @@ impl IdentityProvider {
 
         let perms_len = u16::from_le_bytes([token_data[offset], token_data[offset + 1]]) as usize;
         offset += 2;
+        if token_data.len() < offset + perms_len + 8 {
+            return None;
+        }
         let perms_json = String::from_utf8(token_data[offset..offset + perms_len].to_vec()).ok()?;
         let permissions: Vec<String> = serde_json::from_str(&perms_json).ok()?;
         offset += perms_len;

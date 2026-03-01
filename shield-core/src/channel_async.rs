@@ -41,8 +41,8 @@ pub use crate::channel::ChannelConfig;
 /// Channel protocol version.
 const PROTOCOL_VERSION: u8 = 1;
 
-/// Maximum message size (16 MB).
-const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
+/// Default maximum message size (1 MB) — matches sync channel default.
+const DEFAULT_MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 
 /// Handshake message types.
 #[repr(u8)]
@@ -129,6 +129,7 @@ pub struct AsyncShieldChannel<S> {
     stream: S,
     session: RatchetSession,
     service: String,
+    max_message_size: usize,
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
@@ -183,6 +184,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
             stream,
             session,
             service: config.service().to_string(),
+            max_message_size: config.max_message_size(),
         })
     }
 
@@ -241,26 +243,27 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
             stream,
             session,
             service: config.service().to_string(),
+            max_message_size: config.max_message_size(),
         })
     }
 
     /// Send encrypted message.
     pub async fn send(&mut self, data: &[u8]) -> Result<()> {
-        if data.len() > MAX_MESSAGE_SIZE {
+        if data.len() > self.max_message_size {
             return Err(ShieldError::ChannelError(format!(
                 "message too large: {} > {}",
                 data.len(),
-                MAX_MESSAGE_SIZE
+                self.max_message_size
             )));
         }
 
         let encrypted = self.session.encrypt(data)?;
-        Self::write_frame(&mut self.stream, &encrypted).await
+        Self::write_frame(&mut self.stream, &encrypted, self.max_message_size).await
     }
 
     /// Receive and decrypt message.
     pub async fn recv(&mut self) -> Result<Vec<u8>> {
-        let encrypted = Self::read_frame(&mut self.stream).await?;
+        let encrypted = Self::read_frame(&mut self.stream, self.max_message_size).await?;
         self.session.decrypt(&encrypted)
     }
 
@@ -357,7 +360,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
         let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, session_key);
         let confirm = hmac::sign(&hmac_key, label);
 
-        Self::write_frame(stream, &confirm.as_ref()[..16]).await
+        Self::write_frame(stream, &confirm.as_ref()[..16], DEFAULT_MAX_MESSAGE_SIZE).await
     }
 
     async fn verify_confirmation(
@@ -365,7 +368,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
         session_key: &[u8; 32],
         expect_client: bool,
     ) -> Result<()> {
-        let received = Self::read_frame(stream).await?;
+        let received = Self::read_frame(stream, DEFAULT_MAX_MESSAGE_SIZE).await?;
         if received.len() != 16 {
             return Err(ShieldError::ChannelError("invalid confirmation".into()));
         }
@@ -385,7 +388,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
         Ok(())
     }
 
-    async fn write_frame(stream: &mut S, data: &[u8]) -> Result<()> {
+    async fn write_frame(stream: &mut S, data: &[u8], max_size: usize) -> Result<()> {
+        if data.len() > max_size {
+            return Err(ShieldError::ChannelError(format!(
+                "frame too large to send: {} > {max_size}",
+                data.len()
+            )));
+        }
         let len = data.len() as u32;
         stream
             .write_all(&len.to_be_bytes())
@@ -402,7 +411,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
         Ok(())
     }
 
-    async fn read_frame(stream: &mut S) -> Result<Vec<u8>> {
+    async fn read_frame(stream: &mut S, max_size: usize) -> Result<Vec<u8>> {
         let mut len_buf = [0u8; 4];
         stream
             .read_exact(&mut len_buf)
@@ -410,9 +419,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
             .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
 
         let len = u32::from_be_bytes(len_buf) as usize;
-        if len > MAX_MESSAGE_SIZE {
+        if len > max_size {
             return Err(ShieldError::ChannelError(format!(
-                "frame too large: {len} > {MAX_MESSAGE_SIZE}"
+                "frame too large: {len} > {max_size}"
             )));
         }
 

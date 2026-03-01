@@ -14,48 +14,22 @@
 //!
 //! # Example
 //!
-//! ```no_run
+//! ```rust
 //! use shield_core::{Shield, fido2::{Fido2Manager, WebAuthnConfig}};
 //!
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! // Configure WebAuthn
 //! let config = WebAuthnConfig::new("example.com", "My App", "https://example.com");
-//! let shield = Shield::new("master_password", "fido2.myapp")?;
-//!
-//! // Create manager with encrypted storage
+//! let shield = Shield::new("master_password", "fido2.myapp");
 //! let mut manager = Fido2Manager::new_with_shield(config, shield);
 //!
-//! // Registration flow
-//! let user_id = b"user123";
+//! // Registration: generate challenge, then verify with credential
 //! let challenge = manager.generate_registration_challenge(
-//!     user_id,
-//!     "alice@example.com",
-//!     "Alice",
-//! )?;
-//!
-//! // ... client creates credential ...
-//!
-//! // Verify and store credential
-//! let credential = manager.verify_registration(
-//!     &challenge.challenge,
-//!     credential_id,
-//!     public_key,
-//! )?;
-//!
-//! // Authentication flow
-//! let auth_challenge = manager.generate_authentication_challenge(user_id)?;
-//!
-//! // ... client signs challenge ...
-//!
-//! // Verify authentication
-//! let result = manager.verify_authentication(
-//!     &auth_challenge.challenge,
-//!     &credential_id,
-//!     &signature,
-//!     counter,
-//! )?;
-//! # Ok(())
-//! # }
+//!     b"user123", "alice", "Alice",
+//! ).unwrap();
+//! let cred_id = b"credential_123".to_vec();
+//! let pubkey = b"public_key_data".to_vec();
+//! let _credential = manager.verify_registration(
+//!     &challenge.challenge, cred_id, pubkey,
+//! ).unwrap();
 //! ```
 
 pub mod config;

@@ -5,7 +5,7 @@ use thiserror::Error;
 /// Errors that can occur during FIDO2 operations
 #[derive(Error, Debug)]
 pub enum Fido2Error {
-    /// WebAuthn error
+    /// `WebAuthn` error
     #[error("WebAuthn error: {0}")]
     WebAuthn(String),
 

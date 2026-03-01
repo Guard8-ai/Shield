@@ -1,11 +1,22 @@
-//! FIDO2 Manager - Main API for WebAuthn operations
+//! FIDO2 Manager - Main API for `WebAuthn` operations
 
 use super::config::{CredentialStore, WebAuthnConfig};
 use super::credential::{ShieldCredentialStore, StoredCredential};
 use super::error::{Fido2Error, Result};
+use base64::Engine;
 use crate::Shield;
+use ring::hmac;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// Base64 engine for FIDO2 challenge/credential encoding.
+fn b64_encode(data: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(data)
+}
+
+fn b64_decode(data: &str) -> std::result::Result<Vec<u8>, base64::DecodeError> {
+    base64::engine::general_purpose::STANDARD.decode(data)
+}
 
 /// Challenge data for registration or authentication
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,7 +29,7 @@ pub struct ChallengeData {
     pub user_id: Option<Vec<u8>>,
 }
 
-/// FIDO2 Manager for WebAuthn operations
+/// FIDO2 Manager for `WebAuthn` operations
 pub struct Fido2Manager<S: CredentialStore> {
     config: WebAuthnConfig,
     store: S,
@@ -60,7 +71,7 @@ impl<S: CredentialStore> Fido2Manager<S> {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
-            + (self.config.timeout_ms as u64 / 1000);
+            + (u64::from(self.config.timeout_ms) / 1000);
 
         // Store challenge for verification
         self.challenges.insert(
@@ -73,8 +84,8 @@ impl<S: CredentialStore> Fido2Manager<S> {
         );
 
         Ok(RegistrationChallenge {
-            challenge: base64::encode(&challenge),
-            user_id: base64::encode(user_id),
+            challenge: b64_encode(&challenge),
+            user_id: b64_encode(user_id),
             username: username.to_string(),
             display_name: display_name.to_string(),
             rp_id: self.config.rp_id.clone(),
@@ -91,7 +102,7 @@ impl<S: CredentialStore> Fido2Manager<S> {
         public_key: Vec<u8>,
     ) -> Result<StoredCredential> {
         // Decode challenge
-        let challenge = base64::decode(challenge_b64)
+        let challenge = b64_decode(challenge_b64)
             .map_err(|_| Fido2Error::InvalidChallenge)?;
 
         // Verify challenge exists and not expired
@@ -146,7 +157,7 @@ impl<S: CredentialStore> Fido2Manager<S> {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
-            + (self.config.timeout_ms as u64 / 1000);
+            + (u64::from(self.config.timeout_ms) / 1000);
 
         // Store challenge
         self.challenges.insert(
@@ -162,13 +173,13 @@ impl<S: CredentialStore> Fido2Manager<S> {
         let allowed_credentials: Vec<_> = credentials
             .iter()
             .map(|c| AllowedCredential {
-                id: base64::encode(&c.credential_id),
+                id: b64_encode(&c.credential_id),
                 credential_type: "public-key".to_string(),
             })
             .collect();
 
         Ok(AuthenticationChallenge {
-            challenge: base64::encode(&challenge),
+            challenge: b64_encode(&challenge),
             allowed_credentials,
             timeout_ms: self.config.timeout_ms,
             rp_id: self.config.rp_id.clone(),
@@ -184,7 +195,7 @@ impl<S: CredentialStore> Fido2Manager<S> {
         counter: u32,
     ) -> Result<AuthenticationResult> {
         // Decode challenge
-        let challenge = base64::decode(challenge_b64)
+        let challenge = b64_decode(challenge_b64)
             .map_err(|_| Fido2Error::InvalidChallenge)?;
 
         // Verify challenge exists and not expired
@@ -216,11 +227,15 @@ impl<S: CredentialStore> Fido2Manager<S> {
             return Err(Fido2Error::CounterDecreased);
         }
 
-        // In a real implementation, verify signature with stored_cred.public_key
-        // For this simplified version, we just check signature is non-empty
-        if signature.is_empty() {
-            return Err(Fido2Error::InvalidSignature);
-        }
+        // Verify HMAC-SHA256 signature using stored credential's public_key
+        // Signature covers: challenge || credential_id || counter (domain separation)
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &stored_cred.public_key);
+        let mut sign_data = Vec::with_capacity(challenge.len() + credential_id.len() + 4);
+        sign_data.extend_from_slice(&challenge);
+        sign_data.extend_from_slice(credential_id);
+        sign_data.extend_from_slice(&counter.to_le_bytes());
+        hmac::verify(&hmac_key, &sign_data, signature)
+            .map_err(|_| Fido2Error::InvalidSignature)?;
 
         // Update counter
         self.store.update_counter(&user_id, credential_id, counter)?;
@@ -295,6 +310,22 @@ mod tests {
         Fido2Manager::new_with_shield(config, shield)
     }
 
+    /// Compute a valid HMAC-SHA256 signature for FIDO2 authentication.
+    fn compute_test_signature(
+        public_key: &[u8],
+        challenge_b64: &str,
+        credential_id: &[u8],
+        counter: u32,
+    ) -> Vec<u8> {
+        let challenge = b64_decode(challenge_b64).unwrap();
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, public_key);
+        let mut sign_data = Vec::new();
+        sign_data.extend_from_slice(&challenge);
+        sign_data.extend_from_slice(credential_id);
+        sign_data.extend_from_slice(&counter.to_le_bytes());
+        hmac::sign(&hmac_key, &sign_data).as_ref().to_vec()
+    }
+
     #[test]
     fn test_registration_flow() {
         let mut manager = create_test_manager();
@@ -308,7 +339,7 @@ mod tests {
         assert!(!challenge.challenge.is_empty());
         assert_eq!(challenge.username, "testuser");
 
-        // Simulate registration (simplified)
+        // Simulate registration
         let credential_id = b"cred_id_123".to_vec();
         let public_key = b"public_key_data".to_vec();
 
@@ -325,13 +356,18 @@ mod tests {
         let mut manager = create_test_manager();
         let user_id = b"user123";
         let credential_id = b"cred_id_123".to_vec();
+        let public_key = b"public_key_data".to_vec();
 
         // Register first
         let reg_challenge = manager
             .generate_registration_challenge(user_id, "testuser", "Test User")
             .unwrap();
         manager
-            .verify_registration(&reg_challenge.challenge, credential_id.clone(), b"public_key".to_vec())
+            .verify_registration(
+                &reg_challenge.challenge,
+                credential_id.clone(),
+                public_key.clone(),
+            )
             .unwrap();
 
         // Generate auth challenge
@@ -339,9 +375,16 @@ mod tests {
         assert!(!auth_challenge.challenge.is_empty());
         assert_eq!(auth_challenge.allowed_credentials.len(), 1);
 
-        // Verify authentication (simplified)
+        // Compute valid HMAC signature
+        let signature = compute_test_signature(
+            &public_key,
+            &auth_challenge.challenge,
+            &credential_id,
+            1,
+        );
+
         let result = manager
-            .verify_authentication(&auth_challenge.challenge, &credential_id, b"signature", 1)
+            .verify_authentication(&auth_challenge.challenge, &credential_id, &signature, 1)
             .unwrap();
 
         assert!(result.success);
@@ -350,7 +393,7 @@ mod tests {
     }
 
     #[test]
-    fn test_counter_replay_protection() {
+    fn test_authentication_invalid_signature() {
         let mut manager = create_test_manager();
         let user_id = b"user123";
         let credential_id = b"cred_id_123".to_vec();
@@ -360,18 +403,67 @@ mod tests {
             .generate_registration_challenge(user_id, "testuser", "Test User")
             .unwrap();
         manager
-            .verify_registration(&reg_challenge.challenge, credential_id.clone(), b"public_key".to_vec())
+            .verify_registration(
+                &reg_challenge.challenge,
+                credential_id.clone(),
+                b"public_key_data".to_vec(),
+            )
             .unwrap();
 
-        // First authentication
+        // Generate auth challenge
         let auth_challenge = manager.generate_authentication_challenge(user_id).unwrap();
+
+        // Use an invalid signature
+        let result = manager.verify_authentication(
+            &auth_challenge.challenge,
+            &credential_id,
+            b"invalid_signature",
+            1,
+        );
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Fido2Error::InvalidSignature));
+    }
+
+    #[test]
+    fn test_counter_replay_protection() {
+        let mut manager = create_test_manager();
+        let user_id = b"user123";
+        let credential_id = b"cred_id_123".to_vec();
+        let public_key = b"public_key_data".to_vec();
+
+        // Register
+        let reg_challenge = manager
+            .generate_registration_challenge(user_id, "testuser", "Test User")
+            .unwrap();
         manager
-            .verify_authentication(&auth_challenge.challenge, &credential_id, b"sig1", 1)
+            .verify_registration(
+                &reg_challenge.challenge,
+                credential_id.clone(),
+                public_key.clone(),
+            )
             .unwrap();
 
-        // Second authentication with same counter should fail
+        // First authentication with valid signature
+        let auth_challenge = manager.generate_authentication_challenge(user_id).unwrap();
+        let sig1 = compute_test_signature(
+            &public_key,
+            &auth_challenge.challenge,
+            &credential_id,
+            1,
+        );
+        manager
+            .verify_authentication(&auth_challenge.challenge, &credential_id, &sig1, 1)
+            .unwrap();
+
+        // Second authentication with same counter should fail (replay)
         let auth_challenge2 = manager.generate_authentication_challenge(user_id).unwrap();
-        let result = manager.verify_authentication(&auth_challenge2.challenge, &credential_id, b"sig2", 1);
+        let sig2 = compute_test_signature(
+            &public_key,
+            &auth_challenge2.challenge,
+            &credential_id,
+            1,
+        );
+        let result = manager.verify_authentication(&auth_challenge2.challenge, &credential_id, &sig2, 1);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Fido2Error::CounterDecreased));
     }
