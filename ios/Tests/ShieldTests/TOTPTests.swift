@@ -32,8 +32,8 @@ final class TOTPTests: XCTestCase {
     }
 
     func testBase32KnownValue() {
-        // Test vector: "JBSWY3DPEHPK3PXP" = "Hello!"
-        let decoded = TOTP.secretFromBase32("JBSWY3DPEHPK3PXP")
+        // Test vector: "JBSWY3DPEE" = "Hello!" (RFC 4648 base32)
+        let decoded = TOTP.secretFromBase32("JBSWY3DPEE")
         let expected = Array("Hello!".utf8)
         XCTAssertEqual(decoded, expected, "Known base32 value should decode correctly")
     }
