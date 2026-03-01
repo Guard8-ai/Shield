@@ -10,10 +10,11 @@ This audit examined the Shield v2 protocol implementation across 5 programming l
 
 ## Findings
 
-### 🔴 MEDIUM: Missing Padding Length Validation (CVE-PENDING)
+### 🟢 MEDIUM (FIXED in Rust): Missing Padding Length Validation (CVE-PENDING)
 
 **Severity**: MEDIUM
-**Affected**: Python, JavaScript, Go, Java, C (all implementations)
+**Affected**: Python, JavaScript, Go, Java, C (remaining implementations)
+**Fixed in**: Rust (shield-core v2.1.0) — `pad_len` validated against 32-128 bounds before accessing plaintext
 **CWE**: CWE-20 (Improper Input Validation)
 
 **Description**:
@@ -99,34 +100,32 @@ if pad_len < MIN_PADDING or pad_len > MAX_PADDING:
 
 ---
 
-### ⚠️ WARNING: Key Zeroization
+### ✅ WARNING: Key Zeroization
 
-**Status**: PARTIAL
+**Status**: FIXED in Rust, PARTIAL in other languages
 **Key material should be securely erased after use**:
 
+- **Rust**: ✅ **FIXED (v2.1.0)** — `Zeroize`/`ZeroizeOnDrop` on `Shield`, `RatchetSession`, `TOTP`, `SymmetricSignature`, `LamportSignature`. Explicit `Drop` impls for `IdentityProvider`, `SecureSession`, `KeyRotationManager`
 - Python: ❌ No explicit zeroization (relies on garbage collection)
 - JavaScript: ❌ No explicit zeroization (relies on V8 GC)
 - Go: ⚠️ Uses arrays, may not be fully zeroized
 - Java: ❌ No explicit zeroization (JVM GC)
 - C: ❌ Need to verify `memset_s()` or explicit_bzero() usage
 
-**Recommendation**: Add explicit zeroization for all key material, especially in C.
+**Recommendation**: Add explicit zeroization for non-Rust implementations, especially C.
 
 ---
 
-### ⚠️ WARNING: Integer Overflow Potential (C)
+### ✅ WARNING: Integer Overflow Potential (C) + Counter Overflow (All)
 
-**Status**: NEEDS REVIEW
-**C implementation performs unchecked arithmetic**:
+**Status**: FIXED in Rust, NEEDS REVIEW in C
 
-Location: `c/src/shield.c:499`
-```c
-data_start = SHIELD_V2_HEADER_SIZE + pad_len;
-```
+**C implementation** (`c/src/shield.c:499`):
+- Bounds check exists on line 501, likely safe but should add explicit validation
 
-- If `pad_len = 255`, `data_start = 272` (safe)
-- Checked against `data_len` on line 501 (bounds check exists)
-- **Status**: Likely safe, but should add explicit validation
+**Rust (shield-core v2.1.0)** — Counter overflow guards added in all 8 keystream generators:
+- `shield.rs`, `stream.rs` (encrypt/decrypt), `ratchet.rs` (encrypt/decrypt), `rotation.rs`, `group.rs`, `identity.rs`
+- Assertion: `u32::try_from(num_blocks).is_ok()` prevents silent wraparound at >137GB
 
 ---
 
@@ -227,12 +226,29 @@ data_start = SHIELD_V2_HEADER_SIZE + pad_len;
 
 ---
 
+## Rust Core v2.1 Hardening Summary (2026-03-01)
+
+The Rust core (`shield-core`) received comprehensive security hardening based on a separate 189-finding assessment:
+
+| Hardening | Status |
+|-----------|--------|
+| Key separation (enc_key/mac_key via HMAC domain labels) | ✅ Fixed |
+| HMAC-SHA256 in 13 internal call sites | ✅ Fixed |
+| Constant-time MAC comparisons (`subtle::ConstantTimeEq`) | ✅ Fixed |
+| Zeroize on Drop for all key-holding structs | ✅ Fixed |
+| Counter overflow guards (8 keystream generators) | ✅ Fixed |
+| Padding validation (32-128 bounds check) | ✅ Fixed |
+| Modulo bias elimination (rejection sampling) | ✅ Fixed |
+| Timing-safe authentication (anti-enumeration) | ✅ Fixed |
+| TOTP hardening (digits, window, recovery codes) | ✅ Fixed |
+| Sync channel timeout enforcement | ✅ Fixed |
+
 ## Conclusion
 
-The Shield v2 implementation is **generally secure** with strong cryptographic foundations. The identified padding validation issue poses a **MEDIUM risk** but requires MAC bypass to exploit (computationally infeasible). Immediate remediation is recommended for defense-in-depth.
+The Shield v2 implementation is **generally secure** with strong cryptographic foundations. The Rust core has been comprehensively hardened (v2.1.0). Remaining padding validation issues affect non-Rust implementations only and require MAC bypass to exploit (computationally infeasible).
 
-**Overall Risk Rating**: MEDIUM
-**Recommended Action**: Apply Priority 1 fixes before production deployment
+**Overall Risk Rating**: LOW (Rust), MEDIUM (other languages)
+**Recommended Action**: Apply Priority 1 fixes in non-Rust implementations
 **Timeline**: 1-2 days for fixes + testing
 
 ---

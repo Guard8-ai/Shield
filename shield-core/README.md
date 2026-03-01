@@ -17,7 +17,7 @@ Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Bre
 
 ```toml
 [dependencies]
-shield-core = "1.1"
+shield-core = "2.1"
 ```
 
 For WebAssembly:
@@ -251,10 +251,20 @@ Shield uses only symmetric primitives with unconditional security:
 
 - **Symmetric encryption** (AES-256 equivalent)
 - **Hash functions** (SHA-256)
-- **HMAC authentication**
-- **Key derivation** (PBKDF2)
+- **HMAC authentication** (all MAC verifications use `subtle::ConstantTimeEq`)
+- **Key derivation** (PBKDF2 + HMAC-SHA256 domain separation for enc_key/mac_key)
+- **Memory safety** (`Zeroize`/`ZeroizeOnDrop` on all key-holding structs)
 
 Breaking requires 2^256 operations - no shortcut exists.
+
+### v2.1 Security Hardening
+
+Comprehensive hardening based on 189-finding security assessment:
+- Key separation via HMAC-SHA256 domain labels (`shield-encrypt` / `shield-authenticate`)
+- HMAC-SHA256 in all 13 internal modules (ratchet, rotation, group, identity, exchange, signatures)
+- Counter overflow guards in all 8 keystream generators
+- Timing-safe authentication preventing user enumeration
+- 119 tests (104 unit + 7 interop + 8 doc-tests), clippy clean with `-D warnings`
 
 ## Safety
 

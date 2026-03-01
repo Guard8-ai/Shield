@@ -12,6 +12,9 @@ This document outlines the requirements for a third-party security audit of Shie
    - HMAC-SHA256 authentication
    - Nonce generation and handling
    - Key material handling and zeroization
+   - Key separation (enc_key/mac_key via HMAC domain labels) — v2.1
+   - HMAC-SHA256 in internal modules (replacing raw SHA256) — v2.1
+   - Counter overflow protection — v2.1
 
 2. **Core Components**
    - `Shield` class (password-based encryption)
@@ -45,8 +48,11 @@ This document outlines the requirements for a third-party security audit of Shie
 | 256-bit security | Key space is 2^256, no shortcuts |
 | Tamper detection | Any modification detected by HMAC |
 | Forward secrecy | Past messages safe if key compromised |
-| Constant-time | No timing side channels |
+| Constant-time | No timing side channels (`subtle::ConstantTimeEq`) |
 | Memory safety | No buffer overflows or use-after-free |
+| Key separation | Separate enc_key/mac_key via HMAC domain labels |
+| Zeroize on Drop | All key-holding structs securely clear memory |
+| Counter overflow | Hard failure at 2^32 blocks (137GB) |
 
 ## Audit Methodology
 

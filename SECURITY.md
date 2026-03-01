@@ -78,8 +78,14 @@ Shield uses a SHA256-based counter mode instead of AES for philosophical consist
 ### How Passwords Become Keys
 
 ```
-password + service → PBKDF2(password, SHA256("shield:" + service), 100,000) → 256-bit key
+master_key = PBKDF2(password, SHA256(service), 100,000) → 256-bit key
+
+# v2.1: Key separation via HMAC domain labels
+enc_key = HMAC-SHA256(master_key, "shield-encrypt")
+mac_key = HMAC-SHA256(master_key, "shield-authenticate")
 ```
+
+Key separation prevents cross-protocol key reuse (CWE-323). The `enc_key` is used for keystream generation and the `mac_key` for HMAC authentication.
 
 ### Password Recommendations
 
@@ -168,25 +174,28 @@ For quantum-safe document signing:
 
 ### Constant-Time Operations
 
-Shield uses constant-time comparison for all security-critical operations:
+All MAC verifications use constant-time comparison to prevent timing attacks (CWE-208):
 
-```python
-def constant_time_eq(a, b):
-    if len(a) != len(b):
-        return False
-    result = 0
-    for x, y in zip(a, b):
-        result |= x ^ y
-    return result == 0
-```
+- **Rust**: `subtle::ConstantTimeEq` for all MAC and secret comparisons
+- **Python**: `hmac.compare_digest()`
+- **JavaScript**: `crypto.timingSafeEqual()`
+- **Go**: `subtle.ConstantTimeCompare()`
 
-This prevents timing attacks that leak information through execution time.
+Additionally, `IdentityProvider::authenticate()` runs PBKDF2 even for non-existent users to prevent user enumeration timing attacks (CWE-203).
 
-### Memory Handling
+### Memory Handling (v2.1)
 
-- Keys are wiped after use (where language allows)
-- No key material in error messages
-- Minimal key lifetime in memory
+**Rust core** uses the `zeroize` crate for secure key material cleanup:
+
+- `Shield` — encryption keys zeroized on drop (`#[derive(Zeroize, ZeroizeOnDrop)]`)
+- `RatchetSession` — chain keys zeroized on drop
+- `TOTP` — secret zeroized on drop
+- `SymmetricSignature` — signing/verification keys zeroized on drop
+- `LamportSignature` — private key material zeroized on drop
+- `IdentityProvider` — master keys, password hashes, and salts zeroized via explicit `Drop` impl
+- `SecureSession` — session keys zeroized via explicit `Drop` impl
+
+Other language implementations rely on garbage collection with best-effort cleanup.
 
 ---
 
@@ -209,12 +218,30 @@ If you discover a security vulnerability:
 
 | Component | Status |
 |-----------|--------|
-| Core algorithms | Internal review |
+| Rust core (shield-core) | v2.1 security hardening complete (189-finding assessment) |
+| Core algorithms | Internal review + hardened |
 | Python implementation | Internal review |
 | JavaScript implementation | Internal review |
 | Go implementation | Internal review |
 | Formal verification | Planned |
 | External audit | Planned |
+
+### v2.1 Security Hardening (2026-03-01)
+
+Based on a comprehensive 189-finding security assessment, all Rust-applicable findings were resolved:
+
+- **Key separation**: Derived separate `enc_key` and `mac_key` via HMAC-SHA256 domain labels
+- **HMAC-SHA256 upgrade**: Replaced 13 internal `SHA256(key||data)` patterns with HMAC-SHA256
+- **Constant-time comparisons**: All MAC verifications use `subtle::ConstantTimeEq`
+- **Zeroize on Drop**: All key-holding structs securely clear memory
+- **Counter overflow guards**: All 8 keystream generators prevent silent `u32` wraparound
+- **Sync channel timeout**: TCP handshake enforces configurable timeout
+- **TOTP hardening**: Digits clamping, window=0 exact-match, 64-bit recovery codes
+- **CLI security**: Password input via stdin, `--force` for overwrites
+- **Modulo bias elimination**: Padding uses rejection sampling
+- **Padding validation**: Decryption rejects out-of-bounds `pad_len`
+
+Test count: 119 tests (104 unit + 7 interop + 8 doc-tests), clippy clean with `-D warnings`.
 
 ---
 

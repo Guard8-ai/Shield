@@ -8,7 +8,7 @@
 // Crypto block counters are intentionally u32 - data >4GB would have other issues
 #![allow(clippy::cast_possible_truncation)]
 
-use ring::{digest, hmac};
+use ring::hmac;
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -108,35 +108,28 @@ impl RatchetSession {
     }
 }
 
-/// Derive chain key from root and label.
+/// Derive chain key from root and label using HMAC-SHA256 (keyed PRF).
 fn derive_chain_key(root: &[u8; 32], label: &[u8]) -> [u8; 32] {
-    let mut data = Vec::with_capacity(root.len() + label.len());
-    data.extend_from_slice(root);
-    data.extend_from_slice(label);
-
-    let hash = digest::digest(&digest::SHA256, &data);
+    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, root);
+    let tag = hmac::sign(&hmac_key, label);
     let mut result = [0u8; 32];
-    result.copy_from_slice(hash.as_ref());
+    result.copy_from_slice(&tag.as_ref()[..32]);
     result
 }
 
-/// Ratchet chain forward, returning (`new_chain`, `message_key`).
+/// Ratchet chain forward using HMAC-SHA256, returning (`new_chain`, `message_key`).
 fn ratchet_chain(chain_key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
-    // New chain key
-    let mut chain_data = Vec::with_capacity(chain_key.len() + 5);
-    chain_data.extend_from_slice(chain_key);
-    chain_data.extend_from_slice(b"chain");
-    let new_chain_hash = digest::digest(&digest::SHA256, &chain_data);
-    let mut new_chain = [0u8; 32];
-    new_chain.copy_from_slice(new_chain_hash.as_ref());
+    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, chain_key);
 
-    // Message key
-    let mut msg_data = Vec::with_capacity(chain_key.len() + 7);
-    msg_data.extend_from_slice(chain_key);
-    msg_data.extend_from_slice(b"message");
-    let msg_hash = digest::digest(&digest::SHA256, &msg_data);
+    // New chain key = HMAC(chain_key, "chain")
+    let new_chain_tag = hmac::sign(&hmac_key, b"chain");
+    let mut new_chain = [0u8; 32];
+    new_chain.copy_from_slice(&new_chain_tag.as_ref()[..32]);
+
+    // Message key = HMAC(chain_key, "message")
+    let msg_tag = hmac::sign(&hmac_key, b"message");
     let mut msg_key = [0u8; 32];
-    msg_key.copy_from_slice(msg_hash.as_ref());
+    msg_key.copy_from_slice(&msg_tag.as_ref()[..32]);
 
     (new_chain, msg_key)
 }
@@ -154,16 +147,18 @@ fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8], counter: u64) -> Result<Ve
     data.extend_from_slice(&counter_bytes);
     data.extend_from_slice(plaintext);
 
-    // Generate keystream
-    let mut keystream = Vec::with_capacity(data.len().div_ceil(32) * 32);
-    for i in 0..data.len().div_ceil(32) {
+    // Generate keystream using HMAC-SHA256 (keyed PRF)
+    let num_blocks = data.len().div_ceil(32);
+    assert!(u32::try_from(num_blocks).is_ok(), "keystream too long: counter overflow");
+    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+    let mut keystream = Vec::with_capacity(num_blocks * 32);
+    for i in 0..num_blocks {
         let block_counter = (i as u32).to_le_bytes();
-        let mut hash_input = Vec::with_capacity(key.len() + nonce.len() + 4);
-        hash_input.extend_from_slice(key);
-        hash_input.extend_from_slice(&nonce);
-        hash_input.extend_from_slice(&block_counter);
-        let hash = digest::digest(&digest::SHA256, &hash_input);
-        keystream.extend_from_slice(hash.as_ref());
+        let mut block_data = Vec::with_capacity(nonce.len() + 4);
+        block_data.extend_from_slice(&nonce);
+        block_data.extend_from_slice(&block_counter);
+        let tag = hmac::sign(&hmac_key, &block_data);
+        keystream.extend_from_slice(tag.as_ref());
     }
 
     // XOR encrypt
@@ -210,16 +205,18 @@ fn decrypt_with_key(key: &[u8; 32], encrypted: &[u8]) -> Result<(Vec<u8>, u64)> 
         return Err(ShieldError::AuthenticationFailed);
     }
 
-    // Generate keystream
-    let mut keystream = Vec::with_capacity(ciphertext.len().div_ceil(32) * 32);
-    for i in 0..ciphertext.len().div_ceil(32) {
+    // Generate keystream using HMAC-SHA256 (keyed PRF)
+    let num_blocks = ciphertext.len().div_ceil(32);
+    assert!(u32::try_from(num_blocks).is_ok(), "keystream too long: counter overflow");
+    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+    let mut keystream = Vec::with_capacity(num_blocks * 32);
+    for i in 0..num_blocks {
         let block_counter = (i as u32).to_le_bytes();
-        let mut hash_input = Vec::with_capacity(key.len() + nonce.len() + 4);
-        hash_input.extend_from_slice(key);
-        hash_input.extend_from_slice(nonce);
-        hash_input.extend_from_slice(&block_counter);
-        let hash = digest::digest(&digest::SHA256, &hash_input);
-        keystream.extend_from_slice(hash.as_ref());
+        let mut block_data = Vec::with_capacity(nonce.len() + 4);
+        block_data.extend_from_slice(nonce);
+        block_data.extend_from_slice(&block_counter);
+        let tag = hmac::sign(&hmac_key, &block_data);
+        keystream.extend_from_slice(tag.as_ref());
     }
 
     // XOR decrypt

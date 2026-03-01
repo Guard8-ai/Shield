@@ -16,8 +16,9 @@ use crate::error::{Result, ShieldError};
 
 /// Generate keystream using HMAC-SHA256 (keyed PRF).
 fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
-    let mut keystream = Vec::with_capacity(length.div_ceil(32) * 32);
     let num_blocks = length.div_ceil(32);
+    assert!(u32::try_from(num_blocks).is_ok(), "keystream too long: counter overflow");
+    let mut keystream = Vec::with_capacity(num_blocks * 32);
     let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
 
     for i in 0..num_blocks {
