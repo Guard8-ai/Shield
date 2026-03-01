@@ -801,7 +801,7 @@ func TestFingerprints(t *testing.T) {
 	maxAge := int64(DefaultMaxAgeMs)
 	s := New("password", "service", &maxAge)
 	// Just verify key exists
-	if len(s.Key()) != KeySize {
+	if len(s.DerivedKey()) != KeySize {
 		t.Errorf("Key should be %d bytes", KeySize)
 	}
 

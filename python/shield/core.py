@@ -82,6 +82,9 @@ class Shield:
         self._key = hashlib.pbkdf2_hmac(
             "sha256", password.encode(), salt, iterations
         )
+        # Derive separated subkeys using HMAC-SHA256 (Shield's own primitive)
+        self._enc_key = hmac.new(self._key, b"shield-encrypt", hashlib.sha256).digest()
+        self._mac_key = hmac.new(self._key, b"shield-authenticate", hashlib.sha256).digest()
         self._counter = 0
         self._max_age_ms = max_age_ms
 
@@ -104,6 +107,8 @@ class Shield:
 
         instance = cls.__new__(cls)
         instance._key = key
+        instance._enc_key = hmac.new(key, b"shield-encrypt", hashlib.sha256).digest()
+        instance._mac_key = hmac.new(key, b"shield-authenticate", hashlib.sha256).digest()
         instance._counter = 0
         instance._max_age_ms = 60_000
         return instance
@@ -179,22 +184,27 @@ class Shield:
         timestamp_ms = int(time.time() * 1000)
         timestamp_bytes = struct.pack("<Q", timestamp_ms)
 
-        # Random padding: 32-128 bytes
-        pad_len = int.from_bytes(os.urandom(1), "little") % (MAX_PADDING - MIN_PADDING + 1) + MIN_PADDING
+        # Random padding: 32-128 bytes (rejection sampling to avoid modulo bias)
+        pad_range = MAX_PADDING - MIN_PADDING + 1  # 97
+        while True:
+            val = os.urandom(1)[0]
+            if val < pad_range * (256 // pad_range):  # Reject biased values
+                pad_len = (val % pad_range) + MIN_PADDING
+                break
         pad_len_byte = struct.pack("B", pad_len)
         padding = os.urandom(pad_len)
 
         # Data to encrypt: counter || timestamp || pad_len || padding || plaintext
         data = counter_bytes + timestamp_bytes + pad_len_byte + padding + plaintext
 
-        # Generate keystream
-        keystream = _generate_keystream(self._key, nonce, len(data))
+        # Generate keystream (using encryption subkey)
+        keystream = _generate_keystream(self._enc_key, nonce, len(data))
 
         # XOR encrypt
         ciphertext = bytes(p ^ k for p, k in zip(data, keystream))
 
-        # HMAC authenticate
-        mac = hmac.new(self._key, nonce + ciphertext, hashlib.sha256).digest()[
+        # HMAC authenticate (using MAC subkey)
+        mac = hmac.new(self._mac_key, nonce + ciphertext, hashlib.sha256).digest()[
             :MAC_SIZE
         ]
 
@@ -218,16 +228,16 @@ class Shield:
         ciphertext = encrypted[NONCE_SIZE:-MAC_SIZE]
         mac = encrypted[-MAC_SIZE:]
 
-        # Verify MAC first (constant-time)
+        # Verify MAC (constant-time, using MAC subkey)
         expected_mac = hmac.new(
-            self._key, nonce + ciphertext, hashlib.sha256
+            self._mac_key, nonce + ciphertext, hashlib.sha256
         ).digest()[:MAC_SIZE]
 
         if not hmac.compare_digest(mac, expected_mac):
             return None
 
-        # Decrypt
-        keystream = _generate_keystream(self._key, nonce, len(ciphertext))
+        # Decrypt (using encryption subkey)
+        keystream = _generate_keystream(self._enc_key, nonce, len(ciphertext))
         decrypted = bytes(c ^ k for c, k in zip(ciphertext, keystream))
 
         # Auto-detect v2 by timestamp range (2020-2100)
@@ -280,16 +290,16 @@ class Shield:
         ciphertext = encrypted[NONCE_SIZE:-MAC_SIZE]
         mac = encrypted[-MAC_SIZE:]
 
-        # Verify MAC first (constant-time)
+        # Verify MAC (constant-time, using MAC subkey)
         expected_mac = hmac.new(
-            self._key, nonce + ciphertext, hashlib.sha256
+            self._mac_key, nonce + ciphertext, hashlib.sha256
         ).digest()[:MAC_SIZE]
 
         if not hmac.compare_digest(mac, expected_mac):
             return None
 
-        # Decrypt
-        keystream = _generate_keystream(self._key, nonce, len(ciphertext))
+        # Decrypt (using encryption subkey)
+        keystream = _generate_keystream(self._enc_key, nonce, len(ciphertext))
         decrypted = bytes(c ^ k for c, k in zip(ciphertext, keystream))
 
         # v1 format: skip counter (8 bytes)

@@ -86,12 +86,7 @@ impl WasmShield {
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
-    /// Get the derived key (for interop testing).
-    #[wasm_bindgen]
-    #[must_use]
-    pub fn key(&self) -> Vec<u8> {
-        self.inner.key().to_vec()
-    }
+    // key() getter removed - exposing derived key is a security risk
 }
 
 /// Quick encrypt with pre-shared key (WASM export).

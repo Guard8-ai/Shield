@@ -365,6 +365,7 @@ impl TEEKeyManager {
         }
 
         // Mix in the master key
+        #[allow(deprecated)]
         ctx.update(self.shield.key());
 
         let digest = ctx.finish();

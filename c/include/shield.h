@@ -52,6 +52,8 @@ typedef enum {
 /* Shield context */
 typedef struct {
     uint8_t key[SHIELD_KEY_SIZE];
+    uint8_t enc_key[SHIELD_KEY_SIZE];  /* encryption subkey */
+    uint8_t mac_key[SHIELD_KEY_SIZE];  /* authentication subkey */
     int64_t max_age_ms;  /* -1 = disabled */
 } shield_t;
 
@@ -176,10 +178,7 @@ uint8_t *shield_quick_encrypt(const uint8_t *key, size_t key_len, const uint8_t 
  */
 uint8_t *shield_quick_decrypt(const uint8_t *key, size_t key_len, const uint8_t *ciphertext, size_t ciphertext_len, size_t *out_len, shield_error_t *err);
 
-/**
- * Get the derived key from Shield context.
- */
-const uint8_t *shield_get_key(const shield_t *ctx);
+/* shield_get_key removed in v2.1 - exposing derived key is a security risk */
 
 /**
  * Securely wipe Shield context.

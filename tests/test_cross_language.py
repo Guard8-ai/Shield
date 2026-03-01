@@ -473,7 +473,7 @@ import (
 
 func main() {{
     s := shield.New("{TEST_PASSWORD}", "{TEST_SERVICE}")
-    fmt.Print(hex.EncodeToString(s.Key()))
+    fmt.Print(hex.EncodeToString(s.DerivedKey()))
 }}
 '''
     go_dir = os.path.join(os.path.dirname(__file__), '..', 'go')
