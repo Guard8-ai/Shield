@@ -4,6 +4,7 @@
 //! Adapted from SaaSClient-SideLicensingSystem with enhanced cross-platform support.
 
 use crate::error::{Result, ShieldError};
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::process::Command;
 
 /// Fingerprint collection mode.
