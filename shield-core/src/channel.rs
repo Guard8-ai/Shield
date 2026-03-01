@@ -7,21 +7,31 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use shield_core::channel::{ShieldChannel, ChannelConfig};
+//! use std::net::{TcpListener, TcpStream};
 //!
-//! // Both parties share a password
-//! let config = ChannelConfig::new("shared-secret", "my-service");
+//! fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+//!     let config = ChannelConfig::new("shared-secret", "my-service");
 //!
-//! // Server side
-//! let mut server = ShieldChannel::accept(stream, &config)?;
+//!     // Server thread
+//!     let server_config = config.clone();
+//!     let server = std::thread::spawn(move || {
+//!         let listener = TcpListener::bind("127.0.0.1:9876").unwrap();
+//!         let (stream, _) = listener.accept().unwrap();
+//!         let mut ch = ShieldChannel::accept(stream, &server_config).unwrap();
+//!         let msg = ch.recv().unwrap();
+//!         assert_eq!(msg, b"Hello server!");
+//!     });
 //!
-//! // Client side
-//! let mut client = ShieldChannel::connect(stream, &config)?;
+//!     // Client side
+//!     let stream = TcpStream::connect("127.0.0.1:9876")?;
+//!     let mut client = ShieldChannel::connect(stream, &config)?;
+//!     client.send(b"Hello server!")?;
 //!
-//! // Send/receive with forward secrecy
-//! client.send(b"Hello server!")?;
-//! let msg = server.recv()?;
+//!     server.join().unwrap();
+//!     Ok(())
+//! }
 //! ```
 
 // Crypto block counters are intentionally u32
@@ -653,7 +663,7 @@ mod tests {
         let config = ChannelConfig::new("password", "service");
 
         // 64KB message
-        let large_data: Vec<u8> = (0..65536).map(|i| (i % 256) as u8).collect();
+        let large_data: Vec<u8> = (0..65536_u32).map(|i| (i % 256) as u8).collect();
 
         let server_config = config.clone();
         let expected_data = large_data.clone();
@@ -721,10 +731,10 @@ mod tests {
         // Different services should still connect (service is metadata, not part of key)
         // But they will have different session keys due to different service in PAKE
         // This test verifies the behavior - adjust based on actual design
-        if client_result.is_ok() && server_result.is_ok() {
+        if let (Ok(client), Ok(server)) = (client_result, server_result) {
             // If both succeed, verify services are different
-            assert_eq!(client_result.unwrap().service(), "service1");
-            assert_eq!(server_result.unwrap().service(), "service2");
+            assert_eq!(client.service(), "service1");
+            assert_eq!(server.service(), "service2");
         }
     }
 
@@ -759,7 +769,7 @@ mod tests {
 
         assert_eq!(listener.config().service(), "service");
 
-        let _ = listener.into_inner();
+        listener.into_inner();
     }
 
     #[test]
