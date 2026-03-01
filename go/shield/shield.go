@@ -60,7 +60,21 @@ var (
 // Shield provides password-based encryption.
 type Shield struct {
 	key      [KeySize]byte
-	maxAgeMs *int64 // nil = disabled, otherwise maximum age in milliseconds
+	encKey   [KeySize]byte // encryption subkey
+	macKey   [KeySize]byte // authentication subkey
+	maxAgeMs *int64        // nil = disabled, otherwise maximum age in milliseconds
+}
+
+// deriveSubkeys derives separated encryption and MAC subkeys from a master key using HMAC-SHA256.
+func deriveSubkeys(masterKey []byte) (encKey, macKey [KeySize]byte) {
+	encMac := hmac.New(sha256.New, masterKey)
+	encMac.Write([]byte("shield-encrypt"))
+	copy(encKey[:], encMac.Sum(nil))
+
+	macHmac := hmac.New(sha256.New, masterKey)
+	macHmac.Write([]byte("shield-authenticate"))
+	copy(macKey[:], macHmac.Sum(nil))
+	return
 }
 
 // New creates a Shield instance from password and service name.
@@ -71,6 +85,7 @@ func New(password, service string, maxAgeMs *int64) *Shield {
 
 	s := &Shield{maxAgeMs: maxAgeMs}
 	copy(s.key[:], key)
+	s.encKey, s.macKey = deriveSubkeys(s.key[:])
 	return s
 }
 
@@ -82,27 +97,29 @@ func WithKey(key []byte) (*Shield, error) {
 	defaultMaxAge := int64(DefaultMaxAgeMs)
 	s := &Shield{maxAgeMs: &defaultMaxAge}
 	copy(s.key[:], key)
+	s.encKey, s.macKey = deriveSubkeys(s.key[:])
 	return s, nil
 }
 
 // Encrypt encrypts plaintext and returns authenticated ciphertext (v2 format).
 // Format: nonce(16) || encrypted(counter(8) || timestamp(8) || pad_len(1) || padding(32-128) || plaintext) || mac(16)
 func (s *Shield) Encrypt(plaintext []byte) ([]byte, error) {
-	return EncryptWithKey(s.key[:], plaintext)
+	return encryptWithSeparatedKeys(s.encKey[:], s.macKey[:], plaintext)
 }
 
 // Decrypt decrypts and verifies ciphertext (auto-detects v1/v2).
 func (s *Shield) Decrypt(ciphertext []byte) ([]byte, error) {
-	return DecryptWithKey(s.key[:], ciphertext, s.maxAgeMs)
+	return decryptWithSeparatedKeys(s.encKey[:], s.macKey[:], ciphertext, s.maxAgeMs)
 }
 
 // DecryptV1 explicitly decrypts v1 format (for legacy compatibility).
 func (s *Shield) DecryptV1(ciphertext []byte) ([]byte, error) {
-	return DecryptV1WithKey(s.key[:], ciphertext)
+	return decryptV1WithSeparatedKeys(s.encKey[:], s.macKey[:], ciphertext)
 }
 
-// Key returns the derived key.
-func (s *Shield) Key() []byte {
+// Deprecated: DerivedKey exposes the raw key and will be removed in v3.
+// Use encrypt/decrypt operations instead. Exposed only for cross-language interop tests.
+func (s *Shield) DerivedKey() []byte {
 	return s.key[:]
 }
 
@@ -120,14 +137,14 @@ func QuickEncrypt(key, plaintext []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	// Generate keystream and XOR (no counter prefix)
+	// Generate keystream and XOR (no counter prefix, uses raw key for quick functions)
 	keystream := generateKeystream(key, nonce, len(plaintext))
 	ciphertext := make([]byte, len(plaintext))
 	for i := range plaintext {
 		ciphertext[i] = plaintext[i] ^ keystream[i]
 	}
 
-	// Compute HMAC over nonce || ciphertext
+	// Compute HMAC over nonce || ciphertext (uses raw key for quick functions)
 	mac := hmac.New(sha256.New, key)
 	mac.Write(nonce)
 	mac.Write(ciphertext)
@@ -157,7 +174,7 @@ func QuickDecrypt(key, encrypted []byte) ([]byte, error) {
 	ciphertext := encrypted[NonceSize : len(encrypted)-MACSize]
 	receivedMAC := encrypted[len(encrypted)-MACSize:]
 
-	// Verify MAC
+	// Verify MAC (uses raw key for quick functions)
 	mac := hmac.New(sha256.New, key)
 	mac.Write(nonce)
 	mac.Write(ciphertext)
@@ -167,7 +184,7 @@ func QuickDecrypt(key, encrypted []byte) ([]byte, error) {
 		return nil, ErrAuthenticationFailed
 	}
 
-	// Decrypt (no counter prefix to skip)
+	// Decrypt (no counter prefix to skip, uses raw key for quick functions)
 	keystream := generateKeystream(key, nonce, len(ciphertext))
 	decrypted := make([]byte, len(ciphertext))
 	for i := range ciphertext {
@@ -178,8 +195,15 @@ func QuickDecrypt(key, encrypted []byte) ([]byte, error) {
 }
 
 // EncryptWithKey encrypts using an explicit key (v2 format).
-// Inner format: counter(8) || timestamp_ms(8) || pad_len(1) || random_padding(32-128) || plaintext
+// Derives subkeys internally for key separation.
 func EncryptWithKey(key, plaintext []byte) ([]byte, error) {
+	encKey, macKey := deriveSubkeys(key)
+	return encryptWithSeparatedKeys(encKey[:], macKey[:], plaintext)
+}
+
+// encryptWithSeparatedKeys encrypts using pre-derived encryption and MAC subkeys.
+// Inner format: counter(8) || timestamp_ms(8) || pad_len(1) || random_padding(32-128) || plaintext
+func encryptWithSeparatedKeys(encKey, macKey, plaintext []byte) ([]byte, error) {
 	// Generate random nonce
 	nonce := make([]byte, NonceSize)
 	if _, err := rand.Read(nonce); err != nil {
@@ -195,12 +219,20 @@ func EncryptWithKey(key, plaintext []byte) ([]byte, error) {
 	timestamp := make([]byte, 8)
 	binary.LittleEndian.PutUint64(timestamp, uint64(timestampMs))
 
-	// Random padding: 32-128 bytes
-	randomByte := make([]byte, 1)
-	if _, err := rand.Read(randomByte); err != nil {
-		return nil, err
+	// Random padding: 32-128 bytes (rejection sampling to avoid modulo bias)
+	padRange := MaxPadding - MinPadding + 1 // 97
+	var padLen int
+	for {
+		randomByte := make([]byte, 1)
+		if _, err := rand.Read(randomByte); err != nil {
+			return nil, err
+		}
+		val := int(randomByte[0])
+		if val < padRange*(256/padRange) { // Reject biased values
+			padLen = (val % padRange) + MinPadding
+			break
+		}
 	}
-	padLen := int(randomByte[0])%(MaxPadding-MinPadding+1) + MinPadding
 	padLenByte := []byte{byte(padLen)}
 	padding := make([]byte, padLen)
 	if _, err := rand.Read(padding); err != nil {
@@ -220,15 +252,15 @@ func EncryptWithKey(key, plaintext []byte) ([]byte, error) {
 	pos += padLen
 	copy(dataToEncrypt[pos:], plaintext)
 
-	// Generate keystream and XOR
-	keystream := generateKeystream(key, nonce, len(dataToEncrypt))
+	// Generate keystream and XOR (using encryption subkey)
+	keystream := generateKeystream(encKey, nonce, len(dataToEncrypt))
 	ciphertext := make([]byte, len(dataToEncrypt))
 	for i := range dataToEncrypt {
 		ciphertext[i] = dataToEncrypt[i] ^ keystream[i]
 	}
 
-	// Compute HMAC over nonce || ciphertext
-	mac := hmac.New(sha256.New, key)
+	// Compute HMAC over nonce || ciphertext (using MAC subkey)
+	mac := hmac.New(sha256.New, macKey)
 	mac.Write(nonce)
 	mac.Write(ciphertext)
 	tag := mac.Sum(nil)[:MACSize]
@@ -243,7 +275,14 @@ func EncryptWithKey(key, plaintext []byte) ([]byte, error) {
 }
 
 // DecryptWithKey decrypts using an explicit key (auto-detects v1/v2).
+// Derives subkeys internally for key separation.
 func DecryptWithKey(key, encrypted []byte, maxAgeMs *int64) ([]byte, error) {
+	encKey, macKey := deriveSubkeys(key)
+	return decryptWithSeparatedKeys(encKey[:], macKey[:], encrypted, maxAgeMs)
+}
+
+// decryptWithSeparatedKeys decrypts using pre-derived encryption and MAC subkeys.
+func decryptWithSeparatedKeys(encKey, macKey, encrypted []byte, maxAgeMs *int64) ([]byte, error) {
 	if len(encrypted) < MinCiphertextSize {
 		return nil, ErrCiphertextTooShort
 	}
@@ -253,8 +292,8 @@ func DecryptWithKey(key, encrypted []byte, maxAgeMs *int64) ([]byte, error) {
 	ciphertext := encrypted[NonceSize : len(encrypted)-MACSize]
 	receivedMAC := encrypted[len(encrypted)-MACSize:]
 
-	// Verify MAC
-	mac := hmac.New(sha256.New, key)
+	// Verify MAC (using MAC subkey)
+	mac := hmac.New(sha256.New, macKey)
 	mac.Write(nonce)
 	mac.Write(ciphertext)
 	expectedMAC := mac.Sum(nil)[:MACSize]
@@ -263,8 +302,8 @@ func DecryptWithKey(key, encrypted []byte, maxAgeMs *int64) ([]byte, error) {
 		return nil, ErrAuthenticationFailed
 	}
 
-	// Decrypt
-	keystream := generateKeystream(key, nonce, len(ciphertext))
+	// Decrypt (using encryption subkey)
+	keystream := generateKeystream(encKey, nonce, len(ciphertext))
 	decrypted := make([]byte, len(ciphertext))
 	for i := range ciphertext {
 		decrypted[i] = ciphertext[i] ^ keystream[i]
@@ -310,7 +349,14 @@ func DecryptWithKey(key, encrypted []byte, maxAgeMs *int64) ([]byte, error) {
 }
 
 // DecryptV1WithKey explicitly decrypts v1 format (for legacy compatibility).
+// Derives subkeys internally for key separation.
 func DecryptV1WithKey(key, encrypted []byte) ([]byte, error) {
+	encKey, macKey := deriveSubkeys(key)
+	return decryptV1WithSeparatedKeys(encKey[:], macKey[:], encrypted)
+}
+
+// decryptV1WithSeparatedKeys decrypts v1 format using pre-derived subkeys.
+func decryptV1WithSeparatedKeys(encKey, macKey, encrypted []byte) ([]byte, error) {
 	if len(encrypted) < MinCiphertextSize {
 		return nil, ErrCiphertextTooShort
 	}
@@ -320,8 +366,8 @@ func DecryptV1WithKey(key, encrypted []byte) ([]byte, error) {
 	ciphertext := encrypted[NonceSize : len(encrypted)-MACSize]
 	receivedMAC := encrypted[len(encrypted)-MACSize:]
 
-	// Verify MAC
-	mac := hmac.New(sha256.New, key)
+	// Verify MAC (using MAC subkey)
+	mac := hmac.New(sha256.New, macKey)
 	mac.Write(nonce)
 	mac.Write(ciphertext)
 	expectedMAC := mac.Sum(nil)[:MACSize]
@@ -330,8 +376,8 @@ func DecryptV1WithKey(key, encrypted []byte) ([]byte, error) {
 		return nil, ErrAuthenticationFailed
 	}
 
-	// Decrypt
-	keystream := generateKeystream(key, nonce, len(ciphertext))
+	// Decrypt (using encryption subkey)
+	keystream := generateKeystream(encKey, nonce, len(ciphertext))
 	decrypted := make([]byte, len(ciphertext))
 	for i := range ciphertext {
 		decrypted[i] = ciphertext[i] ^ keystream[i]

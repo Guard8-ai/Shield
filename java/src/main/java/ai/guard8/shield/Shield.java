@@ -33,8 +33,19 @@ public class Shield {
     public static final long DEFAULT_MAX_AGE_MS = 60000L;
 
     private final byte[] key;
+    private final byte[] encKey;  // encryption subkey
+    private final byte[] macKey;  // authentication subkey
     private final Long maxAgeMs;  // null = disabled
     private static final SecureRandom random = new SecureRandom();
+
+    /**
+     * Derive separated encryption and MAC subkeys from master key using HMAC-SHA256.
+     */
+    private static byte[][] deriveSubkeys(byte[] masterKey) {
+        byte[] encKey = hmacSha256(masterKey, "shield-encrypt".getBytes());
+        byte[] macKeyDerived = hmacSha256(masterKey, "shield-authenticate".getBytes());
+        return new byte[][] { encKey, macKeyDerived };
+    }
 
     /**
      * Create Shield from password and service name.
@@ -49,6 +60,9 @@ public class Shield {
     public Shield(String password, String service, Long maxAgeMs) {
         byte[] salt = sha256(service.getBytes());
         this.key = pbkdf2(password, salt, ITERATIONS, KEY_SIZE);
+        byte[][] subkeys = deriveSubkeys(this.key);
+        this.encKey = subkeys[0];
+        this.macKey = subkeys[1];
         this.maxAgeMs = maxAgeMs;
     }
 
@@ -67,6 +81,9 @@ public class Shield {
             throw new IllegalArgumentException("Invalid key size");
         }
         this.key = Arrays.copyOf(key, KEY_SIZE);
+        byte[][] subkeys = deriveSubkeys(this.key);
+        this.encKey = subkeys[0];
+        this.macKey = subkeys[1];
         this.maxAgeMs = maxAgeMs;
     }
 
@@ -100,27 +117,29 @@ public class Shield {
      * Encrypt plaintext (v2 format).
      */
     public byte[] encrypt(byte[] plaintext) {
-        return encryptWithKey(key, plaintext);
+        return encryptWithSeparatedKeys(encKey, macKey, plaintext);
     }
 
     /**
      * Decrypt ciphertext (auto-detects v1/v2).
      */
     public byte[] decrypt(byte[] ciphertext) {
-        return decryptWithKey(key, ciphertext, maxAgeMs);
+        return decryptWithSeparatedKeys(encKey, macKey, ciphertext, maxAgeMs);
     }
 
     /**
      * Decrypt v1 format explicitly (for legacy compatibility).
      */
     public byte[] decryptV1(byte[] ciphertext) {
-        return decryptV1WithKey(key, ciphertext);
+        return decryptV1WithSeparatedKeys(encKey, macKey, ciphertext);
     }
 
     /**
-     * Get the derived key.
+     * @deprecated Exposing derived key is a security risk. Will be removed in v3.
+     * For testing only - use encrypt/decrypt operations instead.
      */
-    public byte[] getKey() {
+    @Deprecated
+    byte[] getKey() {
         return Arrays.copyOf(key, KEY_SIZE);
     }
 
@@ -129,6 +148,8 @@ public class Shield {
      */
     public void wipe() {
         Arrays.fill(key, (byte) 0);
+        Arrays.fill(encKey, (byte) 0);
+        Arrays.fill(macKey, (byte) 0);
     }
 
     // ============== Static Methods ==============
@@ -140,7 +161,8 @@ public class Shield {
         if (key.length != KEY_SIZE) {
             throw new IllegalArgumentException("Invalid key size");
         }
-        return encryptWithKey(key, plaintext);
+        byte[][] subkeys = deriveSubkeys(key);
+        return encryptWithSeparatedKeys(subkeys[0], subkeys[1], plaintext);
     }
 
     /**
@@ -150,10 +172,11 @@ public class Shield {
         if (key.length != KEY_SIZE) {
             throw new IllegalArgumentException("Invalid key size");
         }
-        return decryptWithKey(key, ciphertext, null);
+        byte[][] subkeys = deriveSubkeys(key);
+        return decryptWithSeparatedKeys(subkeys[0], subkeys[1], ciphertext, null);
     }
 
-    private static byte[] encryptWithKey(byte[] key, byte[] plaintext) {
+    private static byte[] encryptWithSeparatedKeys(byte[] encKey, byte[] macKey, byte[] plaintext) {
         // Generate random nonce
         byte[] nonce = new byte[NONCE_SIZE];
         random.nextBytes(nonce);
@@ -166,8 +189,16 @@ public class Shield {
         byte[] timestamp = new byte[8];
         ByteBuffer.wrap(timestamp).order(ByteOrder.LITTLE_ENDIAN).putLong(timestampMs);
 
-        // Random padding: 32-128 bytes
-        int padLen = (random.nextInt() & 0xFF) % (MAX_PADDING - MIN_PADDING + 1) + MIN_PADDING;
+        // Random padding: 32-128 bytes (rejection sampling to avoid modulo bias)
+        int padRange = MAX_PADDING - MIN_PADDING + 1; // 97
+        int padLen;
+        do {
+            int val = random.nextInt() & 0xFF;
+            if (val < padRange * (256 / padRange)) { // Reject biased values
+                padLen = (val % padRange) + MIN_PADDING;
+                break;
+            }
+        } while (true);
         byte[] padLenByte = new byte[] { (byte) padLen };
         byte[] padding = new byte[padLen];
         random.nextBytes(padding);
@@ -185,18 +216,18 @@ public class Shield {
         pos += padLen;
         System.arraycopy(plaintext, 0, dataToEncrypt, pos, plaintext.length);
 
-        // Generate keystream and XOR
-        byte[] keystream = generateKeystream(key, nonce, dataToEncrypt.length);
+        // Generate keystream and XOR (using encryption subkey)
+        byte[] keystream = generateKeystream(encKey, nonce, dataToEncrypt.length);
         byte[] ciphertext = new byte[dataToEncrypt.length];
         for (int i = 0; i < dataToEncrypt.length; i++) {
             ciphertext[i] = (byte) (dataToEncrypt[i] ^ keystream[i]);
         }
 
-        // Compute HMAC over nonce || ciphertext
+        // Compute HMAC over nonce || ciphertext (using MAC subkey)
         byte[] macData = new byte[NONCE_SIZE + ciphertext.length];
         System.arraycopy(nonce, 0, macData, 0, NONCE_SIZE);
         System.arraycopy(ciphertext, 0, macData, NONCE_SIZE, ciphertext.length);
-        byte[] mac = hmacSha256(key, macData);
+        byte[] mac = hmacSha256(macKey, macData);
 
         // Format: nonce || ciphertext || mac
         byte[] result = new byte[NONCE_SIZE + ciphertext.length + MAC_SIZE];
@@ -207,7 +238,7 @@ public class Shield {
         return result;
     }
 
-    private static byte[] decryptWithKey(byte[] key, byte[] encrypted, Long maxAgeMs) {
+    private static byte[] decryptWithSeparatedKeys(byte[] encKey, byte[] macKey, byte[] encrypted, Long maxAgeMs) {
         if (encrypted.length < MIN_CIPHERTEXT_SIZE) {
             throw new IllegalArgumentException("Ciphertext too short");
         }
@@ -217,18 +248,18 @@ public class Shield {
         byte[] ciphertext = Arrays.copyOfRange(encrypted, NONCE_SIZE, encrypted.length - MAC_SIZE);
         byte[] receivedMac = Arrays.copyOfRange(encrypted, encrypted.length - MAC_SIZE, encrypted.length);
 
-        // Verify MAC
+        // Verify MAC (using MAC subkey)
         byte[] macData = new byte[NONCE_SIZE + ciphertext.length];
         System.arraycopy(nonce, 0, macData, 0, NONCE_SIZE);
         System.arraycopy(ciphertext, 0, macData, NONCE_SIZE, ciphertext.length);
-        byte[] expectedMac = hmacSha256(key, macData);
+        byte[] expectedMac = hmacSha256(macKey, macData);
 
         if (!constantTimeEquals(receivedMac, Arrays.copyOf(expectedMac, MAC_SIZE))) {
             throw new SecurityException("Authentication failed");
         }
 
-        // Decrypt
-        byte[] keystream = generateKeystream(key, nonce, ciphertext.length);
+        // Decrypt (using encryption subkey)
+        byte[] keystream = generateKeystream(encKey, nonce, ciphertext.length);
         byte[] decrypted = new byte[ciphertext.length];
         for (int i = 0; i < ciphertext.length; i++) {
             decrypted[i] = (byte) (ciphertext[i] ^ keystream[i]);
@@ -273,7 +304,7 @@ public class Shield {
         return Arrays.copyOfRange(decrypted, 8, decrypted.length);
     }
 
-    private static byte[] decryptV1WithKey(byte[] key, byte[] encrypted) {
+    private static byte[] decryptV1WithSeparatedKeys(byte[] encKey, byte[] macKey, byte[] encrypted) {
         if (encrypted.length < MIN_CIPHERTEXT_SIZE) {
             throw new IllegalArgumentException("Ciphertext too short");
         }
@@ -283,18 +314,18 @@ public class Shield {
         byte[] ciphertext = Arrays.copyOfRange(encrypted, NONCE_SIZE, encrypted.length - MAC_SIZE);
         byte[] receivedMac = Arrays.copyOfRange(encrypted, encrypted.length - MAC_SIZE, encrypted.length);
 
-        // Verify MAC
+        // Verify MAC (using MAC subkey)
         byte[] macData = new byte[NONCE_SIZE + ciphertext.length];
         System.arraycopy(nonce, 0, macData, 0, NONCE_SIZE);
         System.arraycopy(ciphertext, 0, macData, NONCE_SIZE, ciphertext.length);
-        byte[] expectedMac = hmacSha256(key, macData);
+        byte[] expectedMac = hmacSha256(macKey, macData);
 
         if (!constantTimeEquals(receivedMac, Arrays.copyOf(expectedMac, MAC_SIZE))) {
             throw new SecurityException("Authentication failed");
         }
 
-        // Decrypt
-        byte[] keystream = generateKeystream(key, nonce, ciphertext.length);
+        // Decrypt (using encryption subkey)
+        byte[] keystream = generateKeystream(encKey, nonce, ciphertext.length);
         byte[] decrypted = new byte[ciphertext.length];
         for (int i = 0; i < ciphertext.length; i++) {
             decrypted[i] = (byte) (ciphertext[i] ^ keystream[i]);

@@ -47,16 +47,40 @@ const MAX_TIMESTAMP_MS: u64 = 4_102_444_800_000;
 /// - Timestamp validation prevents replay attacks
 /// - Random padding (32-128 bytes) obfuscates message length
 ///
+/// **Key separation**: Derives separate subkeys for encryption and authentication
+/// to prevent cross-protocol attacks: `enc_key = SHA256(key || 0x01)`, `mac_key = SHA256(key || 0x02)`.
+///
 /// Key material is securely zeroized from memory when dropped.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Shield {
     key: [u8; 32],
+    enc_key: [u8; 32],
+    mac_key: [u8; 32],
     #[zeroize(skip)]
     #[allow(dead_code)]
     counter: u64,
     /// Maximum message age in milliseconds (None = no replay protection)
     #[zeroize(skip)]
     max_age_ms: Option<u64>,
+}
+
+/// Derive separated encryption and MAC subkeys from a master key using HMAC-SHA256.
+///
+/// Uses Shield's own HMAC primitive as a PRF for key separation:
+/// - `enc_key = HMAC-SHA256(master_key, "shield-encrypt")`
+/// - `mac_key = HMAC-SHA256(master_key, "shield-authenticate")`
+fn derive_subkeys(master_key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, master_key);
+
+    let enc_tag = hmac::sign(&hmac_key, b"shield-encrypt");
+    let mut enc_key = [0u8; 32];
+    enc_key.copy_from_slice(&enc_tag.as_ref()[..32]);
+
+    let mac_tag = hmac::sign(&hmac_key, b"shield-authenticate");
+    let mut mac_key = [0u8; 32];
+    mac_key.copy_from_slice(&mac_tag.as_ref()[..32]);
+
+    (enc_key, mac_key)
 }
 
 impl Shield {
@@ -86,8 +110,11 @@ impl Shield {
             &mut key,
         );
 
+        let (enc_key, mac_key) = derive_subkeys(&key);
         Self {
             key,
+            enc_key,
+            mac_key,
             counter: 0,
             max_age_ms: Some(60_000), // Default: 60 seconds
         }
@@ -96,8 +123,11 @@ impl Shield {
     /// Create Shield with a pre-shared key (no password derivation).
     #[must_use]
     pub fn with_key(key: [u8; 32]) -> Self {
+        let (enc_key, mac_key) = derive_subkeys(&key);
         Self {
             key,
+            enc_key,
+            mac_key,
             counter: 0,
             max_age_ms: Some(60_000),
         }
@@ -155,8 +185,11 @@ impl Shield {
             &mut key,
         );
 
+        let (enc_key, mac_key) = derive_subkeys(&key);
         Ok(Self {
             key,
+            enc_key,
+            mac_key,
             counter: 0,
             max_age_ms: Some(60_000),
         })
@@ -181,11 +214,17 @@ impl Shield {
     /// # Errors
     /// Returns error if random generation fails.
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
-        Self::encrypt_with_key(&self.key, plaintext)
+        Self::encrypt_with_separated_keys(&self.enc_key, &self.mac_key, plaintext)
     }
 
-    /// Encrypt with explicit key (v2 format).
+    /// Encrypt with explicit key (v2 format). Derives separate enc/mac subkeys internally.
     pub fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>> {
+        let (enc_key, mac_key) = derive_subkeys(key);
+        Self::encrypt_with_separated_keys(&enc_key, &mac_key, plaintext)
+    }
+
+    /// Encrypt with pre-separated encryption and MAC keys.
+    fn encrypt_with_separated_keys(enc_key: &[u8; 32], mac_key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>> {
         // Generate random nonce
         let nonce: [u8; NONCE_SIZE] = crate::random::random_bytes()?;
 
@@ -199,9 +238,17 @@ impl Shield {
             .as_millis() as u64;
         let timestamp_bytes = timestamp_ms.to_le_bytes();
 
-        // Random padding: 32-128 bytes
-        let pad_len_byte: [u8; 1] = crate::random::random_bytes()?;
-        let pad_len = (pad_len_byte[0] as usize % (MAX_PADDING - MIN_PADDING + 1)) + MIN_PADDING;
+        // Random padding: 32-128 bytes (rejection sampling to avoid modulo bias)
+        let pad_range = MAX_PADDING - MIN_PADDING + 1; // 97
+        let pad_len = loop {
+            let rand_byte: [u8; 1] = crate::random::random_bytes()?;
+            let val = rand_byte[0] as usize;
+            // Reject values >= 194 (97*2) to eliminate modulo bias
+            // 256 % 97 = 62, so values 0-61 would be over-represented without rejection
+            if val < pad_range * (256 / pad_range) {
+                break (val % pad_range) + MIN_PADDING;
+            }
+        };
         let padding = crate::random::random_vec(pad_len)?;
 
         // Data to encrypt: counter || timestamp || pad_len || padding || plaintext
@@ -212,16 +259,16 @@ impl Shield {
         data_to_encrypt.extend_from_slice(&padding);
         data_to_encrypt.extend_from_slice(plaintext);
 
-        // Generate keystream and XOR
-        let keystream = generate_keystream(key, &nonce, data_to_encrypt.len());
+        // Generate keystream and XOR (using encryption subkey)
+        let keystream = generate_keystream(enc_key, &nonce, data_to_encrypt.len());
         let ciphertext: Vec<u8> = data_to_encrypt
             .iter()
             .zip(keystream.iter())
             .map(|(p, k)| p ^ k)
             .collect();
 
-        // Compute HMAC over nonce || ciphertext
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+        // Compute HMAC over nonce || ciphertext (using MAC subkey)
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, mac_key);
         let mut hmac_data = Vec::with_capacity(NONCE_SIZE + ciphertext.len());
         hmac_data.extend_from_slice(&nonce);
         hmac_data.extend_from_slice(&ciphertext);
@@ -239,6 +286,7 @@ impl Shield {
     /// Decrypt and verify data (supports both v1 and v2 formats).
     ///
     /// Automatically detects v2 format by timestamp range and applies replay protection if configured.
+    /// Tries separated subkeys first, falls back to unified key for backward compatibility.
     ///
     /// # Errors
     /// Returns error if MAC verification fails, ciphertext is malformed, or message is expired.
@@ -269,20 +317,21 @@ impl Shield {
         let ciphertext = &encrypted[NONCE_SIZE..encrypted.len() - MAC_SIZE];
         let mac = &encrypted[encrypted.len() - MAC_SIZE..];
 
-        // Verify MAC first (constant-time)
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
         let mut hmac_data = Vec::with_capacity(NONCE_SIZE + ciphertext.len());
         hmac_data.extend_from_slice(nonce);
         hmac_data.extend_from_slice(ciphertext);
+
+        // Verify MAC with separated mac_key (no fallback to unified key)
+        let (enc_key, mac_key) = derive_subkeys(key);
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
         let expected_tag = hmac::sign(&hmac_key, &hmac_data);
 
-        // Constant-time comparison
         if mac.ct_eq(&expected_tag.as_ref()[..MAC_SIZE]).unwrap_u8() != 1 {
             return Err(ShieldError::AuthenticationFailed);
         }
 
-        // Decrypt
-        let keystream = generate_keystream(key, nonce, ciphertext.len());
+        // Decrypt with separated enc_key
+        let keystream = generate_keystream(&enc_key, nonce, ciphertext.len());
         let decrypted: Vec<u8> = ciphertext
             .iter()
             .zip(keystream.iter())
@@ -298,6 +347,12 @@ impl Shield {
             if (MIN_TIMESTAMP_MS..=MAX_TIMESTAMP_MS).contains(&timestamp_ms) {
                 // This is v2 format
                 let pad_len = decrypted[16] as usize;
+
+                // Validate padding length is within protocol bounds
+                if pad_len < MIN_PADDING || pad_len > MAX_PADDING {
+                    return Err(ShieldError::AuthenticationFailed);
+                }
+
                 let data_start = V2_HEADER_SIZE + pad_len;
 
                 if data_start > decrypted.len() {
@@ -339,8 +394,10 @@ impl Shield {
         Self::decrypt_v1_with_key(&self.key, encrypted)
     }
 
-    /// Decrypt v1 format with explicit key.
+    /// Decrypt v1 format with explicit key (uses separated subkeys).
     pub fn decrypt_v1_with_key(key: &[u8; 32], encrypted: &[u8]) -> Result<Vec<u8>> {
+        let (enc_key, mac_key) = derive_subkeys(key);
+
         if encrypted.len() < MIN_CIPHERTEXT_SIZE {
             return Err(ShieldError::CiphertextTooShort {
                 expected: MIN_CIPHERTEXT_SIZE,
@@ -353,8 +410,8 @@ impl Shield {
         let ciphertext = &encrypted[NONCE_SIZE..encrypted.len() - MAC_SIZE];
         let mac = &encrypted[encrypted.len() - MAC_SIZE..];
 
-        // Verify MAC
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+        // Verify MAC with separated mac_key (no fallback to unified key)
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
         let mut hmac_data = Vec::with_capacity(NONCE_SIZE + ciphertext.len());
         hmac_data.extend_from_slice(nonce);
         hmac_data.extend_from_slice(ciphertext);
@@ -364,8 +421,8 @@ impl Shield {
             return Err(ShieldError::AuthenticationFailed);
         }
 
-        // Decrypt
-        let keystream = generate_keystream(key, nonce, ciphertext.len());
+        // Decrypt with separated enc_key
+        let keystream = generate_keystream(&enc_key, nonce, ciphertext.len());
         let decrypted: Vec<u8> = ciphertext
             .iter()
             .zip(keystream.iter())
@@ -376,7 +433,13 @@ impl Shield {
         Ok(decrypted[8..].to_vec())
     }
 
-    /// Get the derived key (for testing/debugging).
+    /// Get the derived key.
+    ///
+    /// # Deprecation Notice
+    /// Exposing derived keys is a security risk. This method exists only for
+    /// cross-language interop verification and confidential computing.
+    /// Use encrypt/decrypt operations instead. Will be removed in v3.
+    #[deprecated(note = "exposing derived key is a security risk; use encrypt/decrypt instead")]
     #[must_use]
     pub fn key(&self) -> &[u8; 32] {
         &self.key
@@ -494,6 +557,7 @@ mod tests {
     fn test_v1_backward_compat() {
         // Create a v1-format ciphertext manually (no timestamp, no padding)
         let key = [1u8; 32];
+        let (enc_key, mac_key) = derive_subkeys(&key);
         let plaintext = b"v1 message";
 
         // v1 format: nonce(16) || [counter(8) || plaintext] || mac(16)
@@ -504,18 +568,18 @@ mod tests {
         data_to_encrypt.extend_from_slice(&counter_bytes);
         data_to_encrypt.extend_from_slice(plaintext);
 
-        let keystream = generate_keystream(&key, &nonce, data_to_encrypt.len());
+        let keystream = generate_keystream(&enc_key, &nonce, data_to_encrypt.len());
         let ciphertext: Vec<u8> = data_to_encrypt
             .iter()
             .zip(keystream.iter())
             .map(|(p, k)| p ^ k)
             .collect();
 
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &key);
+        let hmac_signing_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
         let mut hmac_data = Vec::new();
         hmac_data.extend_from_slice(&nonce);
         hmac_data.extend_from_slice(&ciphertext);
-        let tag = hmac::sign(&hmac_key, &hmac_data);
+        let tag = hmac::sign(&hmac_signing_key, &hmac_data);
 
         let mut v1_encrypted = Vec::new();
         v1_encrypted.extend_from_slice(&nonce);
@@ -532,6 +596,7 @@ mod tests {
     fn test_v1_explicit_decrypt() {
         // Create v1 ciphertext
         let key = [3u8; 32];
+        let (enc_key, mac_key) = derive_subkeys(&key);
         let plaintext = b"explicit v1";
 
         let nonce: [u8; 16] = [4u8; 16];
@@ -541,18 +606,18 @@ mod tests {
         data_to_encrypt.extend_from_slice(&counter_bytes);
         data_to_encrypt.extend_from_slice(plaintext);
 
-        let keystream = generate_keystream(&key, &nonce, data_to_encrypt.len());
+        let keystream = generate_keystream(&enc_key, &nonce, data_to_encrypt.len());
         let ciphertext: Vec<u8> = data_to_encrypt
             .iter()
             .zip(keystream.iter())
             .map(|(p, k)| p ^ k)
             .collect();
 
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &key);
+        let hmac_signing_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
         let mut hmac_data = Vec::new();
         hmac_data.extend_from_slice(&nonce);
         hmac_data.extend_from_slice(&ciphertext);
-        let tag = hmac::sign(&hmac_key, &hmac_data);
+        let tag = hmac::sign(&hmac_signing_key, &hmac_data);
 
         let mut v1_encrypted = Vec::new();
         v1_encrypted.extend_from_slice(&nonce);

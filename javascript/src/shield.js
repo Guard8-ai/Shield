@@ -68,6 +68,9 @@ class Shield {
         const maxAgeMs = options.maxAgeMs !== undefined ? options.maxAgeMs : 60000;
 
         this._key = crypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256');
+        // Derive separated subkeys using HMAC-SHA256 (Shield's own primitive)
+        this._encKey = crypto.createHmac('sha256', this._key).update('shield-encrypt').digest();
+        this._macKey = crypto.createHmac('sha256', this._key).update('shield-authenticate').digest();
         this._counter = 0;
         this._maxAgeMs = maxAgeMs;
     }
@@ -84,6 +87,8 @@ class Shield {
         }
         const instance = Object.create(Shield.prototype);
         instance._key = key;
+        instance._encKey = crypto.createHmac('sha256', key).update('shield-encrypt').digest();
+        instance._macKey = crypto.createHmac('sha256', key).update('shield-authenticate').digest();
         instance._counter = 0;
         instance._maxAgeMs = 60000;
         return instance;
@@ -136,9 +141,16 @@ class Shield {
         const timestampBytes = Buffer.alloc(8);
         timestampBytes.writeBigUInt64LE(BigInt(timestampMs));
 
-        // Random padding: 32-128 bytes
-        const randomByte = crypto.randomBytes(1)[0];
-        const padLen = (randomByte % (MAX_PADDING - MIN_PADDING + 1)) + MIN_PADDING;
+        // Random padding: 32-128 bytes (rejection sampling to avoid modulo bias)
+        const padRange = MAX_PADDING - MIN_PADDING + 1; // 97
+        let padLen;
+        do {
+            const val = crypto.randomBytes(1)[0];
+            if (val < padRange * Math.floor(256 / padRange)) {
+                padLen = (val % padRange) + MIN_PADDING;
+                break;
+            }
+        } while (true);
         const padLenByte = Buffer.alloc(1);
         padLenByte[0] = padLen;
         const padding = crypto.randomBytes(padLen);
@@ -146,8 +158,8 @@ class Shield {
         // Data to encrypt: counter || timestamp || pad_len || padding || plaintext
         const data = Buffer.concat([counterBytes, timestampBytes, padLenByte, padding, plaintext]);
 
-        // Generate keystream
-        const keystream = generateKeystream(this._key, nonce, data.length);
+        // Generate keystream (using encryption subkey)
+        const keystream = generateKeystream(this._encKey, nonce, data.length);
 
         // XOR encrypt
         const ciphertext = Buffer.alloc(data.length);
@@ -155,8 +167,8 @@ class Shield {
             ciphertext[i] = data[i] ^ keystream[i];
         }
 
-        // HMAC authenticate
-        const mac = crypto.createHmac('sha256', this._key)
+        // HMAC authenticate (using MAC subkey)
+        const mac = crypto.createHmac('sha256', this._macKey)
             .update(Buffer.concat([nonce, ciphertext]))
             .digest()
             .slice(0, MAC_SIZE);
@@ -180,8 +192,8 @@ class Shield {
         const ciphertext = encrypted.slice(NONCE_SIZE, -MAC_SIZE);
         const mac = encrypted.slice(-MAC_SIZE);
 
-        // Verify MAC (constant-time)
-        const expectedMac = crypto.createHmac('sha256', this._key)
+        // Verify MAC (constant-time, using MAC subkey)
+        const expectedMac = crypto.createHmac('sha256', this._macKey)
             .update(Buffer.concat([nonce, ciphertext]))
             .digest()
             .slice(0, MAC_SIZE);
@@ -190,8 +202,8 @@ class Shield {
             return null;
         }
 
-        // Decrypt
-        const keystream = generateKeystream(this._key, nonce, ciphertext.length);
+        // Decrypt (using encryption subkey)
+        const keystream = generateKeystream(this._encKey, nonce, ciphertext.length);
         const decrypted = Buffer.alloc(ciphertext.length);
         for (let i = 0; i < ciphertext.length; i++) {
             decrypted[i] = ciphertext[i] ^ keystream[i];
@@ -252,8 +264,8 @@ class Shield {
         const ciphertext = encrypted.slice(NONCE_SIZE, -MAC_SIZE);
         const mac = encrypted.slice(-MAC_SIZE);
 
-        // Verify MAC (constant-time)
-        const expectedMac = crypto.createHmac('sha256', this._key)
+        // Verify MAC (constant-time, using MAC subkey)
+        const expectedMac = crypto.createHmac('sha256', this._macKey)
             .update(Buffer.concat([nonce, ciphertext]))
             .digest()
             .slice(0, MAC_SIZE);
@@ -262,8 +274,8 @@ class Shield {
             return null;
         }
 
-        // Decrypt
-        const keystream = generateKeystream(this._key, nonce, ciphertext.length);
+        // Decrypt (using encryption subkey)
+        const keystream = generateKeystream(this._encKey, nonce, ciphertext.length);
         const decrypted = Buffer.alloc(ciphertext.length);
         for (let i = 0; i < ciphertext.length; i++) {
             decrypted[i] = ciphertext[i] ^ keystream[i];
@@ -344,5 +356,6 @@ module.exports = {
     Shield,
     quickEncrypt,
     quickDecrypt,
-    generateKeystream
+    // Internal: exposed for interop tests only, not part of public API
+    _generateKeystream: generateKeystream
 };

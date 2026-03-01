@@ -20,6 +20,7 @@ mod test_vectors {
 }
 
 #[test]
+#[allow(deprecated)]
 fn test_key_derivation_matches_python() {
     let shield = Shield::new(test_vectors::PASSWORD, test_vectors::SERVICE);
     let key = shield.key();
@@ -80,8 +81,11 @@ fn test_ciphertext_format() {
     let shield = Shield::new("password", "service");
     let encrypted = shield.encrypt(b"test").unwrap();
 
-    // Format: nonce(16) + counter(8) + plaintext(4) + mac(16) = 44 bytes
-    assert_eq!(encrypted.len(), 44, "Ciphertext should be 44 bytes");
+    // v2 format: nonce(16) + counter(8) + timestamp(8) + pad_len(1) + padding(32-128) + plaintext(4) + mac(16)
+    // Minimum: 16 + 8 + 8 + 1 + 32 + 4 + 16 = 85
+    // Maximum: 16 + 8 + 8 + 1 + 128 + 4 + 16 = 181
+    assert!(encrypted.len() >= 85 && encrypted.len() <= 181,
+        "Ciphertext should be between 85 and 181 bytes, got {}", encrypted.len());
 }
 
 #[test]

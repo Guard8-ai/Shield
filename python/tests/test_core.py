@@ -166,9 +166,9 @@ class TestShield:
         counter_bytes = struct.pack("<Q", 0)
         data = counter_bytes + plaintext
 
-        keystream = _generate_keystream(s.key, nonce, len(data))
+        keystream = _generate_keystream(s._enc_key, nonce, len(data))
         ciphertext = bytes(p ^ k for p, k in zip(data, keystream))
-        mac = hmac.new(s.key, nonce + ciphertext, hashlib.sha256).digest()[:MAC_SIZE]
+        mac = hmac.new(s._mac_key, nonce + ciphertext, hashlib.sha256).digest()[:MAC_SIZE]
         encrypted = nonce + ciphertext + mac
 
         # Should auto-detect and decrypt as v1
@@ -190,9 +190,9 @@ class TestShield:
         counter_bytes = struct.pack("<Q", 0)
         data = counter_bytes + plaintext
 
-        keystream = _generate_keystream(s.key, nonce, len(data))
+        keystream = _generate_keystream(s._enc_key, nonce, len(data))
         ciphertext = bytes(p ^ k for p, k in zip(data, keystream))
-        mac = hmac.new(s.key, nonce + ciphertext, hashlib.sha256).digest()[:MAC_SIZE]
+        mac = hmac.new(s._mac_key, nonce + ciphertext, hashlib.sha256).digest()[:MAC_SIZE]
         encrypted = nonce + ciphertext + mac
 
         # Decrypt using explicit v1 method
@@ -222,9 +222,9 @@ class TestShield:
 
         data = counter_bytes + timestamp_bytes + pad_len_byte + padding + plaintext
 
-        keystream = _generate_keystream(s.key, nonce, len(data))
+        keystream = _generate_keystream(s._enc_key, nonce, len(data))
         ciphertext = bytes(p ^ k for p, k in zip(data, keystream))
-        mac = hmac.new(s.key, nonce + ciphertext, hashlib.sha256).digest()[:MAC_SIZE]
+        mac = hmac.new(s._mac_key, nonce + ciphertext, hashlib.sha256).digest()[:MAC_SIZE]
         encrypted = nonce + ciphertext + mac
 
         # Should reject (not fallback to v1)
@@ -254,9 +254,9 @@ class TestShield:
 
         data = counter_bytes + timestamp_bytes + pad_len_byte + padding + plaintext
 
-        keystream = _generate_keystream(s.key, nonce, len(data))
+        keystream = _generate_keystream(s._enc_key, nonce, len(data))
         ciphertext = bytes(p ^ k for p, k in zip(data, keystream))
-        mac = hmac.new(s.key, nonce + ciphertext, hashlib.sha256).digest()[:MAC_SIZE]
+        mac = hmac.new(s._mac_key, nonce + ciphertext, hashlib.sha256).digest()[:MAC_SIZE]
         encrypted = nonce + ciphertext + mac
 
         # Should decrypt successfully (no age check)

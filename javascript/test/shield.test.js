@@ -103,13 +103,13 @@ describe('Shield', () => {
 
         const data = Buffer.concat([counterBytes, timestampBytes, padLenByte, padding, plaintext]);
 
-        const { generateKeystream } = require('../src/shield');
-        const keystream = generateKeystream(s.key, nonce, data.length);
+        const { _generateKeystream: generateKeystream } = require('../src/shield');
+        const keystream = generateKeystream(s._encKey, nonce, data.length);
         const ciphertext = Buffer.alloc(data.length);
         for (let i = 0; i < data.length; i++) {
             ciphertext[i] = data[i] ^ keystream[i];
         }
-        const mac = crypto.createHmac('sha256', s.key)
+        const mac = crypto.createHmac('sha256', s._macKey)
             .update(Buffer.concat([nonce, ciphertext]))
             .digest()
             .slice(0, 16);
@@ -144,13 +144,13 @@ describe('Shield', () => {
         counterBytes.writeBigUInt64LE(BigInt(0));
         const data = Buffer.concat([counterBytes, plaintext]);
 
-        const { generateKeystream } = require('../src/shield');
-        const keystream = generateKeystream(s.key, nonce, data.length);
+        const { _generateKeystream: generateKeystream } = require('../src/shield');
+        const keystream = generateKeystream(s._encKey, nonce, data.length);
         const ciphertext = Buffer.alloc(data.length);
         for (let i = 0; i < data.length; i++) {
             ciphertext[i] = data[i] ^ keystream[i];
         }
-        const mac = crypto.createHmac('sha256', s.key)
+        const mac = crypto.createHmac('sha256', s._macKey)
             .update(Buffer.concat([nonce, ciphertext]))
             .digest()
             .slice(0, 16);
@@ -171,13 +171,13 @@ describe('Shield', () => {
         counterBytes.writeBigUInt64LE(BigInt(0));
         const data = Buffer.concat([counterBytes, plaintext]);
 
-        const { generateKeystream } = require('../src/shield');
-        const keystream = generateKeystream(s.key, nonce, data.length);
+        const { _generateKeystream: generateKeystream } = require('../src/shield');
+        const keystream = generateKeystream(s._encKey, nonce, data.length);
         const ciphertext = Buffer.alloc(data.length);
         for (let i = 0; i < data.length; i++) {
             ciphertext[i] = data[i] ^ keystream[i];
         }
-        const mac = crypto.createHmac('sha256', s.key)
+        const mac = crypto.createHmac('sha256', s._macKey)
             .update(Buffer.concat([nonce, ciphertext]))
             .digest()
             .slice(0, 16);
@@ -206,13 +206,13 @@ describe('Shield', () => {
 
         const data = Buffer.concat([counterBytes, timestampBytes, padLenByte, padding, plaintext]);
 
-        const { generateKeystream } = require('../src/shield');
-        const keystream = generateKeystream(s.key, nonce, data.length);
+        const { _generateKeystream: generateKeystream } = require('../src/shield');
+        const keystream = generateKeystream(s._encKey, nonce, data.length);
         const ciphertext = Buffer.alloc(data.length);
         for (let i = 0; i < data.length; i++) {
             ciphertext[i] = data[i] ^ keystream[i];
         }
-        const mac = crypto.createHmac('sha256', s.key)
+        const mac = crypto.createHmac('sha256', s._macKey)
             .update(Buffer.concat([nonce, ciphertext]))
             .digest()
             .slice(0, 16);
@@ -241,13 +241,13 @@ describe('Shield', () => {
 
         const data = Buffer.concat([counterBytes, timestampBytes, padLenByte, padding, plaintext]);
 
-        const { generateKeystream } = require('../src/shield');
-        const keystream = generateKeystream(s.key, nonce, data.length);
+        const { _generateKeystream: generateKeystream } = require('../src/shield');
+        const keystream = generateKeystream(s._encKey, nonce, data.length);
         const ciphertext = Buffer.alloc(data.length);
         for (let i = 0; i < data.length; i++) {
             ciphertext[i] = data[i] ^ keystream[i];
         }
-        const mac = crypto.createHmac('sha256', s.key)
+        const mac = crypto.createHmac('sha256', s._macKey)
             .update(Buffer.concat([nonce, ciphertext]))
             .digest()
             .slice(0, 16);
