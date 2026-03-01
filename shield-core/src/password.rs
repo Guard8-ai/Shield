@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn test_empty_password() {
-        assert_eq!(calculate_entropy(""), 0.0);
+        assert!(calculate_entropy("").abs() < f64::EPSILON);
     }
 
     #[test]

@@ -7,9 +7,10 @@ use crate::error::{Result, ShieldError};
 use std::process::Command;
 
 /// Fingerprint collection mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FingerprintMode {
     /// No hardware fingerprinting (backward compatible).
+    #[default]
     None,
     /// Use motherboard serial number only.
     Motherboard,
@@ -17,12 +18,6 @@ pub enum FingerprintMode {
     CPU,
     /// Use combined motherboard + CPU (recommended).
     Combined,
-}
-
-impl Default for FingerprintMode {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 /// Collect hardware fingerprint based on mode.
@@ -33,7 +28,7 @@ impl Default for FingerprintMode {
 /// # Platform Support
 /// - **Windows**: wmic commands (baseboard, CPU)
 /// - **Linux**: /sys/class/dmi/id, dmidecode, /proc/cpuinfo
-/// - **macOS**: system_profiler SPHardwareDataType
+/// - **macOS**: `system_profiler SPHardwareDataType`
 pub fn collect_fingerprint(mode: FingerprintMode) -> Result<String> {
     match mode {
         FingerprintMode::None => Ok(String::new()),
@@ -93,7 +88,7 @@ fn get_motherboard_serial() -> Result<String> {
 
     // Fallback to dmidecode (may require sudo)
     let output = Command::new("dmidecode")
-        .args(&["-s", "baseboard-serial-number"])
+        .args(["-s", "baseboard-serial-number"])
         .output()
         .map_err(|_| ShieldError::FingerprintUnavailable)?;
 
@@ -153,7 +148,7 @@ fn get_cpu_id() -> Result<String> {
     if let Ok(content) = std::fs::read_to_string("/proc/cpuinfo") {
         // Use first processor line as identifier
         for line in content.lines() {
-            if line.starts_with("processor") && line.contains("0") {
+            if line.starts_with("processor") && line.contains('0') {
                 return Ok(format!("{:x}", md5::compute(line.as_bytes())));
             }
         }
@@ -203,7 +198,7 @@ mod tests {
             Err(ShieldError::FingerprintUnavailable) => {
                 // Expected on VMs or restricted environments
             }
-            Err(e) => panic!("Unexpected error: {:?}", e),
+            Err(e) => panic!("Unexpected error: {e:?}"),
         }
     }
 }

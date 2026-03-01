@@ -317,7 +317,7 @@ mod tests {
         let key = [0x42u8; 32];
         let cipher = StreamCipher::with_chunk_size(key, 1024);
 
-        let data: Vec<u8> = (0..10000).map(|i| (i % 256) as u8).collect();
+        let data: Vec<u8> = (0..10000_u32).map(|i| (i % 256) as u8).collect();
         let encrypted = cipher.encrypt(&data).unwrap();
         let decrypted = cipher.decrypt(&encrypted).unwrap();
 

@@ -24,7 +24,7 @@ const MAC_SIZE: usize = 16;
 /// Minimum ciphertext size: nonce + counter(8) + mac.
 const MIN_CIPHERTEXT_SIZE: usize = NONCE_SIZE + 8 + MAC_SIZE;
 
-/// V2 header size: counter(8) + timestamp(8) + pad_len(1)
+/// V2 header size: `counter(8) + timestamp(8) + pad_len(1)`
 const V2_HEADER_SIZE: usize = 17;
 
 /// Minimum padding size (bytes)
@@ -169,7 +169,7 @@ impl Shield {
         let combined_password = if fingerprint.is_empty() {
             password.to_string()
         } else {
-            format!("{}:{}", password, fingerprint)
+            format!("{password}:{fingerprint}")
         };
 
         // Derive salt from service name
@@ -349,7 +349,7 @@ impl Shield {
                 let pad_len = decrypted[16] as usize;
 
                 // Validate padding length is within protocol bounds
-                if pad_len < MIN_PADDING || pad_len > MAX_PADDING {
+                if !(MIN_PADDING..=MAX_PADDING).contains(&pad_len) {
                     return Err(ShieldError::AuthenticationFailed);
                 }
 
@@ -366,7 +366,9 @@ impl Shield {
                         .unwrap_or_default()
                         .as_millis() as u64;
 
-                    let age = (now_ms as i64) - (timestamp_ms as i64);
+                    // Safe: timestamps in valid range (2020-2100) fit in i64
+                    let age = i64::try_from(now_ms).unwrap_or(i64::MAX)
+                        - i64::try_from(timestamp_ms).unwrap_or(0);
 
                     // Reject future timestamps (clock skew > 5s)
                     if age < -5000 {
@@ -374,7 +376,7 @@ impl Shield {
                     }
 
                     // Reject expired messages
-                    if age > max_age as i64 {
+                    if age > i64::try_from(max_age).unwrap_or(i64::MAX) {
                         return Err(ShieldError::InvalidFormat);
                     }
                 }
