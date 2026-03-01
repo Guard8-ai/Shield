@@ -519,6 +519,60 @@ impl<S: Read + Write> ShieldChannel<S> {
     }
 }
 
+impl ShieldChannel<std::net::TcpStream> {
+    /// Connect as client with handshake timeout enforcement.
+    ///
+    /// Sets socket read/write timeouts during handshake, then clears them
+    /// so post-handshake messaging is not affected.
+    pub fn connect_tcp(
+        stream: std::net::TcpStream,
+        config: &ChannelConfig,
+    ) -> Result<Self> {
+        let timeout = std::time::Duration::from_millis(config.handshake_timeout_ms);
+        stream
+            .set_read_timeout(Some(timeout))
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .set_write_timeout(Some(timeout))
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+
+        match Self::connect(stream, config) {
+            Ok(channel) => {
+                channel.stream.set_read_timeout(None).ok();
+                channel.stream.set_write_timeout(None).ok();
+                Ok(channel)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Accept connection as server with handshake timeout enforcement.
+    ///
+    /// Sets socket read/write timeouts during handshake, then clears them
+    /// so post-handshake messaging is not affected.
+    pub fn accept_tcp(
+        stream: std::net::TcpStream,
+        config: &ChannelConfig,
+    ) -> Result<Self> {
+        let timeout = std::time::Duration::from_millis(config.handshake_timeout_ms);
+        stream
+            .set_read_timeout(Some(timeout))
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+        stream
+            .set_write_timeout(Some(timeout))
+            .map_err(|e| ShieldError::ChannelError(e.to_string()))?;
+
+        match Self::accept(stream, config) {
+            Ok(channel) => {
+                channel.stream.set_read_timeout(None).ok();
+                channel.stream.set_write_timeout(None).ok();
+                Ok(channel)
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
+
 /// Channel listener for accepting multiple connections.
 pub struct ShieldListener<L> {
     listener: L,

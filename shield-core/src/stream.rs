@@ -224,8 +224,10 @@ fn encrypt_chunk(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>> {
     let nonce: [u8; 16] = crate::random::random_bytes()?;
 
     // Generate keystream
-    let mut keystream = Vec::with_capacity(data.len().div_ceil(32) * 32);
-    for i in 0..data.len().div_ceil(32) {
+    let num_blocks = data.len().div_ceil(32);
+    assert!(u32::try_from(num_blocks).is_ok(), "keystream too long: counter overflow");
+    let mut keystream = Vec::with_capacity(num_blocks * 32);
+    for i in 0..num_blocks {
         let counter = (i as u32).to_le_bytes();
         let mut hash_input = Vec::with_capacity(key.len() + nonce.len() + 4);
         hash_input.extend_from_slice(key);
@@ -280,8 +282,10 @@ fn decrypt_chunk(key: &[u8; 32], encrypted: &[u8]) -> Result<Vec<u8>> {
     }
 
     // Generate keystream
-    let mut keystream = Vec::with_capacity(ciphertext.len().div_ceil(32) * 32);
-    for i in 0..ciphertext.len().div_ceil(32) {
+    let num_blocks = ciphertext.len().div_ceil(32);
+    assert!(u32::try_from(num_blocks).is_ok(), "keystream too long: counter overflow");
+    let mut keystream = Vec::with_capacity(num_blocks * 32);
+    for i in 0..num_blocks {
         let counter = (i as u32).to_le_bytes();
         let mut hash_input = Vec::with_capacity(key.len() + nonce.len() + 4);
         hash_input.extend_from_slice(key);

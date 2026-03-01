@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-03-01
+
+### Security
+
+**Comprehensive Rust core security hardening** based on 189-finding fork security assessment. All Rust-applicable findings resolved.
+
+#### Cryptographic Improvements
+- **Key Separation**: Derived separate `enc_key` and `mac_key` from master key using HMAC-SHA256 domain separation (`shield-encrypt` / `shield-authenticate`). Prevents cross-protocol key reuse (CWE-323)
+- **HMAC-SHA256 upgrade**: Replaced all internal `SHA256(key||data)` patterns with `HMAC-SHA256(key, data)` in 13 call sites across `group.rs`, `identity.rs`, `rotation.rs`, `exchange.rs`, `signatures.rs`, and `ratchet.rs`. Provides formal PRF security proof (Bellare 2006), length-extension resistance, and NIST SP 800-108 compliance
+- **Core wire format preserved**: `shield.rs` and `stream.rs` keystream generation unchanged for cross-language interoperability
+- **Counter overflow guard**: Added bounds assertion in all 8 keystream generators preventing silent `u32` wraparound at >137GB
+
+#### Authentication & Memory Safety
+- **Constant-time comparisons**: All MAC verifications use `subtle::ConstantTimeEq` (CWE-208)
+- **Timing-safe authentication**: `IdentityProvider::authenticate()` runs PBKDF2 even for non-existent users to prevent user enumeration (CWE-203)
+- **Zeroize on Drop**: Added `Drop` implementations for `IdentityProvider` and `SecureSession` that zeroize master keys, password hashes, and salts. Existing `Zeroize`/`ZeroizeOnDrop` derives on `Shield`, `RatchetSession`, `SymmetricSignature`, `TOTP`
+- **Modulo bias elimination**: Padding length selection uses rejection sampling instead of modulo (CWE-330)
+- **Padding validation**: Decryption rejects `pad_len` outside protocol bounds (32-128) before accessing plaintext
+
+#### TOTP Hardening
+- Digits clamped to 1-9 range (0 defaults to 6, >9 caps at 9)
+- `window=0` now means exact-match verification (no silent override to 1)
+- Recovery code entropy increased from 32 bits to 64 bits (8 random bytes, format `XXXX-XXXX-XXXX-XXXX`)
+
+#### CLI Security
+- Password and plaintext input via stdin to avoid process-list exposure
+- `--force` flag required to overwrite existing output files
+- Warnings when `-p` flag used (visible in `ps`)
+
+#### Secure Transport
+- **Sync channel timeout**: Added `connect_tcp()` / `accept_tcp()` methods on `ShieldChannel<TcpStream>` that enforce `handshake_timeout_ms` via socket read/write timeouts during handshake
+- PAKE key derivation and session key computation use HMAC-SHA256 throughout
+
+#### API Changes
+- Removed `GroupEncryption::group_key()` and `BroadcastEncryption::master_key()` accessors (no callers existed, reduced attack surface)
+- `Shield::master_key()` restricted to `pub(crate)` behind feature gates
+
+### Changed
+- Rust test count increased from 97 to 119 (104 unit + 7 interop + 8 doc-tests)
+- Desktop fingerprinting implementation for JS/Go/Java/C (v2.1.0)
+
 ## [1.1.0] - 2026-01-17
 
 ### Added
@@ -193,7 +234,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Random 128-bit nonce per encryption
 - EXPTIME security guarantees
 
-[Unreleased]: https://github.com/Guard8-ai/Shield/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/Guard8-ai/Shield/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/Guard8-ai/Shield/compare/v1.1.0...v2.1.0
 [1.1.0]: https://github.com/Guard8-ai/Shield/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/Guard8-ai/Shield/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/Guard8-ai/Shield/compare/v1.0.0...v1.0.1

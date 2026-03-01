@@ -353,8 +353,8 @@ For comparison: AES-256-GCM achieves ~3.4 GB/s with hardware acceleration. Shiel
 ## Tests
 
 ```bash
-# Rust core (97 tests)
-cd shield-core && cargo test --features async
+# Rust core (119 tests: 104 unit + 7 interop + 8 doc-tests)
+cd shield-core && cargo test
 
 # Python (153 tests)
 cd python && python -m pytest

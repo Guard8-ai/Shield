@@ -1,8 +1,8 @@
 # Shield Wire Protocol Specification
 
-**Version**: 2.0
+**Version**: 2.1
 **Status**: Draft
-**Last Updated**: 2026-02-20
+**Last Updated**: 2026-03-01
 
 ## Overview
 
@@ -35,8 +35,8 @@ master_key = PBKDF2-SHA256(
     key_length = 32
 )
 
-encryption_key = master_key[0:32]
-mac_key = SHA256(master_key || "mac")
+enc_key = HMAC-SHA256(master_key, "shield-encrypt")[0:32]
+mac_key = HMAC-SHA256(master_key, "shield-authenticate")[0:32]
 ```
 
 ### 1.3 Encryption Process
@@ -200,18 +200,20 @@ counter = 0
 position = 0
 
 while need_more_bytes:
-    block_input = nonce || counter.to_bytes(8, big_endian)
+    block_input = nonce || counter.to_bytes(4, little_endian)
     block = SHA256(encryption_key || block_input)
     output block bytes
     counter += 1
 ```
+
+**Counter overflow guard (v2.1):** Keystream generators assert that `counter` fits in `u32` (max 2^32 blocks = 137GB). Exceeding this limit causes a hard failure rather than silent wraparound.
 
 ### 2.2 Block Structure
 
 ```
 +----------------+----------------+
 |     Nonce      |    Counter     |
-|   (16 bytes)   |   (8 bytes)    |
+|   (16 bytes)   |   (4 bytes)    |
 +----------------+----------------+
          |
          v
@@ -220,6 +222,8 @@ while need_more_bytes:
          v
     32-byte keystream block
 ```
+
+> **Note (cross-language wire format):** The core `Shield` and `StreamCipher` keystream use raw SHA256 for cross-language interoperability. Internal-only modules (ratchet, rotation, group, identity, exchange, signatures) use HMAC-SHA256 as keyed PRF — see Section 3.8.
 
 ## 3. ShieldChannel Protocol
 
@@ -244,7 +248,7 @@ Client                              Server
 Both parties derive a shared key from the password:
 
 ```
-pake_key = SHA256(password || service || "pake")
+pake_key = HMAC-SHA256(password, service || "pake")
 ```
 
 ### 3.3 ClientHello Message
@@ -257,7 +261,7 @@ pake_key = SHA256(password || service || "pake")
 
 Type = 0x01 (ClientHello)
 Client Random = random 32 bytes
-Client Contrib = SHA256(pake_key || client_random || "client")
+Client Contrib = HMAC-SHA256(pake_key, client_random || "client")
 ```
 
 ### 3.4 ServerHello Message
@@ -270,21 +274,18 @@ Client Contrib = SHA256(pake_key || client_random || "client")
 
 Type = 0x02 (ServerHello)
 Server Random = random 32 bytes
-Server Contrib = SHA256(pake_key || server_random || "server")
+Server Contrib = HMAC-SHA256(pake_key, server_random || "server")
 ```
 
 ### 3.5 Session Key Derivation
 
 ```
-shared_secret = SHA256(
-    client_contrib ||
-    server_contrib ||
-    client_random ||
-    server_random ||
-    pake_key
+shared_secret = HMAC-SHA256(
+    pake_key,
+    client_contrib || server_contrib || client_random || server_random
 )
 
-session_key = SHA256(shared_secret || "session_key")
+session_key = HMAC-SHA256(shared_secret, "session_key")
 ```
 
 ### 3.6 Finish Messages
@@ -321,12 +322,24 @@ Counter = message sequence number (big-endian)
 
 ### 3.8 Key Ratcheting
 
-After each message:
+After each message (using HMAC-SHA256 as keyed PRF):
 
 ```
-new_chain_key = SHA256(chain_key || "ratchet")
-message_key = SHA256(chain_key || "message" || counter)
+new_chain_key = HMAC-SHA256(chain_key, "chain")
+message_key   = HMAC-SHA256(chain_key, "message")
 ```
+
+Keystream generation in ratchet messages also uses HMAC-SHA256:
+
+```
+keystream_block[i] = HMAC-SHA256(message_key, nonce || counter_i)
+```
+
+> **v2.1 upgrade (Rust):** All internal modules (ratchet, rotation, group, identity, exchange, signatures) replaced raw `SHA256(key||data)` patterns with `HMAC-SHA256(key, data)` for formal PRF security (Bellare 2006), length-extension resistance, and NIST SP 800-108 compliance.
+
+### 3.9 Sync Channel Timeout (v2.1)
+
+`ShieldChannel<TcpStream>` provides `connect_tcp()` and `accept_tcp()` methods that enforce `handshake_timeout_ms` via socket read/write timeouts during the handshake phase. Timeouts are cleared after successful handshake to avoid interfering with application-level I/O.
 
 ## 4. StreamCipher Format
 
@@ -376,6 +389,7 @@ code = (hmac[offset:offset+4] & 0x7FFFFFFF) % 1000000
 |---------|--------------|----------------|------------------|
 | 1.0 | 2025-01-11 | Initial specification | N/A |
 | 2.0 | 2026-02-20 | Replay protection (timestamp) + length obfuscation (random padding) | V1 implementations cannot decrypt v2 messages (by design) |
+| 2.1 | 2026-03-01 | Key separation (enc_key/mac_key via HMAC domain labels), HMAC-SHA256 in all internal modules, counter overflow guards, sync channel timeout | Wire format unchanged; internal crypto hardening only |
 
 ### 6.1 Version Detection
 
