@@ -110,7 +110,7 @@ public class GroupEncryption {
             throw ShieldError.randomGenerationFailed
         }
 
-        let keystream = generateKeystream(key: key, nonce: nonce, length: data.count)
+        let keystream = Self.generateKeystream(key: key, nonce: nonce, length: data.count)
         var ciphertext = [UInt8](repeating: 0, count: data.count)
         for i in 0..<data.count {
             ciphertext[i] = data[i] ^ keystream[i]
