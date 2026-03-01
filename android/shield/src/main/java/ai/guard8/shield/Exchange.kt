@@ -3,7 +3,7 @@ package ai.guard8.shield
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
-import java.util.Base64
+import android.util.Base64
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
@@ -92,7 +92,7 @@ object QRExchange {
      * @return URL-safe base64 string
      */
     fun encode(key: ByteArray): String {
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(key)
+        return Base64.encodeToString(key, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
     }
 
     /**
@@ -102,7 +102,7 @@ object QRExchange {
      * @return Key bytes
      */
     fun decode(encoded: String): ByteArray {
-        return Base64.getUrlDecoder().decode(encoded)
+        return Base64.decode(encoded, Base64.URL_SAFE)
     }
 
     /**

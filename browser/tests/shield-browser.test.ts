@@ -344,14 +344,14 @@ describe('ShieldBrowser', () => {
 
   describe('refreshKey', () => {
     it('should refresh the key', async () => {
-      const mockFetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({
+      const mockFetch = vi.fn().mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify({
           key: 'base64key==',
           session_id: 'sess-123',
           expires_at: Math.floor(Date.now() / 1000) + 3600,
           algorithm: 'shield-v1',
           service: 'test.com',
-        }), { status: 200 })
+        }), { status: 200 }))
       );
       globalThis.fetch = mockFetch;
 
