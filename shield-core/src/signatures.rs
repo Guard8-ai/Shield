@@ -24,12 +24,10 @@ impl SymmetricSignature {
     #[must_use]
     pub fn new(signing_key: [u8; 32]) -> Self {
         let verification_key = {
-            let mut data = Vec::with_capacity(7 + 32);
-            data.extend_from_slice(b"verify:");
-            data.extend_from_slice(&signing_key);
-            let hash = ring::digest::digest(&ring::digest::SHA256, &data);
+            let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &signing_key);
+            let tag = hmac::sign(&hmac_key, b"verify");
             let mut key = [0u8; 32];
-            key.copy_from_slice(hash.as_ref());
+            key.copy_from_slice(&tag.as_ref()[..32]);
             key
         };
 

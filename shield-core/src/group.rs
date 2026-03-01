@@ -14,20 +14,20 @@ use zeroize::Zeroize;
 
 use crate::error::{Result, ShieldError};
 
-/// Generate keystream using SHA256.
+/// Generate keystream using HMAC-SHA256 (keyed PRF).
 fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
     let mut keystream = Vec::with_capacity(length.div_ceil(32) * 32);
     let num_blocks = length.div_ceil(32);
+    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
 
     for i in 0..num_blocks {
         let counter = (i as u32).to_le_bytes();
-        let mut data = Vec::with_capacity(key.len() + nonce.len() + 4);
-        data.extend_from_slice(key);
+        let mut data = Vec::with_capacity(nonce.len() + 4);
         data.extend_from_slice(nonce);
         data.extend_from_slice(&counter);
 
-        let hash = ring::digest::digest(&ring::digest::SHA256, &data);
-        keystream.extend_from_slice(hash.as_ref());
+        let tag = hmac::sign(&hmac_key, &data);
+        keystream.extend_from_slice(tag.as_ref());
     }
 
     keystream.truncate(length);
