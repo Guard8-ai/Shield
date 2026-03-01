@@ -53,5 +53,8 @@
     "rollup": "^4.9.0",
     "typescript": "^5.3.0",
     "vitest": "^4.0.17"
+  },
+  "overrides": {
+    "serialize-javascript": ">=7.0.3"
   }
 }
