@@ -69,8 +69,7 @@ impl SymmetricSignature {
         if include_timestamp {
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
+                .map_or(0, |d| d.as_secs());
 
             let mut sig_data = Vec::with_capacity(8 + message.len());
             sig_data.extend_from_slice(&timestamp.to_le_bytes());
@@ -105,14 +104,16 @@ impl SymmetricSignature {
 
         if signature.len() == 40 {
             // Timestamped signature
-            let timestamp = u64::from_le_bytes(signature[..8].try_into().unwrap());
+            let Ok(ts_bytes) = signature[..8].try_into() else {
+                return false;
+            };
+            let timestamp = u64::from_le_bytes(ts_bytes);
             let sig = &signature[8..];
 
             if max_age > 0 {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
+                    .map_or(0, |d| d.as_secs());
                 if now.abs_diff(timestamp) > max_age {
                     return false;
                 }

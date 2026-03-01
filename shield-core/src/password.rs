@@ -171,9 +171,8 @@ fn has_common_pattern(password: &str) -> bool {
     let lower = password.to_lowercase();
 
     // Check for repeated character
-    if password.len() > 1 {
-        let first = password.chars().next().unwrap();
-        if password.chars().all(|c| c == first) {
+    if let Some(first) = password.chars().next() {
+        if password.len() > 1 && password.chars().all(|c| c == first) {
             return true;
         }
     }

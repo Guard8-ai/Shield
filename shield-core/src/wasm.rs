@@ -61,10 +61,9 @@ impl WasmShield {
     /// Create Shield instance from raw key (32 bytes).
     #[wasm_bindgen(js_name = withKey)]
     pub fn with_key(key: &[u8]) -> Result<WasmShield, JsError> {
-        if key.len() != 32 {
-            return Err(JsError::new("Key must be 32 bytes"));
-        }
-        let key_array: [u8; 32] = key.try_into().unwrap();
+        let key_array: [u8; 32] = key
+            .try_into()
+            .map_err(|_| JsError::new("Key must be 32 bytes"))?;
         Ok(Self {
             inner: Shield::with_key(key_array),
         })
@@ -93,10 +92,9 @@ impl WasmShield {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen(js_name = quickEncrypt)]
 pub fn wasm_encrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>, JsError> {
-    if key.len() != 32 {
-        return Err(JsError::new("key must be 32 bytes"));
-    }
-    let key_array: [u8; 32] = key.try_into().unwrap();
+    let key_array: [u8; 32] = key
+        .try_into()
+        .map_err(|_| JsError::new("key must be 32 bytes"))?;
     quick_encrypt(&key_array, data).map_err(|e| JsError::new(&e.to_string()))
 }
 
@@ -104,10 +102,9 @@ pub fn wasm_encrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>, JsError> {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen(js_name = quickDecrypt)]
 pub fn wasm_decrypt(key: &[u8], encrypted: &[u8]) -> Result<Vec<u8>, JsError> {
-    if key.len() != 32 {
-        return Err(JsError::new("key must be 32 bytes"));
-    }
-    let key_array: [u8; 32] = key.try_into().unwrap();
+    let key_array: [u8; 32] = key
+        .try_into()
+        .map_err(|_| JsError::new("key must be 32 bytes"))?;
     quick_decrypt(&key_array, encrypted).map_err(|e| JsError::new(&e.to_string()))
 }
 
@@ -218,7 +215,9 @@ impl WasmRatchetSession {
         if root_key.len() != 32 {
             return Err(JsError::new("Root key must be 32 bytes"));
         }
-        let key_array: [u8; 32] = root_key.try_into().unwrap();
+        let key_array: [u8; 32] = root_key
+            .try_into()
+            .map_err(|_| JsError::new("Root key must be 32 bytes"))?;
         Ok(Self {
             inner: RatchetSession::new(&key_array, is_initiator),
         })

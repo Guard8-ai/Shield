@@ -1,6 +1,6 @@
 //! pgvector integration for encrypted vector similarity search
 //!
-//! This module provides PostgreSQL pgvector integration with Shield's
+//! This module provides `PostgreSQL` pgvector integration with Shield's
 //! deterministic encryption, enabling semantic similarity search over
 //! encrypted AI embeddings without exposing plaintext to the database.
 //!
@@ -49,7 +49,7 @@
 //! - **Vector Leakage**: Vector dimension and approximate distances visible to database
 //! - **Metadata**: Stored as plaintext JSONB (encrypt sensitive metadata separately)
 //!
-//! # PostgreSQL Schema
+//! # `PostgreSQL` Schema
 //!
 //! ```sql
 //! CREATE EXTENSION IF NOT EXISTS vector;

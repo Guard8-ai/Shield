@@ -43,7 +43,7 @@ pub enum IndexType {
         /// Size of dynamic candidate list (default: 64)
         ef_construction: u32,
     },
-    /// IVFFlat (Inverted File with Flat compression)
+    /// `IVFFlat` (Inverted File with Flat compression)
     IVFFlat {
         /// Number of lists (default: 100)
         lists: u32,
@@ -89,13 +89,13 @@ impl IndexType {
 /// Configuration for pgvector client
 #[derive(Debug, Clone)]
 pub struct PgVectorConfig {
-    /// PostgreSQL connection string
+    /// `PostgreSQL` connection string
     pub connection_string: String,
     /// Connection pool size
     pub pool_size: u32,
     /// Table name for encrypted embeddings
     pub table_name: String,
-    /// Vector dimension (e.g., 1536 for OpenAI text-embedding-3-small)
+    /// Vector dimension (e.g., 1536 for `OpenAI` text-embedding-3-small)
     pub dimension: usize,
     /// Index type
     pub index_type: IndexType,

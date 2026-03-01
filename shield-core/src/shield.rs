@@ -335,7 +335,9 @@ impl Shield {
         // Check if this is v2 format by examining timestamp range
         if decrypted.len() >= V2_HEADER_SIZE {
             let timestamp_bytes = &decrypted[8..16];
-            let timestamp_ms = u64::from_le_bytes(timestamp_bytes.try_into().unwrap());
+            let mut ts_bytes = [0u8; 8];
+            ts_bytes.copy_from_slice(timestamp_bytes);
+            let timestamp_ms = u64::from_le_bytes(ts_bytes);
 
             // Valid v2 timestamp range: 2020-2100
             if (MIN_TIMESTAMP_MS..=MAX_TIMESTAMP_MS).contains(&timestamp_ms) {
