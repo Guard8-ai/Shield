@@ -174,5 +174,5 @@ fun Shield.Companion.withFingerprint(
         password
     }
 
-    return Shield(combinedPassword, service)
+    return Shield.create(combinedPassword, service)
 }
