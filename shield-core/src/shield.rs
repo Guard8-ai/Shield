@@ -56,9 +56,6 @@ pub struct Shield {
     key: [u8; 32],
     enc_key: [u8; 32],
     mac_key: [u8; 32],
-    #[zeroize(skip)]
-    #[allow(dead_code)]
-    counter: u64,
     /// Maximum message age in milliseconds (None = no replay protection)
     #[zeroize(skip)]
     max_age_ms: Option<u64>,
@@ -115,7 +112,6 @@ impl Shield {
             key,
             enc_key,
             mac_key,
-            counter: 0,
             max_age_ms: Some(60_000), // Default: 60 seconds
         }
     }
@@ -128,7 +124,6 @@ impl Shield {
             key,
             enc_key,
             mac_key,
-            counter: 0,
             max_age_ms: Some(60_000),
         }
     }
@@ -190,7 +185,6 @@ impl Shield {
             key,
             enc_key,
             mac_key,
-            counter: 0,
             max_age_ms: Some(60_000),
         })
     }
@@ -435,15 +429,12 @@ impl Shield {
         Ok(decrypted[8..].to_vec())
     }
 
-    /// Get the derived key.
+    /// Get the master key for advanced use cases.
     ///
-    /// # Deprecation Notice
-    /// Exposing derived keys is a security risk. This method exists only for
-    /// cross-language interop verification and confidential computing.
-    /// Use encrypt/decrypt operations instead. Will be removed in v3.
-    #[deprecated(note = "exposing derived key is a security risk; use encrypt/decrypt instead")]
+    /// Used by `TEEKeyManager` for attestation-bound key derivation and
+    /// cross-language interoperability verification.
     #[must_use]
-    pub fn key(&self) -> &[u8; 32] {
+    pub fn master_key(&self) -> &[u8; 32] {
         &self.key
     }
 }

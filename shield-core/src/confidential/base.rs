@@ -137,24 +137,28 @@ impl AttestationResult {
     }
 
     /// Add a measurement to the result.
+    #[must_use]
     pub fn with_measurement(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.measurements.insert(name.into(), value.into());
         self
     }
 
     /// Add a claim to the result.
+    #[must_use]
     pub fn with_claim(mut self, name: impl Into<String>, value: serde_json::Value) -> Self {
         self.claims.insert(name.into(), value);
         self
     }
 
     /// Set the raw evidence.
+    #[must_use]
     pub fn with_raw_evidence(mut self, evidence: Vec<u8>) -> Self {
         self.raw_evidence = Some(evidence);
         self
     }
 
     /// Set the timestamp.
+    #[must_use]
     pub fn with_timestamp(mut self, timestamp: u64) -> Self {
         self.timestamp = timestamp;
         self
@@ -193,6 +197,7 @@ pub trait AttestationProvider: Send + Sync {
     ) -> Result<Vec<u8>, AttestationError>;
 
     /// Verify that measurements match expected values.
+    #[allow(clippy::unused_self)]
     fn verify_measurements(
         &self,
         result: &AttestationResult,
@@ -200,7 +205,7 @@ pub trait AttestationProvider: Send + Sync {
     ) -> bool {
         for (name, expected_value) in expected {
             match result.measurements.get(name) {
-                Some(actual) if actual.to_lowercase() == expected_value.to_lowercase() => continue,
+                Some(actual) if actual.to_lowercase() == expected_value.to_lowercase() => {},
                 _ => return false,
             }
         }
@@ -233,18 +238,21 @@ impl KeyReleasePolicy {
     }
 
     /// Require a specific TEE type.
+    #[must_use]
     pub fn require_tee_type(mut self, tee_type: TEEType) -> Self {
         self.required_tee_types.push(tee_type);
         self
     }
 
     /// Require a specific measurement value.
+    #[must_use]
     pub fn require_measurement(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.required_measurements.insert(name.into(), value.into());
         self
     }
 
     /// Set maximum attestation age.
+    #[must_use]
     pub fn with_max_age(mut self, seconds: u64) -> Self {
         self.max_age_seconds = seconds;
         self
@@ -272,7 +280,7 @@ impl KeyReleasePolicy {
         // Check measurements
         for (name, expected) in &self.required_measurements {
             match result.measurements.get(name) {
-                Some(actual) if actual.to_lowercase() == expected.to_lowercase() => continue,
+                Some(actual) if actual.to_lowercase() == expected.to_lowercase() => {},
                 _ => return false,
             }
         }
@@ -298,7 +306,6 @@ pub struct TEEKeyManager {
     shield: Shield,
     provider: Arc<dyn AttestationProvider>,
     policy: KeyReleasePolicy,
-    #[allow(dead_code)]
     cache_ttl: u64,
 }
 
@@ -317,7 +324,21 @@ impl TEEKeyManager {
         }
     }
 
+    /// Set the attestation cache TTL in seconds.
+    #[must_use]
+    pub fn with_cache_ttl(mut self, ttl: u64) -> Self {
+        self.cache_ttl = ttl;
+        self
+    }
+
+    /// Get the configured cache TTL in seconds.
+    #[must_use]
+    pub fn cache_ttl(&self) -> u64 {
+        self.cache_ttl
+    }
+
     /// Set the key release policy.
+    #[must_use]
     pub fn with_policy(mut self, policy: KeyReleasePolicy) -> Self {
         self.policy = policy;
         self
@@ -365,8 +386,7 @@ impl TEEKeyManager {
         }
 
         // Mix in the master key
-        #[allow(deprecated)]
-        ctx.update(self.shield.key());
+        ctx.update(self.shield.master_key());
 
         let digest = ctx.finish();
         let mut key = [0u8; 32];
@@ -403,8 +423,7 @@ impl TEEKeyManager {
 fn current_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 #[cfg(test)]

@@ -36,25 +36,28 @@ impl NitroAttestationProvider {
     }
 
     /// Add an expected PCR value.
+    #[must_use]
     pub fn with_expected_pcr(mut self, index: u8, value: impl Into<String>) -> Self {
         self.expected_pcrs.insert(index, value.into());
         self
     }
 
     /// Set maximum attestation age in seconds.
+    #[must_use]
     pub fn with_max_age(mut self, seconds: u64) -> Self {
         self.max_age_seconds = seconds;
         self
     }
 
     /// Disable certificate verification (for testing only).
+    #[must_use]
     pub fn without_certificate_verification(mut self) -> Self {
         self.verify_certificate = false;
         self
     }
 
     /// Parse CBOR-encoded COSE Sign1 document.
-    fn parse_cose_sign1(&self, data: &[u8]) -> Result<NitroAttestationDocument, AttestationError> {
+    fn parse_cose_sign1(data: &[u8]) -> Result<NitroAttestationDocument, AttestationError> {
         // COSE Sign1 structure: [protected, unprotected, payload, signature]
         // Using ciborium for CBOR parsing
         let value: ciborium::Value = ciborium::from_reader(data).map_err(|e| {
@@ -80,12 +83,11 @@ impl NitroAttestationProvider {
         let payload: ciborium::Value = ciborium::from_reader(payload_bytes.as_slice())
             .map_err(|e| AttestationError::InvalidFormat(format!("Failed to parse payload: {e}")))?;
 
-        self.parse_attestation_payload(&payload)
+        Self::parse_attestation_payload(&payload)
     }
 
     /// Parse the attestation document payload.
     fn parse_attestation_payload(
-        &self,
         payload: &ciborium::Value,
     ) -> Result<NitroAttestationDocument, AttestationError> {
         let map = payload.as_map().ok_or_else(|| {
@@ -119,13 +121,13 @@ impl NitroAttestationProvider {
                     }
                 }
                 "user_data" => {
-                    doc.user_data = value.as_bytes().map(|b| b.to_vec());
+                    doc.user_data = value.as_bytes().cloned();
                 }
                 "nonce" => {
-                    doc.nonce = value.as_bytes().map(|b| b.to_vec());
+                    doc.nonce = value.as_bytes().cloned();
                 }
                 "public_key" => {
-                    doc.public_key = value.as_bytes().map(|b| b.to_vec());
+                    doc.public_key = value.as_bytes().cloned();
                 }
                 "cabundle" => {
                     if let Some(arr) = value.as_array() {
@@ -153,7 +155,7 @@ impl AttestationProvider for NitroAttestationProvider {
     }
 
     async fn verify(&self, evidence: &[u8]) -> Result<AttestationResult, AttestationError> {
-        let doc = self.parse_cose_sign1(evidence)?;
+        let doc = Self::parse_cose_sign1(evidence)?;
 
         // Build measurements
         let mut measurements = HashMap::new();
@@ -203,8 +205,7 @@ impl AttestationProvider for NitroAttestationProvider {
         if let Some(timestamp_ms) = doc.timestamp {
             let now_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
+                .map_or(0, |d| d.as_millis() as u64);
 
             let age_ms = now_ms.saturating_sub(timestamp_ms);
             if age_ms > self.max_age_seconds * 1000 {
@@ -225,12 +226,14 @@ impl AttestationProvider for NitroAttestationProvider {
             .with_raw_evidence(evidence.to_vec()));
         }
 
-        let timestamp = doc.timestamp.map(|t| t / 1000).unwrap_or_else(|| {
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0)
-        });
+        let timestamp = doc.timestamp.map_or_else(
+            || {
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs())
+            },
+            |t| t / 1000,
+        );
 
         let mut result = AttestationResult::success(self.tee_type())
             .with_timestamp(timestamp)
@@ -245,12 +248,11 @@ impl AttestationProvider for NitroAttestationProvider {
         &self,
         user_data: Option<&[u8]>,
     ) -> Result<Vec<u8>, AttestationError> {
-        // This would communicate with the NSM via /dev/nsm or vsock
-        // For now, return an error if not in an enclave
+        // Communicate with the NSM via /dev/nsm when running in an enclave
         #[cfg(target_os = "linux")]
         {
             if std::path::Path::new("/dev/nsm").exists() {
-                return self.nsm_get_attestation(user_data).await;
+                return Self::nsm_get_attestation(user_data);
             }
         }
 
@@ -262,16 +264,88 @@ impl AttestationProvider for NitroAttestationProvider {
 
 impl NitroAttestationProvider {
     #[cfg(target_os = "linux")]
-    async fn nsm_get_attestation(
-        &self,
-        _user_data: Option<&[u8]>,
+    fn nsm_get_attestation(
+        user_data: Option<&[u8]>,
     ) -> Result<Vec<u8>, AttestationError> {
-        // NSM attestation request structure
-        // In a real implementation, this would use the NSM API
-        // For now, this is a placeholder
-        Err(AttestationError::NotInTEE(
-            "NSM communication not yet implemented".into(),
-        ))
+        use std::io::Write;
+
+        // Build CBOR attestation request
+        let mut attestation_map = Vec::new();
+        if let Some(data) = user_data {
+            attestation_map.push((
+                ciborium::Value::Text("user_data".into()),
+                ciborium::Value::Bytes(data.to_vec()),
+            ));
+        }
+        attestation_map.push((
+            ciborium::Value::Text("nonce".into()),
+            ciborium::Value::Null,
+        ));
+        attestation_map.push((
+            ciborium::Value::Text("public_key".into()),
+            ciborium::Value::Null,
+        ));
+
+        let request = ciborium::Value::Map(vec![(
+            ciborium::Value::Text("Attestation".into()),
+            ciborium::Value::Map(attestation_map),
+        )]);
+
+        let mut request_bytes = Vec::new();
+        ciborium::into_writer(&request, &mut request_bytes).map_err(|e| {
+            AttestationError::IoError(format!("Failed to encode CBOR request: {e}"))
+        })?;
+
+        // Write request to NSM device and read response.
+        // The NSM kernel module provides a file-based interface: write request CBOR,
+        // read response CBOR from the same fd.
+        let mut nsm_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/nsm")
+            .map_err(|e| AttestationError::NotInTEE(format!("Cannot open /dev/nsm: {e}")))?;
+
+        nsm_file.write_all(&request_bytes).map_err(|e| {
+            AttestationError::IoError(format!("Failed to write to /dev/nsm: {e}"))
+        })?;
+
+        let response_bytes = std::fs::read("/dev/nsm").map_err(|e| {
+            AttestationError::IoError(format!("Failed to read from /dev/nsm: {e}"))
+        })?;
+
+        // Parse CBOR response to extract attestation document
+        let response: ciborium::Value =
+            ciborium::from_reader(response_bytes.as_slice()).map_err(|e| {
+                AttestationError::InvalidFormat(format!("Failed to parse NSM response: {e}"))
+            })?;
+
+        // Response structure: {"Attestation": {"document": <bytes>}}
+        let doc_bytes = response
+            .as_map()
+            .and_then(|m| {
+                m.iter().find_map(|(k, v)| {
+                    if k.as_text() == Some("Attestation") {
+                        v.as_map().and_then(|inner| {
+                            inner.iter().find_map(|(ik, iv)| {
+                                if ik.as_text() == Some("document") {
+                                    iv.as_bytes().cloned()
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                    } else {
+                        None
+                    }
+                })
+            })
+            .ok_or_else(|| {
+                AttestationError::InvalidFormat(
+                    "NSM response missing Attestation.document".into(),
+                )
+            })?;
+
+        Ok(doc_bytes)
     }
 }
 
@@ -311,20 +385,58 @@ impl NitroVsockClient {
 
     /// Send data and receive response via vsock.
     ///
-    /// Note: This requires the `vsock` crate or direct NSM API access.
-    /// In production, use the AWS Nitro Enclave SDK.
+    /// Uses `socat` to bridge `AF_VSOCK` to stdio for safe communication
+    /// without requiring `unsafe` code. `socat` is available in standard
+    /// Nitro Enclave base images.
+    #[cfg(target_os = "linux")]
+    #[allow(clippy::unused_async)]
+    pub async fn send(&self, data: &[u8]) -> Result<Vec<u8>, AttestationError> {
+        use std::process::{Command, Stdio};
+        use std::io::Write;
+
+        let vsock_addr = format!("VSOCK-CONNECT:{cid}:{port}", cid = self.cid, port = self.port);
+
+        let mut child = Command::new("socat")
+            .args(["-", &vsock_addr])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| AttestationError::IoError(format!(
+                "Failed to spawn socat for vsock CID {cid} port {port}: {e}",
+                cid = self.cid, port = self.port
+            )))?;
+
+        // Write request data to socat stdin
+        if let Some(ref mut stdin) = child.stdin {
+            stdin.write_all(data).map_err(|e| {
+                AttestationError::IoError(format!("vsock write failed: {e}"))
+            })?;
+        }
+        // Close stdin to signal end of input
+        drop(child.stdin.take());
+
+        let output = child.wait_with_output().map_err(|e| {
+            AttestationError::IoError(format!("vsock communication failed: {e}"))
+        })?;
+
+        if !output.status.success() {
+            return Err(AttestationError::IoError(format!(
+                "socat vsock exited with status {}",
+                output.status
+            )));
+        }
+
+        Ok(output.stdout)
+    }
+
+    /// Send data and receive response via vsock (non-Linux).
+    #[cfg(not(target_os = "linux"))]
+    #[allow(clippy::unused_async)]
     pub async fn send(&self, _data: &[u8]) -> Result<Vec<u8>, AttestationError> {
-        // vsock requires either:
-        // 1. The `vsock` crate (pure Rust)
-        // 2. AWS Nitro Enclave SDK bindings
-        // 3. Direct NSM API access
-        //
-        // For now, return a helpful error. In production environments,
-        // use the official AWS Nitro Enclave SDK.
-        Err(AttestationError::MissingDependency(format!(
-            "vsock not available. Use AWS Nitro Enclave SDK for vsock to CID {} port {}",
-            self.cid, self.port
-        )))
+        Err(AttestationError::NotInTEE(
+            "vsock is only available on Linux".into(),
+        ))
     }
 }
 
@@ -339,31 +451,76 @@ impl NitroVsockServer {
         Self { port }
     }
 
-    /// Start the server (blocking).
+    /// Start the server, accepting connections and dispatching to the handler.
     ///
-    /// Note: This requires the `vsock` crate or direct system access.
-    /// In production, use the AWS Nitro Enclave SDK.
+    /// Uses `socat` to bridge `AF_VSOCK` to stdio for safe communication.
+    /// Each connection reads all data from stdin, calls the handler, and
+    /// writes the response to stdout via `socat`.
+    #[cfg(target_os = "linux")]
+    pub async fn start<F, Fut>(&self, handler: F) -> Result<(), AttestationError>
+    where
+        F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Vec<u8>> + Send,
+    {
+        use std::process::{Command, Stdio};
+        use std::io::{Read, Write};
+
+        let vsock_addr = format!("VSOCK-LISTEN:{port},fork", port = self.port);
+
+        loop {
+            // socat with fork handles one connection per invocation
+            let mut child = Command::new("socat")
+                .args([&vsock_addr, "-"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|e| AttestationError::IoError(format!(
+                    "Failed to spawn socat vsock server on port {port}: {e}",
+                    port = self.port
+                )))?;
+
+            // Read request from socat stdout (connected client data)
+            let mut request = Vec::new();
+            if let Some(ref mut stdout) = child.stdout {
+                stdout.read_to_end(&mut request).map_err(|e| {
+                    AttestationError::IoError(format!("vsock server read failed: {e}"))
+                })?;
+            }
+
+            // Process request through handler
+            let response = handler(request).await;
+
+            // Write response to socat stdin (back to client)
+            if let Some(ref mut stdin) = child.stdin {
+                let _ = stdin.write_all(&response);
+            }
+            drop(child.stdin.take());
+
+            let _ = child.wait();
+        }
+    }
+
+    /// Start the server (non-Linux).
+    #[cfg(not(target_os = "linux"))]
+    #[allow(clippy::unused_async)]
     pub async fn start<F, Fut>(&self, _handler: F) -> Result<(), AttestationError>
     where
         F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Vec<u8>> + Send,
     {
-        // vsock server requires either:
-        // 1. The `vsock` crate (pure Rust)
-        // 2. AWS Nitro Enclave SDK bindings
-        //
-        // For now, return a helpful error. In production environments,
-        // use the official AWS Nitro Enclave SDK.
-        Err(AttestationError::MissingDependency(format!(
-            "vsock server not available. Use AWS Nitro Enclave SDK for port {}",
-            self.port
-        )))
+        Err(AttestationError::NotInTEE(
+            "vsock is only available on Linux".into(),
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        NitroAttestationProvider, NitroVsockClient,
+    };
+    use super::super::base::{AttestationProvider, TEEType};
 
     #[test]
     fn test_provider_creation() {

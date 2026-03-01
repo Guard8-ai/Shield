@@ -4,6 +4,7 @@
 //! AMD SEV-SNP hardware attestation and vTPM measurements.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -42,12 +43,14 @@ impl SEVAttestationProvider {
     }
 
     /// Set the expected GCP project ID.
+    #[must_use]
     pub fn with_project_id(mut self, project_id: impl Into<String>) -> Self {
         self.project_id = Some(project_id.into());
         self
     }
 
     /// Add an expected measurement.
+    #[must_use]
     pub fn with_expected_measurement(
         mut self,
         name: impl Into<String>,
@@ -58,19 +61,21 @@ impl SEVAttestationProvider {
     }
 
     /// Add allowed zones.
+    #[must_use]
     pub fn with_allowed_zones(mut self, zones: Vec<String>) -> Self {
         self.allowed_zones = zones;
         self
     }
 
     /// Set the token audience.
+    #[must_use]
     pub fn with_audience(mut self, audience: impl Into<String>) -> Self {
         self.audience = audience.into();
         self
     }
 
     /// Parse a JWT token (base64url-encoded parts).
-    fn parse_jwt(&self, token: &str) -> Result<JwtPayload, AttestationError> {
+    fn parse_jwt(token: &str) -> Result<JwtPayload, AttestationError> {
         let parts: Vec<&str> = token.split('.').collect();
         if parts.len() != 3 {
             return Err(AttestationError::InvalidFormat("Invalid JWT format".into()));
@@ -103,7 +108,7 @@ impl AttestationProvider for SEVAttestationProvider {
             AttestationError::InvalidFormat(format!("Invalid token encoding: {e}"))
         })?;
 
-        let payload = self.parse_jwt(token)?;
+        let payload = Self::parse_jwt(token)?;
 
         // Build measurements
         let mut measurements = HashMap::new();
@@ -142,8 +147,7 @@ impl AttestationProvider for SEVAttestationProvider {
         let is_confidential = payload
             .google
             .as_ref()
-            .map(|g| g.confidential_vm)
-            .unwrap_or(false);
+            .is_some_and(|g| g.confidential_vm);
 
         if !is_confidential {
             return Ok(AttestationResult::failure(
@@ -158,8 +162,7 @@ impl AttestationProvider for SEVAttestationProvider {
             let actual_project = payload
                 .google
                 .as_ref()
-                .map(|g| g.project_id.as_str())
-                .unwrap_or("");
+                .map_or("", |g| g.project_id.as_str());
 
             if actual_project != expected_project {
                 return Ok(AttestationResult::failure(
@@ -175,8 +178,7 @@ impl AttestationProvider for SEVAttestationProvider {
             let zone = payload
                 .google
                 .as_ref()
-                .map(|g| g.zone.as_str())
-                .unwrap_or("");
+                .map_or("", |g| g.zone.as_str());
 
             if !self.allowed_zones.iter().any(|z| z == zone) {
                 return Ok(AttestationResult::failure(
@@ -233,7 +235,7 @@ impl AttestationProvider for SEVAttestationProvider {
 
         if let Some(data) = user_data {
             let nonce = URL_SAFE_NO_PAD.encode(data);
-            url.push_str(&format!("&nonce={nonce}"));
+            let _ = write!(url, "&nonce={nonce}");
         }
 
         #[cfg(feature = "async")]
@@ -327,6 +329,7 @@ impl ConfidentialSpaceProvider {
     }
 
     /// Set expected container image digest.
+    #[must_use]
     pub fn with_expected_image_digest(mut self, digest: impl Into<String>) -> Self {
         self.expected_image_digest = Some(digest.into());
         self
@@ -380,8 +383,11 @@ impl AttestationProvider for ConfidentialSpaceProvider {
 }
 
 /// GCP Secret Manager with attestation-based access.
+///
+/// Retrieves secrets from Google Cloud Secret Manager after verifying
+/// attestation evidence. Uses the GCP metadata service for authentication
+/// and the Secret Manager REST API for secret retrieval.
 pub struct GCPSecretManager {
-    #[allow(dead_code)]
     project_id: String,
     provider: Arc<dyn AttestationProvider>,
 }
@@ -396,12 +402,16 @@ impl GCPSecretManager {
     }
 
     /// Get a secret after verifying attestation.
+    ///
+    /// Fetches an access token from the GCP metadata service, verifies the
+    /// attestation evidence, then retrieves the specified secret version from
+    /// Secret Manager.
     #[cfg(feature = "async")]
     pub async fn get_secret(
         &self,
-        _secret_id: &str,
+        secret_id: &str,
         attestation_evidence: &[u8],
-        _version: &str,
+        version: &str,
     ) -> Result<Vec<u8>, AttestationError> {
         let result = self.provider.verify(attestation_evidence).await?;
 
@@ -412,11 +422,68 @@ impl GCPSecretManager {
             ));
         }
 
-        // In production, use google-cloud-secretmanager crate
-        // For now, return a placeholder error
-        Err(AttestationError::MissingDependency(
-            "google-cloud-secretmanager crate required".into(),
-        ))
+        // Get access token from GCP metadata service
+        let client = reqwest::Client::new();
+        let token_url = format!(
+            "{GCP_METADATA_URL}/instance/service-accounts/default/token"
+        );
+
+        let token_response = client
+            .get(&token_url)
+            .header("Metadata-Flavor", "Google")
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|e| AttestationError::IoError(format!("Metadata token request failed: {e}")))?;
+
+        if !token_response.status().is_success() {
+            return Err(AttestationError::IoError(format!(
+                "Metadata token service returned {}",
+                token_response.status()
+            )));
+        }
+
+        let token_json: serde_json::Value = token_response.json().await.map_err(|e| {
+            AttestationError::IoError(format!("Failed to parse token response: {e}"))
+        })?;
+
+        let access_token = token_json["access_token"]
+            .as_str()
+            .ok_or_else(|| AttestationError::IoError("Missing access_token in response".into()))?;
+
+        // Fetch secret from Secret Manager REST API
+        let secret_url = format!(
+            "https://secretmanager.googleapis.com/v1/projects/{}/secrets/{}/versions/{}:access",
+            self.project_id, secret_id, version
+        );
+
+        let secret_response = client
+            .get(&secret_url)
+            .bearer_auth(access_token)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|e| AttestationError::IoError(format!("Secret Manager request failed: {e}")))?;
+
+        if !secret_response.status().is_success() {
+            return Err(AttestationError::KeyReleaseFailed(format!(
+                "Secret Manager returned {}",
+                secret_response.status()
+            )));
+        }
+
+        let secret_json: serde_json::Value = secret_response.json().await.map_err(|e| {
+            AttestationError::IoError(format!("Failed to parse secret response: {e}"))
+        })?;
+
+        // Extract and decode the secret payload (base64-encoded)
+        let payload_b64 = secret_json["payload"]["data"]
+            .as_str()
+            .ok_or_else(|| AttestationError::IoError("Missing payload.data in response".into()))?;
+
+        base64::engine::general_purpose::STANDARD.decode(payload_b64).map_err(|e| {
+            AttestationError::IoError(format!("Failed to decode secret payload: {e}"))
+        })
     }
 }
 
