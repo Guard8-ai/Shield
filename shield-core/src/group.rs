@@ -10,6 +10,7 @@ use ring::hmac;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use subtle::ConstantTimeEq;
+use zeroize::Zeroize;
 
 use crate::error::{Result, ShieldError};
 
@@ -192,6 +193,15 @@ impl GroupEncryption {
     }
 }
 
+impl Drop for GroupEncryption {
+    fn drop(&mut self) {
+        self.group_key.zeroize();
+        for key in self.members.values_mut() {
+            key.zeroize();
+        }
+    }
+}
+
 /// Encrypted broadcast message format.
 #[derive(Serialize, Deserialize)]
 pub struct EncryptedBroadcast {
@@ -349,6 +359,18 @@ impl BroadcastEncryption {
             .decode(&encrypted.ciphertext)
             .map_err(|_| ShieldError::InvalidFormat)?;
         decrypt_block(&msg_key, &ciphertext)
+    }
+}
+
+impl Drop for BroadcastEncryption {
+    fn drop(&mut self) {
+        self.master_key.zeroize();
+        for key in self.members.values_mut() {
+            key.1.zeroize();
+        }
+        for key in self.subgroup_keys.values_mut() {
+            key.zeroize();
+        }
     }
 }
 

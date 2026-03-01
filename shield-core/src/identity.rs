@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::time::{SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
+use zeroize::Zeroize;
 
 use crate::error::{Result, ShieldError};
 
@@ -593,6 +594,15 @@ impl SecureSession {
     #[must_use]
     pub fn key_version(&self) -> u32 {
         self.key_version
+    }
+}
+
+impl Drop for SecureSession {
+    fn drop(&mut self) {
+        self.master_key.zeroize();
+        for key in self.keys.values_mut() {
+            key.zeroize();
+        }
     }
 }
 

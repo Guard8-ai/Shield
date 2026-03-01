@@ -8,6 +8,7 @@
 
 use ring::{digest, hmac};
 use subtle::ConstantTimeEq;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{Result, ShieldError};
 
@@ -20,8 +21,10 @@ const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
 /// - Constant memory usage regardless of file size
 /// - Early detection of tampering
 /// - Potential for parallel processing
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct StreamCipher {
     key: [u8; 32],
+    #[zeroize(skip)]
     chunk_size: usize,
 }
 

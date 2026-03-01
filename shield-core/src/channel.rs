@@ -40,6 +40,7 @@
 use ring::hmac;
 use std::io::{Read, Write};
 use subtle::ConstantTimeEq;
+use zeroize::Zeroize;
 
 use crate::error::{Result, ShieldError};
 use crate::exchange::PAKEExchange;
@@ -122,6 +123,13 @@ impl ChannelConfig {
     pub(crate) fn iterations(&self) -> u32 {
         self.iterations
     }
+
+    /// Get handshake timeout in milliseconds (for internal use by async channel).
+    #[cfg(feature = "async")]
+    #[must_use]
+    pub(crate) fn handshake_timeout_ms(&self) -> u64 {
+        self.handshake_timeout_ms
+    }
 }
 
 /// Handshake state for key exchange.
@@ -130,6 +138,16 @@ struct HandshakeState {
     local_contribution: [u8; 32],
     remote_contribution: Option<[u8; 32]>,
     is_initiator: bool,
+}
+
+impl Drop for HandshakeState {
+    fn drop(&mut self) {
+        self.salt.zeroize();
+        self.local_contribution.zeroize();
+        if let Some(ref mut remote) = self.remote_contribution {
+            remote.zeroize();
+        }
+    }
 }
 
 impl HandshakeState {
@@ -172,14 +190,12 @@ impl HandshakeState {
             Some(config.iterations),
         );
 
-        // Final session key = hash(base_key || password_key)
-        let mut combined = Vec::with_capacity(64);
-        combined.extend_from_slice(&base_key);
-        combined.extend_from_slice(&password_key);
-
-        let hash = ring::digest::digest(&ring::digest::SHA256, &combined);
+        // Final session key = HMAC-SHA256(base_key, password_key)
+        // Using keyed HMAC instead of SHA256(key || data) to prevent length-extension
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &base_key);
+        let tag = hmac::sign(&hmac_key, &password_key);
         let mut result = [0u8; 32];
-        result.copy_from_slice(hash.as_ref());
+        result.copy_from_slice(&tag.as_ref()[..32]);
         Ok(result)
     }
 }

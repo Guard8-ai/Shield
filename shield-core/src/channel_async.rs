@@ -29,6 +29,7 @@
 use ring::hmac;
 use subtle::ConstantTimeEq;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use zeroize::Zeroize;
 
 use crate::error::{Result, ShieldError};
 use crate::exchange::PAKEExchange;
@@ -58,6 +59,16 @@ struct HandshakeState {
     local_contribution: [u8; 32],
     remote_contribution: Option<[u8; 32]>,
     is_initiator: bool,
+}
+
+impl Drop for HandshakeState {
+    fn drop(&mut self) {
+        self.salt.zeroize();
+        self.local_contribution.zeroize();
+        if let Some(ref mut remote) = self.remote_contribution {
+            remote.zeroize();
+        }
+    }
 }
 
 impl HandshakeState {
@@ -101,13 +112,12 @@ impl HandshakeState {
             Some(config.iterations()),
         );
 
-        let mut combined = Vec::with_capacity(64);
-        combined.extend_from_slice(&base_key);
-        combined.extend_from_slice(&password_key);
-
-        let hash = ring::digest::digest(&ring::digest::SHA256, &combined);
+        // Final session key = HMAC-SHA256(base_key, password_key)
+        // Using keyed HMAC instead of SHA256(key || data) to prevent length-extension
+        let hmac_key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &base_key);
+        let tag = ring::hmac::sign(&hmac_key, &password_key);
         let mut result = [0u8; 32];
-        result.copy_from_slice(hash.as_ref());
+        result.copy_from_slice(&tag.as_ref()[..32]);
         Ok(result)
     }
 }
@@ -125,7 +135,15 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
     /// Connect as client (initiator).
     ///
     /// Performs async PAKE handshake and establishes encrypted channel.
-    pub async fn connect(mut stream: S, config: &ChannelConfig) -> Result<Self> {
+    /// Enforces the configured handshake timeout (default 30s).
+    pub async fn connect(stream: S, config: &ChannelConfig) -> Result<Self> {
+        let timeout_dur = std::time::Duration::from_millis(config.handshake_timeout_ms());
+        tokio::time::timeout(timeout_dur, Self::connect_inner(stream, config))
+            .await
+            .map_err(|_| ShieldError::ChannelError("handshake timeout".into()))?
+    }
+
+    async fn connect_inner(mut stream: S, config: &ChannelConfig) -> Result<Self> {
         let mut state = HandshakeState::new(true)?;
 
         // Step 1: Send ClientHello (salt)
@@ -171,7 +189,15 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
     /// Accept connection as server.
     ///
     /// Waits for client handshake and establishes encrypted channel.
-    pub async fn accept(mut stream: S, config: &ChannelConfig) -> Result<Self> {
+    /// Enforces the configured handshake timeout (default 30s).
+    pub async fn accept(stream: S, config: &ChannelConfig) -> Result<Self> {
+        let timeout_dur = std::time::Duration::from_millis(config.handshake_timeout_ms());
+        tokio::time::timeout(timeout_dur, Self::accept_inner(stream, config))
+            .await
+            .map_err(|_| ShieldError::ChannelError("handshake timeout".into()))?
+    }
+
+    async fn accept_inner(mut stream: S, config: &ChannelConfig) -> Result<Self> {
         let mut state = HandshakeState::new(false)?;
 
         // Step 1: Receive ClientHello
