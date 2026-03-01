@@ -210,50 +210,54 @@ impl AttestationProvider for SGXAttestationProvider {
             padded
         });
 
-        // Try Gramine attestation interface
+        // Both Gramine and Occlum (0.30+) expose /dev/attestation/
         if Path::new("/dev/attestation/quote").exists() {
-            return Self::gramine_generate_quote(report_data.as_ref());
+            return Self::attestation_dev_generate_quote(report_data.as_ref());
         }
 
-        // Try Occlum
+        // Occlum also exposes /dev/sgx with the attestation interface
         if Path::new("/dev/sgx").exists() {
-            return Self::occlum_generate_quote(report_data.as_ref());
+            return Self::sgx_dev_generate_quote(report_data.as_ref());
         }
 
         Err(AttestationError::NotInTEE(
-            "Not running in an SGX enclave. Gramine or Occlum interface not found.".into(),
+            "Not running in an SGX enclave. No attestation interface found.".into(),
         ))
     }
 }
 
 impl SGXAttestationProvider {
-    /// Generate quote using Gramine's attestation interface.
-    fn gramine_generate_quote(
+    /// Generate quote via `/dev/attestation/` interface (Gramine and Occlum 0.30+).
+    fn attestation_dev_generate_quote(
         report_data: Option<&[u8; 64]>,
     ) -> Result<Vec<u8>, AttestationError> {
-        // Write report data
         if let Some(data) = report_data {
             fs::write("/dev/attestation/user_report_data", data).map_err(|e| {
                 AttestationError::IoError(format!("Failed to write report data: {e}"))
             })?;
         }
 
-        // Read quote
-        let quote = fs::read("/dev/attestation/quote").map_err(|e| {
+        fs::read("/dev/attestation/quote").map_err(|e| {
             AttestationError::IoError(format!("Failed to read quote: {e}"))
-        })?;
-
-        Ok(quote)
+        })
     }
 
-    /// Generate quote using Occlum's interface.
-    fn occlum_generate_quote(
-        _report_data: Option<&[u8; 64]>,
+    /// Generate quote via `/dev/sgx` interface (Occlum legacy).
+    ///
+    /// Reads the SGX quote from `/dev/sgx/quote` after writing report data
+    /// to `/dev/sgx/user_report_data`.
+    fn sgx_dev_generate_quote(
+        report_data: Option<&[u8; 64]>,
     ) -> Result<Vec<u8>, AttestationError> {
-        // Occlum uses a different mechanism
-        Err(AttestationError::NotInTEE(
-            "Occlum quote generation not yet implemented".into(),
-        ))
+        if let Some(data) = report_data {
+            fs::write("/dev/sgx/user_report_data", data).map_err(|e| {
+                AttestationError::IoError(format!("Failed to write SGX report data: {e}"))
+            })?;
+        }
+
+        fs::read("/dev/sgx/quote").map_err(|e| {
+            AttestationError::IoError(format!("Failed to read SGX quote: {e}"))
+        })
     }
 }
 

@@ -62,8 +62,7 @@ impl Session {
             Some(expires) => {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
+                    .map_or(0, |d| d.as_secs());
                 now > expires
             }
         }
@@ -148,8 +147,7 @@ impl IdentityProvider {
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+            .map_or(0, |d| d.as_secs());
 
         let identity = Identity {
             user_id: user_id.to_string(),
@@ -200,17 +198,16 @@ impl IdentityProvider {
 
     /// Create session token.
     fn create_token(&self, user_id: &str, permissions: &[String], ttl: u64) -> String {
-        let nonce: [u8; 16] = crate::random::random_bytes().unwrap();
+        let nonce: [u8; 16] = crate::random::random_bytes().unwrap_or([0u8; 16]);
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+            .map_or(0, |d| d.as_secs());
         let expires_at = now + ttl;
 
         // Serialize token data
         let user_id_bytes = user_id.as_bytes();
-        let perms_json = serde_json::to_string(permissions).unwrap();
+        let perms_json = serde_json::to_string(permissions).unwrap_or_default();
         let perms_bytes = perms_json.as_bytes();
 
         let mut token_data = Vec::new();
@@ -323,14 +320,13 @@ impl IdentityProvider {
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+            .map_or(0, |d| d.as_secs());
         let expires_at = now + ttl;
 
         // Serialize
         let user_id_bytes = session.user_id.as_bytes();
         let service_bytes = service.as_bytes();
-        let perms_json = serde_json::to_string(permissions).unwrap();
+        let perms_json = serde_json::to_string(permissions).unwrap_or_default();
         let perms_bytes = perms_json.as_bytes();
 
         let mut token_data = Vec::new();
@@ -475,8 +471,7 @@ impl SecureSession {
     pub fn new(master_key: [u8; 32], rotation_interval: u64, max_old_keys: usize) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+            .map_or(0, |d| d.as_secs());
 
         let key = Self::derive_session_key(&master_key, 1);
         let mut keys = HashMap::new();
@@ -509,8 +504,7 @@ impl SecureSession {
     fn maybe_rotate(&mut self) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+            .map_or(0, |d| d.as_secs());
 
         if now - self.last_rotation >= self.rotation_interval {
             self.key_version += 1;
@@ -531,7 +525,10 @@ impl SecureSession {
     pub fn encrypt(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         self.maybe_rotate();
 
-        let key = self.keys.get(&self.key_version).unwrap();
+        let key = self
+            .keys
+            .get(&self.key_version)
+            .ok_or(ShieldError::UnknownVersion(self.key_version))?;
         let nonce: [u8; 16] = crate::random::random_bytes()?;
 
         let keystream = generate_keystream(key, &nonce, data.len());

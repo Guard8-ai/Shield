@@ -23,7 +23,7 @@ impl PAKEExchange {
         let mut base_key = [0u8; 32];
         ring::pbkdf2::derive(
             ring::pbkdf2::PBKDF2_HMAC_SHA256,
-            NonZeroU32::new(iters).unwrap(),
+            NonZeroU32::new(iters).unwrap_or(NonZeroU32::new(Self::ITERATIONS).unwrap()),
             salt,
             password.as_bytes(),
             &mut base_key,
@@ -95,7 +95,7 @@ impl QRExchange {
             k: URL_SAFE_NO_PAD.encode(key),
             m: metadata,
         };
-        serde_json::to_string(&data).unwrap()
+        serde_json::to_string(&data).unwrap_or_default()
     }
 
     /// Parse exchange data.

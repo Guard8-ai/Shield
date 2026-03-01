@@ -28,10 +28,10 @@ impl EncryptedVector {
         let nonce = Self::derive_nonce(vector);
 
         // Encrypt each component deterministically
-        let encrypted_data = Self::encrypt_components(shield, vector, &nonce)?;
+        let encrypted_data = Self::encrypt_components(shield, vector, &nonce);
 
         // Compute MAC over encrypted data
-        let mac = Self::compute_mac(shield, &encrypted_data, &nonce)?;
+        let mac = Self::compute_mac(shield, &encrypted_data, &nonce);
 
         Ok(Self {
             nonce,
@@ -44,13 +44,13 @@ impl EncryptedVector {
     /// Decrypt an encrypted vector
     pub fn decrypt(&self, shield: &Shield) -> Result<Vec<f32>> {
         // Verify MAC first
-        let computed_mac = Self::compute_mac(shield, &self.encrypted_data, &self.nonce)?;
+        let computed_mac = Self::compute_mac(shield, &self.encrypted_data, &self.nonce);
         if !constant_time_compare(&computed_mac, &self.mac) {
             return Err(PgVectorError::Shield(crate::error::ShieldError::AuthenticationFailed));
         }
 
         // Decrypt components
-        Self::decrypt_components(shield, &self.encrypted_data, &self.nonce)
+        Ok(Self::decrypt_components(shield, &self.encrypted_data, &self.nonce))
     }
 
     /// Derive deterministic nonce from vector content
@@ -77,12 +77,12 @@ impl EncryptedVector {
     ///
     /// Uses XOR with deterministic keystream derived from
     /// Shield key + nonce + component index
-    fn encrypt_components(shield: &Shield, vector: &[f32], nonce: &[u8]) -> Result<Vec<f32>> {
+    fn encrypt_components(shield: &Shield, vector: &[f32], nonce: &[u8]) -> Vec<f32> {
         let mut encrypted = Vec::with_capacity(vector.len());
 
         for (i, &value) in vector.iter().enumerate() {
             // Generate keystream for this component
-            let keystream = Self::generate_component_keystream(shield, nonce, i)?;
+            let keystream = Self::generate_component_keystream(shield, nonce, i);
 
             // XOR float bytes with keystream
             let value_bytes = value.to_le_bytes();
@@ -94,38 +94,42 @@ impl EncryptedVector {
             encrypted.push(f32::from_le_bytes(encrypted_bytes));
         }
 
-        Ok(encrypted)
+        encrypted
     }
 
     /// Decrypt vector components
-    fn decrypt_components(shield: &Shield, encrypted: &[f32], nonce: &[u8]) -> Result<Vec<f32>> {
+    fn decrypt_components(shield: &Shield, encrypted: &[f32], nonce: &[u8]) -> Vec<f32> {
         // Decryption is same as encryption (XOR is symmetric)
         Self::encrypt_components(shield, encrypted, nonce)
     }
 
-    /// Generate keystream for a specific vector component
-    fn generate_component_keystream(_shield: &Shield, nonce: &[u8], index: usize) -> Result<Vec<u8>> {
-        // Create input: nonce || index || "component"
+    /// Generate keystream for a specific vector component using keyed HMAC.
+    fn generate_component_keystream(shield: &Shield, nonce: &[u8], index: usize) -> Vec<u8> {
+        use ring::hmac;
+
+        // HMAC-SHA256(master_key, nonce || index || "component")
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, shield.master_key());
         let mut input = nonce.to_vec();
         input.extend_from_slice(&index.to_le_bytes());
         input.extend_from_slice(b"component");
 
-        // Use SHA256 for deterministic keystream
-        let hash = digest::digest(&digest::SHA256, &input);
-        Ok(hash.as_ref()[..4].to_vec())
+        let tag = hmac::sign(&hmac_key, &input);
+        tag.as_ref()[..4].to_vec()
     }
 
-    /// Compute MAC over encrypted vector
-    fn compute_mac(_shield: &Shield, encrypted: &[f32], nonce: &[u8]) -> Result<Vec<u8>> {
-        // Serialize encrypted vector
+    /// Compute keyed MAC over encrypted vector using HMAC-SHA256.
+    fn compute_mac(shield: &Shield, encrypted: &[f32], nonce: &[u8]) -> Vec<u8> {
+        use ring::hmac;
+
+        // HMAC-SHA256(master_key, nonce || encrypted_data)
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, shield.master_key());
         let mut data = nonce.to_vec();
         for &value in encrypted {
             data.extend_from_slice(&value.to_le_bytes());
         }
 
-        // Use SHA256 for MAC (truncate to 16 bytes)
-        let hash = digest::digest(&digest::SHA256, &data);
-        Ok(hash.as_ref()[..16].to_vec())
+        let tag = hmac::sign(&hmac_key, &data);
+        tag.as_ref()[..16].to_vec()
     }
 
     /// Get encrypted data as f32 slice for database storage

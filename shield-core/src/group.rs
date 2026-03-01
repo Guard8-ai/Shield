@@ -291,7 +291,9 @@ impl BroadcastEncryption {
         // Encrypt subgroup keys for each member
         let mut members = HashMap::new();
         for (member_id, (sg_id, member_key)) in &self.members {
-            let sg_key = self.subgroup_keys.get(sg_id).unwrap();
+            let Some(sg_key) = self.subgroup_keys.get(sg_id) else {
+                continue;
+            };
             let encrypted_sg_key = encrypt_block(member_key, sg_key)?;
             members.insert(
                 member_id.clone(),

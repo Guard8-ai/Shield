@@ -89,22 +89,15 @@ impl AttestationProvider for MAAAttestationProvider {
         // Build measurements
         let mut measurements = HashMap::new();
 
-        // Extract SEV-SNP measurements
+        // Extract SEV-SNP and SGX measurements
         for (key, value) in &payload.claims {
-            if key.starts_with("x-ms-sevsnpvm-") {
-                let short_key = key
-                    .strip_prefix("x-ms-sevsnpvm-")
-                    .unwrap()
-                    .to_uppercase();
+            if let Some(short) = key.strip_prefix("x-ms-sevsnpvm-") {
                 if let Some(s) = value.as_str() {
-                    measurements.insert(short_key, s.to_string());
+                    measurements.insert(short.to_uppercase(), s.to_string());
                 }
-            }
-            // Extract SGX measurements
-            if key.starts_with("x-ms-sgx-") {
-                let short_key = key.strip_prefix("x-ms-sgx-").unwrap().to_uppercase();
+            } else if let Some(short) = key.strip_prefix("x-ms-sgx-") {
                 if let Some(s) = value.as_str() {
-                    measurements.insert(short_key, s.to_string());
+                    measurements.insert(short.to_uppercase(), s.to_string());
                 }
             }
         }

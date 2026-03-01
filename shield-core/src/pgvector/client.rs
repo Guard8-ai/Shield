@@ -1,4 +1,4 @@
-//! pgvector client for PostgreSQL operations
+//! pgvector client for `PostgreSQL` operations
 //!
 //! NOTE: This is a simplified implementation demonstrating the integration pattern.
 //! Production use requires tokio-postgres with actual database connections.
@@ -93,7 +93,7 @@ impl PgVectorClient {
         // Search in storage (in production: SELECT with ORDER BY distance)
         let mut results: Vec<_> = self.storage
             .iter()
-            .map(|(id, (encrypted_vec, metadata))| {
+            .filter_map(|(id, (encrypted_vec, metadata))| {
                 // Decrypt stored vector
                 let vector = encrypted_vec.decrypt(&self.shield).ok()?;
 
@@ -107,7 +107,6 @@ impl PgVectorClient {
                     distance: Some(distance),
                 })
             })
-            .filter_map(|x| x)
             .collect();
 
         // Sort by distance
@@ -169,7 +168,7 @@ impl PgVectorClient {
     /// Get collection statistics
     pub fn stats(&self) -> CollectionStats {
         CollectionStats {
-            total_vectors: self.storage.len() as i64,
+            total_vectors: i64::try_from(self.storage.len()).unwrap_or(i64::MAX),
             dimension: self.config.dimension,
         }
     }
@@ -183,16 +182,16 @@ impl PgVectorClient {
                     .zip(v2.iter())
                     .map(|(a, b)| {
                         let diff = a - b;
-                        (diff * diff) as f64
+                        f64::from(diff * diff)
                     })
                     .sum::<f64>()
                     .sqrt()
             }
             DistanceMetric::Cosine => {
                 // Cosine distance = 1 - cosine similarity
-                let dot: f64 = v1.iter().zip(v2.iter()).map(|(a, b)| (a * b) as f64).sum();
-                let norm1: f64 = v1.iter().map(|x| (x * x) as f64).sum::<f64>().sqrt();
-                let norm2: f64 = v2.iter().map(|x| (x * x) as f64).sum::<f64>().sqrt();
+                let dot: f64 = v1.iter().zip(v2.iter()).map(|(a, b)| f64::from(a * b)).sum();
+                let norm1: f64 = v1.iter().map(|x| f64::from(x * x)).sum::<f64>().sqrt();
+                let norm2: f64 = v2.iter().map(|x| f64::from(x * x)).sum::<f64>().sqrt();
 
                 if norm1 == 0.0 || norm2 == 0.0 {
                     1.0
@@ -202,7 +201,7 @@ impl PgVectorClient {
             }
             DistanceMetric::InnerProduct => {
                 // Negative inner product
-                -(v1.iter().zip(v2.iter()).map(|(a, b)| (a * b) as f64).sum::<f64>())
+                -(v1.iter().zip(v2.iter()).map(|(a, b)| f64::from(a * b)).sum::<f64>())
             }
         }
     }
@@ -246,13 +245,13 @@ mod tests {
         let mut client = create_test_client();
 
         // Insert vectors
-        client.insert(&vec![1.0, 0.0, 0.0], serde_json::json!({"id": "v1"})).unwrap();
-        client.insert(&vec![0.9, 0.1, 0.0], serde_json::json!({"id": "v2"})).unwrap();
-        client.insert(&vec![0.0, 1.0, 0.0], serde_json::json!({"id": "v3"})).unwrap();
+        client.insert(&[1.0, 0.0, 0.0], serde_json::json!({"id": "v1"})).unwrap();
+        client.insert(&[0.9, 0.1, 0.0], serde_json::json!({"id": "v2"})).unwrap();
+        client.insert(&[0.0, 1.0, 0.0], serde_json::json!({"id": "v3"})).unwrap();
 
         // Search for similar to [1.0, 0.0, 0.0]
         let results = client.search_similar(
-            &vec![1.0, 0.0, 0.0],
+            &[1.0, 0.0, 0.0],
             2,
             DistanceMetric::L2,
         ).unwrap();
@@ -276,7 +275,7 @@ mod tests {
     #[test]
     fn test_delete() {
         let mut client = create_test_client();
-        let id = client.insert(&vec![1.0, 2.0, 3.0], serde_json::json!({})).unwrap();
+        let id = client.insert(&[1.0, 2.0, 3.0], serde_json::json!({})).unwrap();
 
         assert!(client.delete(id).unwrap());
         assert!(client.get(id).unwrap().is_none());
@@ -285,9 +284,9 @@ mod tests {
     #[test]
     fn test_update() {
         let mut client = create_test_client();
-        let id = client.insert(&vec![1.0, 2.0, 3.0], serde_json::json!({"v": 1})).unwrap();
+        let id = client.insert(&[1.0, 2.0, 3.0], serde_json::json!({"v": 1})).unwrap();
 
-        client.update(id, &vec![4.0, 5.0, 6.0], serde_json::json!({"v": 2})).unwrap();
+        client.update(id, &[4.0, 5.0, 6.0], serde_json::json!({"v": 2})).unwrap();
 
         let record = client.get(id).unwrap().unwrap();
         assert_eq!(record.vector, vec![4.0, 5.0, 6.0]);

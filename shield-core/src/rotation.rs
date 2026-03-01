@@ -69,7 +69,10 @@ impl KeyRotationManager {
     ///
     /// Format: version(4) || nonce(16) || ciphertext || mac(16)
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
-        let key = self.keys.get(&self.current_version).unwrap();
+        let key = self
+            .keys
+            .get(&self.current_version)
+            .ok_or(ShieldError::UnknownVersion(self.current_version))?;
         let nonce: [u8; 16] = crate::random::random_bytes()?;
 
         // Generate keystream
@@ -111,7 +114,14 @@ impl KeyRotationManager {
         }
 
         // Parse components
-        let version = u32::from_le_bytes(encrypted[..4].try_into().unwrap());
+        let version = u32::from_le_bytes(
+            encrypted[..4]
+                .try_into()
+                .map_err(|_| ShieldError::CiphertextTooShort {
+                    expected: 4,
+                    actual: encrypted.len(),
+                })?,
+        );
         let nonce = &encrypted[4..20];
         let ciphertext = &encrypted[20..encrypted.len() - 16];
         let mac = &encrypted[encrypted.len() - 16..];

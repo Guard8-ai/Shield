@@ -55,8 +55,7 @@ impl TOTP {
         let time = timestamp.unwrap_or_else(|| {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
+                .map_or(0, |d| d.as_secs())
         });
 
         let counter = time / self.interval;
@@ -89,8 +88,7 @@ impl TOTP {
         let time = timestamp.unwrap_or_else(|| {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
+                .map_or(0, |d| d.as_secs())
         });
 
         let window = if window == 0 { 1 } else { window };
