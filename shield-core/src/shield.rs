@@ -254,7 +254,7 @@ impl Shield {
         data_to_encrypt.extend_from_slice(plaintext);
 
         // Generate keystream and XOR (using encryption subkey)
-        let keystream = generate_keystream(enc_key, &nonce, data_to_encrypt.len());
+        let keystream = generate_keystream(enc_key, &nonce, data_to_encrypt.len())?;
         let ciphertext: Vec<u8> = data_to_encrypt
             .iter()
             .zip(keystream.iter())
@@ -325,7 +325,7 @@ impl Shield {
         }
 
         // Decrypt with separated enc_key
-        let keystream = generate_keystream(&enc_key, nonce, ciphertext.len());
+        let keystream = generate_keystream(&enc_key, nonce, ciphertext.len())?;
         let decrypted: Vec<u8> = ciphertext
             .iter()
             .zip(keystream.iter())
@@ -420,7 +420,7 @@ impl Shield {
         }
 
         // Decrypt with separated enc_key
-        let keystream = generate_keystream(&enc_key, nonce, ciphertext.len());
+        let keystream = generate_keystream(&enc_key, nonce, ciphertext.len())?;
         let decrypted: Vec<u8> = ciphertext
             .iter()
             .zip(keystream.iter())
@@ -443,9 +443,11 @@ impl Shield {
 }
 
 /// Generate keystream using SHA256 (matches Python implementation).
-fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
+fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Result<Vec<u8>> {
     let num_blocks = length.div_ceil(32);
-    assert!(u32::try_from(num_blocks).is_ok(), "keystream too long: counter overflow");
+    if u32::try_from(num_blocks).is_err() {
+        return Err(ShieldError::StreamError("keystream too long: counter overflow".into()));
+    }
     let mut keystream = Vec::with_capacity(num_blocks * 32);
 
     for i in 0..num_blocks {
@@ -462,7 +464,7 @@ fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
     }
 
     keystream.truncate(length);
-    keystream
+    Ok(keystream)
 }
 
 #[cfg(test)]
@@ -474,8 +476,8 @@ mod tests {
         let key = [1u8; 32];
         let nonce = [2u8; 16];
 
-        let ks1 = generate_keystream(&key, &nonce, 64);
-        let ks2 = generate_keystream(&key, &nonce, 64);
+        let ks1 = generate_keystream(&key, &nonce, 64).unwrap();
+        let ks2 = generate_keystream(&key, &nonce, 64).unwrap();
 
         assert_eq!(ks1, ks2);
     }
@@ -486,8 +488,8 @@ mod tests {
         let nonce1 = [2u8; 16];
         let nonce2 = [3u8; 16];
 
-        let ks1 = generate_keystream(&key, &nonce1, 32);
-        let ks2 = generate_keystream(&key, &nonce2, 32);
+        let ks1 = generate_keystream(&key, &nonce1, 32).unwrap();
+        let ks2 = generate_keystream(&key, &nonce2, 32).unwrap();
 
         assert_ne!(ks1, ks2);
     }
@@ -565,7 +567,7 @@ mod tests {
         data_to_encrypt.extend_from_slice(&counter_bytes);
         data_to_encrypt.extend_from_slice(plaintext);
 
-        let keystream = generate_keystream(&enc_key, &nonce, data_to_encrypt.len());
+        let keystream = generate_keystream(&enc_key, &nonce, data_to_encrypt.len()).unwrap();
         let ciphertext: Vec<u8> = data_to_encrypt
             .iter()
             .zip(keystream.iter())
@@ -603,7 +605,7 @@ mod tests {
         data_to_encrypt.extend_from_slice(&counter_bytes);
         data_to_encrypt.extend_from_slice(plaintext);
 
-        let keystream = generate_keystream(&enc_key, &nonce, data_to_encrypt.len());
+        let keystream = generate_keystream(&enc_key, &nonce, data_to_encrypt.len()).unwrap();
         let ciphertext: Vec<u8> = data_to_encrypt
             .iter()
             .zip(keystream.iter())

@@ -218,19 +218,38 @@ fn derive_chunk_key(key: &[u8], stream_salt: &[u8], chunk_num: u64) -> [u8; 32] 
     result
 }
 
+/// Derive separated encryption and MAC subkeys from a chunk key using HMAC-SHA256.
+fn derive_chunk_subkeys(key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+
+    let enc_tag = hmac::sign(&hmac_key, b"shield-stream-encrypt");
+    let mut enc_key = [0u8; 32];
+    enc_key.copy_from_slice(&enc_tag.as_ref()[..32]);
+
+    let mac_tag = hmac::sign(&hmac_key, b"shield-stream-authenticate");
+    let mut mac_key = [0u8; 32];
+    mac_key.copy_from_slice(&mac_tag.as_ref()[..32]);
+
+    (enc_key, mac_key)
+}
+
 /// Encrypt a single chunk.
 fn encrypt_chunk(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>> {
+    let (enc_key, mac_key) = derive_chunk_subkeys(key);
+
     // Generate nonce
     let nonce: [u8; 16] = crate::random::random_bytes()?;
 
-    // Generate keystream
+    // Generate keystream with enc_key
     let num_blocks = data.len().div_ceil(32);
-    assert!(u32::try_from(num_blocks).is_ok(), "keystream too long: counter overflow");
+    if u32::try_from(num_blocks).is_err() {
+        return Err(ShieldError::StreamError("keystream too long: counter overflow".into()));
+    }
     let mut keystream = Vec::with_capacity(num_blocks * 32);
     for i in 0..num_blocks {
         let counter = (i as u32).to_le_bytes();
-        let mut hash_input = Vec::with_capacity(key.len() + nonce.len() + 4);
-        hash_input.extend_from_slice(key);
+        let mut hash_input = Vec::with_capacity(enc_key.len() + nonce.len() + 4);
+        hash_input.extend_from_slice(&enc_key);
         hash_input.extend_from_slice(&nonce);
         hash_input.extend_from_slice(&counter);
         let hash = digest::digest(&digest::SHA256, &hash_input);
@@ -244,12 +263,12 @@ fn encrypt_chunk(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>> {
         .map(|(p, k)| p ^ k)
         .collect();
 
-    // HMAC
-    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+    // HMAC with mac_key
+    let hmac_signing_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
     let mut hmac_data = Vec::with_capacity(16 + ciphertext.len());
     hmac_data.extend_from_slice(&nonce);
     hmac_data.extend_from_slice(&ciphertext);
-    let tag = hmac::sign(&hmac_key, &hmac_data);
+    let tag = hmac::sign(&hmac_signing_key, &hmac_data);
 
     // Format: nonce || ciphertext || mac(16)
     let mut result = Vec::with_capacity(16 + ciphertext.len() + 16);
@@ -266,29 +285,33 @@ fn decrypt_chunk(key: &[u8; 32], encrypted: &[u8]) -> Result<Vec<u8>> {
         return Err(ShieldError::StreamError("chunk too short".into()));
     }
 
+    let (enc_key, mac_key) = derive_chunk_subkeys(key);
+
     let nonce = &encrypted[..16];
     let ciphertext = &encrypted[16..encrypted.len() - 16];
     let mac = &encrypted[encrypted.len() - 16..];
 
-    // Verify MAC
-    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+    // Verify MAC with mac_key
+    let hmac_signing_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
     let mut hmac_data = Vec::with_capacity(16 + ciphertext.len());
     hmac_data.extend_from_slice(nonce);
     hmac_data.extend_from_slice(ciphertext);
-    let expected = hmac::sign(&hmac_key, &hmac_data);
+    let expected = hmac::sign(&hmac_signing_key, &hmac_data);
 
     if mac.ct_eq(&expected.as_ref()[..16]).unwrap_u8() != 1 {
         return Err(ShieldError::AuthenticationFailed);
     }
 
-    // Generate keystream
+    // Generate keystream with enc_key
     let num_blocks = ciphertext.len().div_ceil(32);
-    assert!(u32::try_from(num_blocks).is_ok(), "keystream too long: counter overflow");
+    if u32::try_from(num_blocks).is_err() {
+        return Err(ShieldError::StreamError("keystream too long: counter overflow".into()));
+    }
     let mut keystream = Vec::with_capacity(num_blocks * 32);
     for i in 0..num_blocks {
         let counter = (i as u32).to_le_bytes();
-        let mut hash_input = Vec::with_capacity(key.len() + nonce.len() + 4);
-        hash_input.extend_from_slice(key);
+        let mut hash_input = Vec::with_capacity(enc_key.len() + nonce.len() + 4);
+        hash_input.extend_from_slice(&enc_key);
         hash_input.extend_from_slice(nonce);
         hash_input.extend_from_slice(&counter);
         let hash = digest::digest(&digest::SHA256, &hash_input);

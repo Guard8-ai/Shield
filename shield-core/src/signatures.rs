@@ -213,7 +213,7 @@ impl LamportSignature {
         Ok(signature)
     }
 
-    /// Verify a Lamport signature.
+    /// Verify a Lamport signature (constant-time: no early returns on mismatch).
     #[must_use]
     pub fn verify(message: &[u8], signature: &[u8], public_key: &[u8]) -> bool {
         if signature.len() != 256 * 32 || public_key.len() != 256 * 64 {
@@ -222,6 +222,10 @@ impl LamportSignature {
 
         let msg_hash = ring::digest::digest(&ring::digest::SHA256, message);
         let hash_bytes = msg_hash.as_ref();
+
+        // Accumulate all comparison results — no early returns to avoid
+        // leaking which bit position failed verification.
+        let mut all_valid = 1u8;
 
         for i in 0..256 {
             let byte_idx = i / 8;
@@ -237,12 +241,10 @@ impl LamportSignature {
                 &public_key[i * 64..i * 64 + 32]
             };
 
-            if hashed.as_ref().ct_eq(expected).unwrap_u8() != 1 {
-                return false;
-            }
+            all_valid &= hashed.as_ref().ct_eq(expected).unwrap_u8();
         }
 
-        true
+        all_valid == 1
     }
 
     /// Check if key has been used.

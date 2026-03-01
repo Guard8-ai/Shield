@@ -74,22 +74,25 @@ impl RatchetSession {
 
     /// Decrypt a message with forward secrecy.
     ///
-    /// Advances the receive chain - previous keys are destroyed.
+    /// Advances the receive chain only AFTER successful MAC and counter
+    /// verification. A forged packet will not desynchronize the session.
     pub fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>> {
-        // Ratchet receive chain
+        // Speculatively compute next chain state without committing
         let (new_chain, msg_key) = ratchet_chain(&self.recv_chain);
-        self.recv_chain = new_chain;
 
-        // Decrypt with message key
+        // Decrypt and verify MAC — if this fails, chain is untouched
         let (plaintext, counter) = decrypt_with_key(&msg_key, ciphertext)?;
 
-        // Verify counter (replay protection)
+        // Verify counter (replay protection) — if this fails, chain is untouched
         if counter != self.recv_counter {
             return Err(ShieldError::RatchetError(format!(
                 "out of order message: expected {}, got {}",
                 self.recv_counter, counter
             )));
         }
+
+        // All checks passed — now commit the chain advance
+        self.recv_chain = new_chain;
         self.recv_counter += 1;
 
         Ok(plaintext)
@@ -134,8 +137,25 @@ fn ratchet_chain(chain_key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     (new_chain, msg_key)
 }
 
+/// Derive separated encryption and MAC subkeys from a message key using HMAC-SHA256.
+fn derive_msg_subkeys(key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+
+    let enc_tag = hmac::sign(&hmac_key, b"shield-ratchet-encrypt");
+    let mut enc_key = [0u8; 32];
+    enc_key.copy_from_slice(&enc_tag.as_ref()[..32]);
+
+    let mac_tag = hmac::sign(&hmac_key, b"shield-ratchet-authenticate");
+    let mut mac_key = [0u8; 32];
+    mac_key.copy_from_slice(&mac_tag.as_ref()[..32]);
+
+    (enc_key, mac_key)
+}
+
 /// Encrypt with message key (includes counter).
 fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8], counter: u64) -> Result<Vec<u8>> {
+    let (enc_key, mac_key) = derive_msg_subkeys(key);
+
     // Generate nonce
     let nonce: [u8; 16] = crate::random::random_bytes()?;
 
@@ -147,17 +167,19 @@ fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8], counter: u64) -> Result<Ve
     data.extend_from_slice(&counter_bytes);
     data.extend_from_slice(plaintext);
 
-    // Generate keystream using HMAC-SHA256 (keyed PRF)
+    // Generate keystream using HMAC-SHA256 (keyed PRF) with enc_key
     let num_blocks = data.len().div_ceil(32);
-    assert!(u32::try_from(num_blocks).is_ok(), "keystream too long: counter overflow");
-    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+    if u32::try_from(num_blocks).is_err() {
+        return Err(ShieldError::RatchetError("keystream too long: counter overflow".into()));
+    }
+    let hmac_enc_key = hmac::Key::new(hmac::HMAC_SHA256, &enc_key);
     let mut keystream = Vec::with_capacity(num_blocks * 32);
     for i in 0..num_blocks {
         let block_counter = (i as u32).to_le_bytes();
         let mut block_data = Vec::with_capacity(nonce.len() + 4);
         block_data.extend_from_slice(&nonce);
         block_data.extend_from_slice(&block_counter);
-        let tag = hmac::sign(&hmac_key, &block_data);
+        let tag = hmac::sign(&hmac_enc_key, &block_data);
         keystream.extend_from_slice(tag.as_ref());
     }
 
@@ -168,12 +190,12 @@ fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8], counter: u64) -> Result<Ve
         .map(|(p, k)| p ^ k)
         .collect();
 
-    // HMAC
-    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+    // HMAC with mac_key
+    let hmac_mac_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
     let mut hmac_data = Vec::with_capacity(16 + ciphertext.len());
     hmac_data.extend_from_slice(&nonce);
     hmac_data.extend_from_slice(&ciphertext);
-    let tag = hmac::sign(&hmac_key, &hmac_data);
+    let tag = hmac::sign(&hmac_mac_key, &hmac_data);
 
     // Format: nonce(16) || ciphertext || mac(16)
     let mut result = Vec::with_capacity(16 + ciphertext.len() + 16);
@@ -190,32 +212,36 @@ fn decrypt_with_key(key: &[u8; 32], encrypted: &[u8]) -> Result<(Vec<u8>, u64)> 
         return Err(ShieldError::RatchetError("ciphertext too short".into()));
     }
 
+    let (enc_key, mac_key) = derive_msg_subkeys(key);
+
     let nonce = &encrypted[..16];
     let ciphertext = &encrypted[16..encrypted.len() - 16];
     let mac = &encrypted[encrypted.len() - 16..];
 
-    // Verify MAC
-    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+    // Verify MAC with mac_key
+    let hmac_mac_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
     let mut hmac_data = Vec::with_capacity(16 + ciphertext.len());
     hmac_data.extend_from_slice(nonce);
     hmac_data.extend_from_slice(ciphertext);
-    let expected = hmac::sign(&hmac_key, &hmac_data);
+    let expected = hmac::sign(&hmac_mac_key, &hmac_data);
 
     if mac.ct_eq(&expected.as_ref()[..16]).unwrap_u8() != 1 {
         return Err(ShieldError::AuthenticationFailed);
     }
 
-    // Generate keystream using HMAC-SHA256 (keyed PRF)
+    // Generate keystream using HMAC-SHA256 (keyed PRF) with enc_key
     let num_blocks = ciphertext.len().div_ceil(32);
-    assert!(u32::try_from(num_blocks).is_ok(), "keystream too long: counter overflow");
-    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+    if u32::try_from(num_blocks).is_err() {
+        return Err(ShieldError::RatchetError("keystream too long: counter overflow".into()));
+    }
+    let hmac_enc_key = hmac::Key::new(hmac::HMAC_SHA256, &enc_key);
     let mut keystream = Vec::with_capacity(num_blocks * 32);
     for i in 0..num_blocks {
         let block_counter = (i as u32).to_le_bytes();
         let mut block_data = Vec::with_capacity(nonce.len() + 4);
         block_data.extend_from_slice(nonce);
         block_data.extend_from_slice(&block_counter);
-        let tag = hmac::sign(&hmac_key, &block_data);
+        let tag = hmac::sign(&hmac_enc_key, &block_data);
         keystream.extend_from_slice(tag.as_ref());
     }
 
@@ -288,6 +314,29 @@ mod tests {
 
         // Different ciphertext for same plaintext (forward secrecy)
         assert_ne!(enc1, enc2);
+    }
+
+    #[test]
+    fn test_ratchet_survives_forged_packet() {
+        let root = [0x42u8; 32];
+        let mut alice = RatchetSession::new(&root, true);
+        let mut bob = RatchetSession::new(&root, false);
+
+        // Alice sends a legit message
+        let enc1 = alice.encrypt(b"first").unwrap();
+
+        // Attacker injects a forged packet — should fail MAC
+        let forged = vec![0xFFu8; 64];
+        assert!(bob.decrypt(&forged).is_err());
+
+        // Bob's chain should NOT be desynchronized — legit message still works
+        let dec1 = bob.decrypt(&enc1).unwrap();
+        assert_eq!(b"first".as_slice(), dec1.as_slice());
+
+        // Subsequent messages also work
+        let enc2 = alice.encrypt(b"second").unwrap();
+        let dec2 = bob.decrypt(&enc2).unwrap();
+        assert_eq!(b"second".as_slice(), dec2.as_slice());
     }
 
     #[test]

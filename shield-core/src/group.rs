@@ -15,9 +15,11 @@ use zeroize::Zeroize;
 use crate::error::{Result, ShieldError};
 
 /// Generate keystream using HMAC-SHA256 (keyed PRF).
-fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
+fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Result<Vec<u8>> {
     let num_blocks = length.div_ceil(32);
-    assert!(u32::try_from(num_blocks).is_ok(), "keystream too long: counter overflow");
+    if u32::try_from(num_blocks).is_err() {
+        return Err(ShieldError::StreamError("keystream too long: counter overflow".into()));
+    }
     let mut keystream = Vec::with_capacity(num_blocks * 32);
     let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
 
@@ -32,25 +34,41 @@ fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
     }
 
     keystream.truncate(length);
-    keystream
+    Ok(keystream)
 }
 
-/// Encrypt a block with HMAC authentication.
+/// Derive separated encryption and MAC subkeys from a block key using HMAC-SHA256.
+fn derive_block_subkeys(key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+
+    let enc_tag = hmac::sign(&hmac_key, b"shield-group-encrypt");
+    let mut enc_key = [0u8; 32];
+    enc_key.copy_from_slice(&enc_tag.as_ref()[..32]);
+
+    let mac_tag = hmac::sign(&hmac_key, b"shield-group-authenticate");
+    let mut mac_key = [0u8; 32];
+    mac_key.copy_from_slice(&mac_tag.as_ref()[..32]);
+
+    (enc_key, mac_key)
+}
+
+/// Encrypt a block with HMAC authentication (separated enc/mac keys).
 fn encrypt_block(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>> {
+    let (enc_key, mac_key) = derive_block_subkeys(key);
     let nonce: [u8; 16] = crate::random::random_bytes()?;
 
-    let keystream = generate_keystream(key, &nonce, data.len());
+    let keystream = generate_keystream(&enc_key, &nonce, data.len())?;
     let ciphertext: Vec<u8> = data
         .iter()
         .zip(keystream.iter())
         .map(|(p, k)| p ^ k)
         .collect();
 
-    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+    let hmac_signing_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
     let mut hmac_data = Vec::with_capacity(16 + ciphertext.len());
     hmac_data.extend_from_slice(&nonce);
     hmac_data.extend_from_slice(&ciphertext);
-    let tag = hmac::sign(&hmac_key, &hmac_data);
+    let tag = hmac::sign(&hmac_signing_key, &hmac_data);
 
     let mut result = Vec::with_capacity(16 + ciphertext.len() + 16);
     result.extend_from_slice(&nonce);
@@ -60,7 +78,7 @@ fn encrypt_block(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>> {
     Ok(result)
 }
 
-/// Decrypt a block with HMAC verification.
+/// Decrypt a block with HMAC verification (separated enc/mac keys).
 fn decrypt_block(key: &[u8; 32], encrypted: &[u8]) -> Result<Vec<u8>> {
     if encrypted.len() < 32 {
         return Err(ShieldError::CiphertextTooShort {
@@ -69,21 +87,23 @@ fn decrypt_block(key: &[u8; 32], encrypted: &[u8]) -> Result<Vec<u8>> {
         });
     }
 
+    let (enc_key, mac_key) = derive_block_subkeys(key);
+
     let nonce = &encrypted[..16];
     let ciphertext = &encrypted[16..encrypted.len() - 16];
     let mac = &encrypted[encrypted.len() - 16..];
 
-    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+    let hmac_signing_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
     let mut hmac_data = Vec::with_capacity(16 + ciphertext.len());
     hmac_data.extend_from_slice(nonce);
     hmac_data.extend_from_slice(ciphertext);
-    let expected_tag = hmac::sign(&hmac_key, &hmac_data);
+    let expected_tag = hmac::sign(&hmac_signing_key, &hmac_data);
 
     if mac.ct_eq(&expected_tag.as_ref()[..16]).unwrap_u8() != 1 {
         return Err(ShieldError::AuthenticationFailed);
     }
 
-    let keystream = generate_keystream(key, nonce, ciphertext.len());
+    let keystream = generate_keystream(&enc_key, nonce, ciphertext.len())?;
     let plaintext: Vec<u8> = ciphertext
         .iter()
         .zip(keystream.iter())
@@ -129,7 +149,12 @@ impl GroupEncryption {
 
     /// Remove member from group.
     pub fn remove_member(&mut self, member_id: &str) -> bool {
-        self.members.remove(member_id).is_some()
+        if let Some(mut key) = self.members.remove(member_id) {
+            key.zeroize();
+            true
+        } else {
+            false
+        }
     }
 
     /// Get member list.
