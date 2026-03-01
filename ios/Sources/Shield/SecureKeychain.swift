@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import CommonCrypto
 
 /// Secure key storage using iOS Keychain.
 ///
