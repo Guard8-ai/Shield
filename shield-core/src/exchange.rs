@@ -3,6 +3,7 @@
 //! Provides PAKE, QR exchange, and key splitting.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use ring::hmac;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
 
@@ -29,30 +30,30 @@ impl PAKEExchange {
             &mut base_key,
         );
 
-        let mut data = Vec::with_capacity(32 + role.len());
-        data.extend_from_slice(&base_key);
-        data.extend_from_slice(role.as_bytes());
-
-        let hash = ring::digest::digest(&ring::digest::SHA256, &data);
+        // Derive role-specific key using HMAC-SHA256 (keyed PRF)
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &base_key);
+        let tag = hmac::sign(&hmac_key, role.as_bytes());
         let mut result = [0u8; 32];
-        result.copy_from_slice(hash.as_ref());
+        result.copy_from_slice(&tag.as_ref()[..32]);
         result
     }
 
-    /// Combine key contributions into session key.
+    /// Combine key contributions into session key using HMAC-SHA256.
     #[must_use]
     pub fn combine(contributions: &[[u8; 32]]) -> [u8; 32] {
         let mut sorted: Vec<&[u8; 32]> = contributions.iter().collect();
         sorted.sort();
 
-        let mut combined = Vec::with_capacity(contributions.len() * 32);
-        for c in sorted {
-            combined.extend_from_slice(c);
+        // Use first contribution as HMAC key, remaining as data
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, sorted[0]);
+        let mut data = Vec::with_capacity((sorted.len() - 1) * 32);
+        for c in &sorted[1..] {
+            data.extend_from_slice(*c);
         }
 
-        let hash = ring::digest::digest(&ring::digest::SHA256, &combined);
+        let tag = hmac::sign(&hmac_key, &data);
         let mut result = [0u8; 32];
-        result.copy_from_slice(hash.as_ref());
+        result.copy_from_slice(&tag.as_ref()[..32]);
         result
     }
 

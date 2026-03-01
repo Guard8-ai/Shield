@@ -15,20 +15,20 @@ use zeroize::Zeroize;
 
 use crate::error::{Result, ShieldError};
 
-/// Generate keystream using SHA256.
+/// Generate keystream using HMAC-SHA256 (keyed PRF).
 fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
     let mut keystream = Vec::with_capacity(length.div_ceil(32) * 32);
     let num_blocks = length.div_ceil(32);
+    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
 
     for i in 0..num_blocks {
         let counter = (i as u32).to_le_bytes();
-        let mut data = Vec::with_capacity(key.len() + nonce.len() + 4);
-        data.extend_from_slice(key);
+        let mut data = Vec::with_capacity(nonce.len() + 4);
         data.extend_from_slice(nonce);
         data.extend_from_slice(&counter);
 
-        let hash = ring::digest::digest(&ring::digest::SHA256, &data);
-        keystream.extend_from_slice(hash.as_ref());
+        let tag = hmac::sign(&hmac_key, &data);
+        keystream.extend_from_slice(tag.as_ref());
     }
 
     keystream.truncate(length);
@@ -103,14 +103,12 @@ impl IdentityProvider {
         }
     }
 
-    /// Derive key for specific purpose.
+    /// Derive key for specific purpose using HMAC-SHA256 (keyed PRF).
     fn derive_key(&self, purpose: &str) -> [u8; 32] {
-        let mut data = Vec::with_capacity(32 + purpose.len());
-        data.extend_from_slice(&self.master_key);
-        data.extend_from_slice(purpose.as_bytes());
-        let hash = ring::digest::digest(&ring::digest::SHA256, &data);
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &self.master_key);
+        let tag = hmac::sign(&hmac_key, purpose.as_bytes());
         let mut key = [0u8; 32];
-        key.copy_from_slice(hash.as_ref());
+        key.copy_from_slice(&tag.as_ref()[..32]);
         key
     }
 
@@ -154,14 +152,12 @@ impl IdentityProvider {
             &mut password_hash,
         );
 
-        // Generate verification key
+        // Generate verification key using HMAC-SHA256 (keyed PRF)
         let verify_key = self.derive_key("verify");
-        let mut vk_data = Vec::with_capacity(32 + user_id.len());
-        vk_data.extend_from_slice(&verify_key);
-        vk_data.extend_from_slice(user_id.as_bytes());
-        let vk_hash = ring::digest::digest(&ring::digest::SHA256, &vk_data);
+        let vk_hmac = hmac::Key::new(hmac::HMAC_SHA256, &verify_key);
+        let vk_tag = hmac::sign(&vk_hmac, user_id.as_bytes());
         let mut verification_key = [0u8; 32];
-        verification_key.copy_from_slice(vk_hash.as_ref());
+        verification_key.copy_from_slice(&vk_tag.as_ref()[..32]);
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -553,12 +549,10 @@ impl SecureSession {
     }
 
     fn derive_session_key(master_key: &[u8; 32], version: u32) -> [u8; 32] {
-        let mut data = Vec::with_capacity(32 + 16);
-        data.extend_from_slice(master_key);
-        data.extend_from_slice(format!("session:{version}").as_bytes());
-        let hash = ring::digest::digest(&ring::digest::SHA256, &data);
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, master_key);
+        let tag = hmac::sign(&hmac_key, format!("session:{version}").as_bytes());
         let mut key = [0u8; 32];
-        key.copy_from_slice(hash.as_ref());
+        key.copy_from_slice(&tag.as_ref()[..32]);
         key
     }
 
