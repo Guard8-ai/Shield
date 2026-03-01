@@ -8,6 +8,7 @@
 use ring::hmac;
 use std::collections::HashMap;
 use subtle::ConstantTimeEq;
+use zeroize::Zeroize;
 
 use crate::error::{Result, ShieldError};
 
@@ -175,6 +176,14 @@ impl KeyRotationManager {
     pub fn re_encrypt(&self, encrypted: &[u8]) -> Result<Vec<u8>> {
         let plaintext = self.decrypt(encrypted)?;
         self.encrypt(&plaintext)
+    }
+}
+
+impl Drop for KeyRotationManager {
+    fn drop(&mut self) {
+        for key in self.keys.values_mut() {
+            key.zeroize();
+        }
     }
 }
 

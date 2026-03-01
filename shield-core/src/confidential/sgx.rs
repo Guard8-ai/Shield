@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ring::digest::{digest, SHA256};
+use ring::hmac;
 
 use super::base::{
     AttestationError, AttestationProvider, AttestationResult, TEEType,
@@ -333,10 +334,11 @@ impl SealedStorage {
             AttestationError::IoError(format!("Failed to read sealing key: {e}"))
         })?;
 
-        // Derive encryption key
-        let derived = digest(&SHA256, &seal_key);
+        // Derive encryption key using keyed HMAC (not unkeyed SHA256)
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &seal_key);
+        let derived = hmac::sign(&hmac_key, b"shield-sealed-storage-v1");
         let mut key = [0u8; 32];
-        key.copy_from_slice(derived.as_ref());
+        key.copy_from_slice(&derived.as_ref()[..32]);
 
         // Encrypt with Shield
         Shield::encrypt_with_key(&key, data).map_err(|e| {
@@ -366,10 +368,11 @@ impl SealedStorage {
             AttestationError::IoError(format!("Failed to read sealing key: {e}"))
         })?;
 
-        // Derive encryption key
-        let derived = digest(&SHA256, &seal_key);
+        // Derive encryption key using keyed HMAC (not unkeyed SHA256)
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &seal_key);
+        let derived = hmac::sign(&hmac_key, b"shield-sealed-storage-v1");
         let mut key = [0u8; 32];
-        key.copy_from_slice(derived.as_ref());
+        key.copy_from_slice(&derived.as_ref()[..32]);
 
         // Decrypt with Shield
         Shield::decrypt_with_key(&key, sealed_data).map_err(|e| {
