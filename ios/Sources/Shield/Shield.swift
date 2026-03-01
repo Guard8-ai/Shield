@@ -20,7 +20,7 @@ public final class Shield {
 
     // MARK: - Constants
 
-    static let pbkdf2Iterations: UInt32 = 100_000
+    public static let pbkdf2Iterations: UInt32 = 100_000
     private static let nonceSize = 16
     private static let macSize = 16
     private static let keySize = 32

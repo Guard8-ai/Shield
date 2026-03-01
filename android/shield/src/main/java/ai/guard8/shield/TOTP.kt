@@ -123,6 +123,7 @@ class TOTP(
                 if (bitsLeft >= 8) {
                     result.add((buffer shr (bitsLeft - 8)).toByte())
                     bitsLeft -= 8
+                    buffer = buffer and ((1 shl bitsLeft) - 1)
                 }
             }
 

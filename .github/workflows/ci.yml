@@ -266,7 +266,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          cd python && pip install -e .
+          cd python && pip install -e ".[dev]"
           cd ../javascript && npm ci
 
       - name: Run interop tests

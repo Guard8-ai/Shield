@@ -1,6 +1,12 @@
 import { defineConfig } from 'vitest/config';
+import path from 'path';
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      '../pkg/shield_browser.js': path.resolve(__dirname, 'tests/__mocks__/shield_browser.js'),
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,
