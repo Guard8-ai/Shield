@@ -170,7 +170,9 @@ mod tests {
         );
 
         store.store(user_id, &credential).unwrap();
-        store.update_counter(user_id, &credential.credential_id, 5).unwrap();
+        store
+            .update_counter(user_id, &credential.credential_id, 5)
+            .unwrap();
 
         let retrieved = store.get(user_id).unwrap();
         assert_eq!(retrieved[0].counter, 5);

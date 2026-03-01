@@ -1,7 +1,7 @@
 //! FIDO2/WebAuthn configuration
 
-use super::error::Result;
 use super::credential::StoredCredential;
+use super::error::Result;
 
 /// `WebAuthn` relying party configuration
 #[derive(Clone, Debug)]
@@ -18,7 +18,11 @@ pub struct WebAuthnConfig {
 
 impl WebAuthnConfig {
     /// Create a new `WebAuthn` configuration
-    pub fn new(rp_id: impl Into<String>, rp_name: impl Into<String>, origin: impl Into<String>) -> Self {
+    pub fn new(
+        rp_id: impl Into<String>,
+        rp_name: impl Into<String>,
+        origin: impl Into<String>,
+    ) -> Self {
         Self {
             rp_id: rp_id.into(),
             rp_name: rp_name.into(),

@@ -6,11 +6,9 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 
-use super::base::{
-    AttestationError, AttestationProvider, AttestationResult, TEEType,
-};
+use super::base::{AttestationError, AttestationProvider, AttestationResult, TEEType};
 
 /// AWS Nitro Enclaves attestation provider.
 ///
@@ -60,13 +58,12 @@ impl NitroAttestationProvider {
     fn parse_cose_sign1(data: &[u8]) -> Result<NitroAttestationDocument, AttestationError> {
         // COSE Sign1 structure: [protected, unprotected, payload, signature]
         // Using ciborium for CBOR parsing
-        let value: ciborium::Value = ciborium::from_reader(data).map_err(|e| {
-            AttestationError::InvalidFormat(format!("Failed to parse CBOR: {e}"))
-        })?;
+        let value: ciborium::Value = ciborium::from_reader(data)
+            .map_err(|e| AttestationError::InvalidFormat(format!("Failed to parse CBOR: {e}")))?;
 
-        let array = value.as_array().ok_or_else(|| {
-            AttestationError::InvalidFormat("Expected COSE Sign1 array".into())
-        })?;
+        let array = value
+            .as_array()
+            .ok_or_else(|| AttestationError::InvalidFormat("Expected COSE Sign1 array".into()))?;
 
         if array.len() != 4 {
             return Err(AttestationError::InvalidFormat(
@@ -75,13 +72,15 @@ impl NitroAttestationProvider {
         }
 
         // Extract payload (index 2)
-        let payload_bytes = array[2].as_bytes().ok_or_else(|| {
-            AttestationError::InvalidFormat("Missing payload bytes".into())
-        })?;
+        let payload_bytes = array[2]
+            .as_bytes()
+            .ok_or_else(|| AttestationError::InvalidFormat("Missing payload bytes".into()))?;
 
         // Parse payload as CBOR
-        let payload: ciborium::Value = ciborium::from_reader(payload_bytes.as_slice())
-            .map_err(|e| AttestationError::InvalidFormat(format!("Failed to parse payload: {e}")))?;
+        let payload: ciborium::Value =
+            ciborium::from_reader(payload_bytes.as_slice()).map_err(|e| {
+                AttestationError::InvalidFormat(format!("Failed to parse payload: {e}"))
+            })?;
 
         Self::parse_attestation_payload(&payload)
     }
@@ -90,9 +89,9 @@ impl NitroAttestationProvider {
     fn parse_attestation_payload(
         payload: &ciborium::Value,
     ) -> Result<NitroAttestationDocument, AttestationError> {
-        let map = payload.as_map().ok_or_else(|| {
-            AttestationError::InvalidFormat("Payload is not a map".into())
-        })?;
+        let map = payload
+            .as_map()
+            .ok_or_else(|| AttestationError::InvalidFormat("Payload is not a map".into()))?;
 
         let mut doc = NitroAttestationDocument::default();
 
@@ -177,7 +176,10 @@ impl AttestationProvider for NitroAttestationProvider {
         claims.insert("cabundle_len".into(), serde_json::json!(doc.cabundle_len));
 
         if let Some(ref user_data) = doc.user_data {
-            claims.insert("user_data".into(), serde_json::json!(STANDARD.encode(user_data)));
+            claims.insert(
+                "user_data".into(),
+                serde_json::json!(STANDARD.encode(user_data)),
+            );
         }
         if let Some(ref nonce) = doc.nonce {
             claims.insert("nonce".into(), serde_json::json!(STANDARD.encode(nonce)));
@@ -193,10 +195,13 @@ impl AttestationProvider for NitroAttestationProvider {
             let expected = expected_hex.to_lowercase();
 
             if actual.as_deref() != Some(&expected) {
-                return Ok(AttestationResult::failure(self.tee_type(), format!(
-                    "PCR{pcr_idx} mismatch: expected {expected}, got {}",
-                    actual.unwrap_or_else(|| "missing".into())
-                ))
+                return Ok(AttestationResult::failure(
+                    self.tee_type(),
+                    format!(
+                        "PCR{pcr_idx} mismatch: expected {expected}, got {}",
+                        actual.unwrap_or_else(|| "missing".into())
+                    ),
+                )
                 .with_raw_evidence(evidence.to_vec()));
             }
         }
@@ -219,11 +224,10 @@ impl AttestationProvider for NitroAttestationProvider {
 
         // Verify certificate bundle exists
         if self.verify_certificate && doc.cabundle_len == 0 {
-            return Ok(AttestationResult::failure(
-                self.tee_type(),
-                "Missing certificate bundle",
-            )
-            .with_raw_evidence(evidence.to_vec()));
+            return Ok(
+                AttestationResult::failure(self.tee_type(), "Missing certificate bundle")
+                    .with_raw_evidence(evidence.to_vec()),
+            );
         }
 
         let timestamp = doc.timestamp.map_or_else(
@@ -264,9 +268,7 @@ impl AttestationProvider for NitroAttestationProvider {
 
 impl NitroAttestationProvider {
     #[cfg(target_os = "linux")]
-    fn nsm_get_attestation(
-        user_data: Option<&[u8]>,
-    ) -> Result<Vec<u8>, AttestationError> {
+    fn nsm_get_attestation(user_data: Option<&[u8]>) -> Result<Vec<u8>, AttestationError> {
         use std::io::Write;
 
         // Build CBOR attestation request
@@ -277,10 +279,7 @@ impl NitroAttestationProvider {
                 ciborium::Value::Bytes(data.to_vec()),
             ));
         }
-        attestation_map.push((
-            ciborium::Value::Text("nonce".into()),
-            ciborium::Value::Null,
-        ));
+        attestation_map.push((ciborium::Value::Text("nonce".into()), ciborium::Value::Null));
         attestation_map.push((
             ciborium::Value::Text("public_key".into()),
             ciborium::Value::Null,
@@ -305,13 +304,12 @@ impl NitroAttestationProvider {
             .open("/dev/nsm")
             .map_err(|e| AttestationError::NotInTEE(format!("Cannot open /dev/nsm: {e}")))?;
 
-        nsm_file.write_all(&request_bytes).map_err(|e| {
-            AttestationError::IoError(format!("Failed to write to /dev/nsm: {e}"))
-        })?;
+        nsm_file
+            .write_all(&request_bytes)
+            .map_err(|e| AttestationError::IoError(format!("Failed to write to /dev/nsm: {e}")))?;
 
-        let response_bytes = std::fs::read("/dev/nsm").map_err(|e| {
-            AttestationError::IoError(format!("Failed to read from /dev/nsm: {e}"))
-        })?;
+        let response_bytes = std::fs::read("/dev/nsm")
+            .map_err(|e| AttestationError::IoError(format!("Failed to read from /dev/nsm: {e}")))?;
 
         // Parse CBOR response to extract attestation document
         let response: ciborium::Value =
@@ -340,9 +338,7 @@ impl NitroAttestationProvider {
                 })
             })
             .ok_or_else(|| {
-                AttestationError::InvalidFormat(
-                    "NSM response missing Attestation.document".into(),
-                )
+                AttestationError::InvalidFormat("NSM response missing Attestation.document".into())
             })?;
 
         Ok(doc_bytes)
@@ -391,10 +387,14 @@ impl NitroVsockClient {
     #[cfg(target_os = "linux")]
     #[allow(clippy::unused_async)]
     pub async fn send(&self, data: &[u8]) -> Result<Vec<u8>, AttestationError> {
-        use std::process::{Command, Stdio};
         use std::io::Write;
+        use std::process::{Command, Stdio};
 
-        let vsock_addr = format!("VSOCK-CONNECT:{cid}:{port}", cid = self.cid, port = self.port);
+        let vsock_addr = format!(
+            "VSOCK-CONNECT:{cid}:{port}",
+            cid = self.cid,
+            port = self.port
+        );
 
         let mut child = Command::new("socat")
             .args(["-", &vsock_addr])
@@ -402,23 +402,26 @@ impl NitroVsockClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| AttestationError::IoError(format!(
-                "Failed to spawn socat for vsock CID {cid} port {port}: {e}",
-                cid = self.cid, port = self.port
-            )))?;
+            .map_err(|e| {
+                AttestationError::IoError(format!(
+                    "Failed to spawn socat for vsock CID {cid} port {port}: {e}",
+                    cid = self.cid,
+                    port = self.port
+                ))
+            })?;
 
         // Write request data to socat stdin
         if let Some(ref mut stdin) = child.stdin {
-            stdin.write_all(data).map_err(|e| {
-                AttestationError::IoError(format!("vsock write failed: {e}"))
-            })?;
+            stdin
+                .write_all(data)
+                .map_err(|e| AttestationError::IoError(format!("vsock write failed: {e}")))?;
         }
         // Close stdin to signal end of input
         drop(child.stdin.take());
 
-        let output = child.wait_with_output().map_err(|e| {
-            AttestationError::IoError(format!("vsock communication failed: {e}"))
-        })?;
+        let output = child
+            .wait_with_output()
+            .map_err(|e| AttestationError::IoError(format!("vsock communication failed: {e}")))?;
 
         if !output.status.success() {
             return Err(AttestationError::IoError(format!(
@@ -462,8 +465,8 @@ impl NitroVsockServer {
         F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Vec<u8>> + Send,
     {
-        use std::process::{Command, Stdio};
         use std::io::{Read, Write};
+        use std::process::{Command, Stdio};
 
         let vsock_addr = format!("VSOCK-LISTEN:{port},fork", port = self.port);
 
@@ -475,10 +478,12 @@ impl NitroVsockServer {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
-                .map_err(|e| AttestationError::IoError(format!(
-                    "Failed to spawn socat vsock server on port {port}: {e}",
-                    port = self.port
-                )))?;
+                .map_err(|e| {
+                    AttestationError::IoError(format!(
+                        "Failed to spawn socat vsock server on port {port}: {e}",
+                        port = self.port
+                    ))
+                })?;
 
             // Read request from socat stdout (connected client data)
             let mut request = Vec::new();
@@ -517,10 +522,8 @@ impl NitroVsockServer {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        NitroAttestationProvider, NitroVsockClient,
-    };
     use super::super::base::{AttestationProvider, TEEType};
+    use super::{NitroAttestationProvider, NitroVsockClient};
 
     #[test]
     fn test_provider_creation() {

@@ -41,6 +41,6 @@ pub use config::{CredentialStore, WebAuthnConfig};
 pub use credential::{ShieldCredentialStore, StoredCredential};
 pub use error::{Fido2Error, Result};
 pub use manager::{
-    AllowedCredential, AuthenticationChallenge, AuthenticationResult,
-    Fido2Manager, RegistrationChallenge,
+    AllowedCredential, AuthenticationChallenge, AuthenticationResult, Fido2Manager,
+    RegistrationChallenge,
 };

@@ -48,11 +48,7 @@ impl PgVectorClient {
     }
 
     /// Insert a vector with metadata
-    pub fn insert(
-        &mut self,
-        vector: &[f32],
-        metadata: serde_json::Value,
-    ) -> Result<i64> {
+    pub fn insert(&mut self, vector: &[f32], metadata: serde_json::Value) -> Result<i64> {
         // Validate dimension
         if vector.len() != self.config.dimension {
             return Err(PgVectorError::InvalidDimension {
@@ -91,7 +87,8 @@ impl PgVectorClient {
         let _encrypted_query = EncryptedVector::encrypt(&self.shield, query)?;
 
         // Search in storage (in production: SELECT with ORDER BY distance)
-        let mut results: Vec<_> = self.storage
+        let mut results: Vec<_> = self
+            .storage
             .iter()
             .filter_map(|(id, (encrypted_vec, metadata))| {
                 // Decrypt stored vector
@@ -111,7 +108,9 @@ impl PgVectorClient {
 
         // Sort by distance
         results.sort_by(|a, b| {
-            a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal)
+            a.distance
+                .partial_cmp(&b.distance)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         // Take top K
@@ -142,12 +141,7 @@ impl PgVectorClient {
     }
 
     /// Update vector
-    pub fn update(
-        &mut self,
-        id: i64,
-        vector: &[f32],
-        metadata: serde_json::Value,
-    ) -> Result<()> {
+    pub fn update(&mut self, id: i64, vector: &[f32], metadata: serde_json::Value) -> Result<()> {
         if !self.storage.contains_key(&id) {
             return Err(PgVectorError::VectorNotFound);
         }
@@ -189,7 +183,11 @@ impl PgVectorClient {
             }
             DistanceMetric::Cosine => {
                 // Cosine distance = 1 - cosine similarity
-                let dot: f64 = v1.iter().zip(v2.iter()).map(|(a, b)| f64::from(a * b)).sum();
+                let dot: f64 = v1
+                    .iter()
+                    .zip(v2.iter())
+                    .map(|(a, b)| f64::from(a * b))
+                    .sum();
                 let norm1: f64 = v1.iter().map(|x| f64::from(x * x)).sum::<f64>().sqrt();
                 let norm2: f64 = v2.iter().map(|x| f64::from(x * x)).sum::<f64>().sqrt();
 
@@ -201,7 +199,10 @@ impl PgVectorClient {
             }
             DistanceMetric::InnerProduct => {
                 // Negative inner product
-                -(v1.iter().zip(v2.iter()).map(|(a, b)| f64::from(a * b)).sum::<f64>())
+                -(v1.iter()
+                    .zip(v2.iter())
+                    .map(|(a, b)| f64::from(a * b))
+                    .sum::<f64>())
             }
         }
     }
@@ -245,16 +246,20 @@ mod tests {
         let mut client = create_test_client();
 
         // Insert vectors
-        client.insert(&[1.0, 0.0, 0.0], serde_json::json!({"id": "v1"})).unwrap();
-        client.insert(&[0.9, 0.1, 0.0], serde_json::json!({"id": "v2"})).unwrap();
-        client.insert(&[0.0, 1.0, 0.0], serde_json::json!({"id": "v3"})).unwrap();
+        client
+            .insert(&[1.0, 0.0, 0.0], serde_json::json!({"id": "v1"}))
+            .unwrap();
+        client
+            .insert(&[0.9, 0.1, 0.0], serde_json::json!({"id": "v2"}))
+            .unwrap();
+        client
+            .insert(&[0.0, 1.0, 0.0], serde_json::json!({"id": "v3"}))
+            .unwrap();
 
         // Search for similar to [1.0, 0.0, 0.0]
-        let results = client.search_similar(
-            &[1.0, 0.0, 0.0],
-            2,
-            DistanceMetric::L2,
-        ).unwrap();
+        let results = client
+            .search_similar(&[1.0, 0.0, 0.0], 2, DistanceMetric::L2)
+            .unwrap();
 
         assert_eq!(results.len(), 2);
         // First result should be exact match
@@ -275,7 +280,9 @@ mod tests {
     #[test]
     fn test_delete() {
         let mut client = create_test_client();
-        let id = client.insert(&[1.0, 2.0, 3.0], serde_json::json!({})).unwrap();
+        let id = client
+            .insert(&[1.0, 2.0, 3.0], serde_json::json!({}))
+            .unwrap();
 
         assert!(client.delete(id).unwrap());
         assert!(client.get(id).unwrap().is_none());
@@ -284,9 +291,13 @@ mod tests {
     #[test]
     fn test_update() {
         let mut client = create_test_client();
-        let id = client.insert(&[1.0, 2.0, 3.0], serde_json::json!({"v": 1})).unwrap();
+        let id = client
+            .insert(&[1.0, 2.0, 3.0], serde_json::json!({"v": 1}))
+            .unwrap();
 
-        client.update(id, &[4.0, 5.0, 6.0], serde_json::json!({"v": 2})).unwrap();
+        client
+            .update(id, &[4.0, 5.0, 6.0], serde_json::json!({"v": 2}))
+            .unwrap();
 
         let record = client.get(id).unwrap().unwrap();
         assert_eq!(record.vector, vec![4.0, 5.0, 6.0]);

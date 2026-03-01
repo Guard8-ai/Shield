@@ -14,10 +14,7 @@ use crate::Shield;
 pub enum AttestationError {
     /// Attestation verification failed
     #[error("Attestation failed: {message}")]
-    VerificationFailed {
-        message: String,
-        code: String,
-    },
+    VerificationFailed { message: String, code: String },
 
     /// Missing required dependency
     #[error("Missing dependency: {0}")]
@@ -205,7 +202,7 @@ pub trait AttestationProvider: Send + Sync {
     ) -> bool {
         for (name, expected_value) in expected {
             match result.measurements.get(name) {
-                Some(actual) if actual.to_lowercase() == expected_value.to_lowercase() => {},
+                Some(actual) if actual.to_lowercase() == expected_value.to_lowercase() => {}
                 _ => return false,
             }
         }
@@ -246,7 +243,11 @@ impl KeyReleasePolicy {
 
     /// Require a specific measurement value.
     #[must_use]
-    pub fn require_measurement(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+    pub fn require_measurement(
+        mut self,
+        name: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
         self.required_measurements.insert(name.into(), value.into());
         self
     }
@@ -280,7 +281,7 @@ impl KeyReleasePolicy {
         // Check measurements
         for (name, expected) in &self.required_measurements {
             match result.measurements.get(name) {
-                Some(actual) if actual.to_lowercase() == expected.to_lowercase() => {},
+                Some(actual) if actual.to_lowercase() == expected.to_lowercase() => {}
                 _ => return false,
             }
         }
@@ -311,11 +312,7 @@ pub struct TEEKeyManager {
 
 impl TEEKeyManager {
     /// Create a new key manager.
-    pub fn new(
-        password: &str,
-        service: &str,
-        provider: Arc<dyn AttestationProvider>,
-    ) -> Self {
+    pub fn new(password: &str, service: &str, provider: Arc<dyn AttestationProvider>) -> Self {
         Self {
             shield: Shield::new(password, service),
             provider,
@@ -401,9 +398,8 @@ impl TEEKeyManager {
         attestation_evidence: &[u8],
     ) -> Result<Vec<u8>, AttestationError> {
         let key = self.get_key(attestation_evidence, "encryption").await?;
-        Shield::encrypt_with_key(&key, data).map_err(|e| {
-            AttestationError::IoError(format!("Encryption failed: {e}"))
-        })
+        Shield::encrypt_with_key(&key, data)
+            .map_err(|e| AttestationError::IoError(format!("Encryption failed: {e}")))
     }
 
     /// Decrypt data inside an attested TEE.
@@ -413,9 +409,8 @@ impl TEEKeyManager {
         attestation_evidence: &[u8],
     ) -> Result<Vec<u8>, AttestationError> {
         let key = self.get_key(attestation_evidence, "encryption").await?;
-        Shield::decrypt_with_key(&key, encrypted).map_err(|e| {
-            AttestationError::IoError(format!("Decryption failed: {e}"))
-        })
+        Shield::decrypt_with_key(&key, encrypted)
+            .map_err(|e| AttestationError::IoError(format!("Decryption failed: {e}")))
     }
 }
 
@@ -456,20 +451,19 @@ mod tests {
             .require_measurement("PCR0", "abc123")
             .with_max_age(300);
 
-        let mut result = AttestationResult::success(TEEType::Nitro)
-            .with_measurement("PCR0", "abc123");
+        let mut result =
+            AttestationResult::success(TEEType::Nitro).with_measurement("PCR0", "abc123");
         result.timestamp = current_timestamp();
 
         assert!(policy.evaluate(&result));
 
         // Wrong TEE type
-        let wrong_tee = AttestationResult::success(TEEType::Sgx)
-            .with_measurement("PCR0", "abc123");
+        let wrong_tee = AttestationResult::success(TEEType::Sgx).with_measurement("PCR0", "abc123");
         assert!(!policy.evaluate(&wrong_tee));
 
         // Wrong measurement
-        let wrong_pcr = AttestationResult::success(TEEType::Nitro)
-            .with_measurement("PCR0", "wrong");
+        let wrong_pcr =
+            AttestationResult::success(TEEType::Nitro).with_measurement("PCR0", "wrong");
         assert!(!policy.evaluate(&wrong_pcr));
     }
 }

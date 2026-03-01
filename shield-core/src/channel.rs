@@ -524,10 +524,7 @@ impl ShieldChannel<std::net::TcpStream> {
     ///
     /// Sets socket read/write timeouts during handshake, then clears them
     /// so post-handshake messaging is not affected.
-    pub fn connect_tcp(
-        stream: std::net::TcpStream,
-        config: &ChannelConfig,
-    ) -> Result<Self> {
+    pub fn connect_tcp(stream: std::net::TcpStream, config: &ChannelConfig) -> Result<Self> {
         let timeout = std::time::Duration::from_millis(config.handshake_timeout_ms);
         stream
             .set_read_timeout(Some(timeout))
@@ -550,10 +547,7 @@ impl ShieldChannel<std::net::TcpStream> {
     ///
     /// Sets socket read/write timeouts during handshake, then clears them
     /// so post-handshake messaging is not affected.
-    pub fn accept_tcp(
-        stream: std::net::TcpStream,
-        config: &ChannelConfig,
-    ) -> Result<Self> {
+    pub fn accept_tcp(stream: std::net::TcpStream, config: &ChannelConfig) -> Result<Self> {
         let timeout = std::time::Duration::from_millis(config.handshake_timeout_ms);
         stream
             .set_read_timeout(Some(timeout))

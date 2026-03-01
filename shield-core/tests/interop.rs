@@ -92,8 +92,11 @@ fn test_ciphertext_format() {
     // v2 format: nonce(16) + counter(8) + timestamp(8) + pad_len(1) + padding(32-128) + plaintext(4) + mac(16)
     // Minimum: 16 + 8 + 8 + 1 + 32 + 4 + 16 = 85
     // Maximum: 16 + 8 + 8 + 1 + 128 + 4 + 16 = 181
-    assert!(encrypted.len() >= 85 && encrypted.len() <= 181,
-        "Ciphertext should be between 85 and 181 bytes, got {}", encrypted.len());
+    assert!(
+        encrypted.len() >= 85 && encrypted.len() <= 181,
+        "Ciphertext should be between 85 and 181 bytes, got {}",
+        encrypted.len()
+    );
 }
 
 #[test]

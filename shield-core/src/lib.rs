@@ -47,12 +47,12 @@ mod exchange;
 #[cfg(feature = "fido2")]
 pub mod fido2;
 pub mod fingerprint;
-mod random;
 mod group;
 mod identity;
 pub mod password;
 #[cfg(feature = "pgvector")]
 pub mod pgvector;
+mod random;
 mod ratchet;
 mod rotation;
 mod shield;

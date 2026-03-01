@@ -243,7 +243,9 @@ fn encrypt_chunk(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>> {
     // Generate keystream with enc_key
     let num_blocks = data.len().div_ceil(32);
     if u32::try_from(num_blocks).is_err() {
-        return Err(ShieldError::StreamError("keystream too long: counter overflow".into()));
+        return Err(ShieldError::StreamError(
+            "keystream too long: counter overflow".into(),
+        ));
     }
     let mut keystream = Vec::with_capacity(num_blocks * 32);
     for i in 0..num_blocks {
@@ -305,7 +307,9 @@ fn decrypt_chunk(key: &[u8; 32], encrypted: &[u8]) -> Result<Vec<u8>> {
     // Generate keystream with enc_key
     let num_blocks = ciphertext.len().div_ceil(32);
     if u32::try_from(num_blocks).is_err() {
-        return Err(ShieldError::StreamError("keystream too long: counter overflow".into()));
+        return Err(ShieldError::StreamError(
+            "keystream too long: counter overflow".into(),
+        ));
     }
     let mut keystream = Vec::with_capacity(num_blocks * 32);
     for i in 0..num_blocks {

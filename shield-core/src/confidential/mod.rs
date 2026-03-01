@@ -31,24 +31,24 @@
 //! ```
 
 mod base;
-mod nitro;
-mod sev;
 mod maa;
-mod sgx;
+mod nitro;
 #[cfg(feature = "openapi")]
 mod openapi;
+mod sev;
+mod sgx;
 
 pub use base::{
     AttestationError, AttestationProvider, AttestationResult, KeyReleasePolicy, TEEKeyManager,
     TEEType,
 };
+pub use maa::{AzureKeyVaultSKR, ConfidentialContainerSidecar, MAAAttestationProvider};
 pub use nitro::{NitroAttestationProvider, NitroVsockClient, NitroVsockServer};
 pub use sev::{ConfidentialSpaceProvider, GCPSecretManager, SEVAttestationProvider};
-pub use maa::{AzureKeyVaultSKR, ConfidentialContainerSidecar, MAAAttestationProvider};
 pub use sgx::{GramineManifestHelper, SGXAttestationProvider, SealedStorage};
 
 #[cfg(feature = "openapi")]
 pub use openapi::{
-    AttestationRequest, AttestationResponse, OpenAPISchemas, ShieldConfidentialApi,
     decrypt_data, encrypt_data, get_attestation, health_check, verify_attestation,
+    AttestationRequest, AttestationResponse, OpenAPISchemas, ShieldConfidentialApi,
 };
