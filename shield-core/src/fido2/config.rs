@@ -3,21 +3,21 @@
 use super::error::Result;
 use super::credential::StoredCredential;
 
-/// WebAuthn relying party configuration
+/// `WebAuthn` relying party configuration
 #[derive(Clone, Debug)]
 pub struct WebAuthnConfig {
     /// Relying party ID (e.g., "example.com")
     pub rp_id: String,
     /// Relying party name (e.g., "Shield Demo")
     pub rp_name: String,
-    /// Expected origin (e.g., "https://example.com")
+    /// Expected origin (e.g., `https://example.com`)
     pub origin: String,
     /// Challenge timeout in milliseconds (default: 60000)
     pub timeout_ms: u32,
 }
 
 impl WebAuthnConfig {
-    /// Create a new WebAuthn configuration
+    /// Create a new `WebAuthn` configuration
     pub fn new(rp_id: impl Into<String>, rp_name: impl Into<String>, origin: impl Into<String>) -> Self {
         Self {
             rp_id: rp_id.into(),
