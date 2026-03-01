@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(UIKit)
 import UIKit
+#endif
 import CryptoKit
 
 /// Device fingerprinting for iOS.
@@ -77,10 +79,14 @@ public final class DeviceFingerprint {
     /// **Privacy**: Unique per app vendor, resets on app deletion.
     /// **Stability**: Same across all apps from same vendor on this device.
     private static func getVendorId() throws -> String {
+        #if canImport(UIKit)
         guard let vendorId = UIDevice.current.identifierForVendor?.uuidString else {
             throw FingerprintError.unavailable
         }
         return vendorId
+        #else
+        throw FingerprintError.unavailable
+        #endif
     }
 
     /// Get device model + system version info.
@@ -88,12 +94,21 @@ public final class DeviceFingerprint {
     /// **Privacy**: Public info, not unique (same for all devices of same model).
     /// **Stability**: Changes with iOS updates.
     private static func getDeviceInfo() -> String {
+        #if canImport(UIKit)
         let components = [
             UIDevice.current.model,
             UIDevice.current.systemName,
             UIDevice.current.systemVersion,
             getDeviceModel()
         ]
+        #else
+        let components = [
+            ProcessInfo.processInfo.hostName,
+            "macOS",
+            ProcessInfo.processInfo.operatingSystemVersionString,
+            getDeviceModel()
+        ]
+        #endif
         let combined = components.joined(separator: "-")
         return md5(string: combined)
     }
