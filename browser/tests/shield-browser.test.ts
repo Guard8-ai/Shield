@@ -5,18 +5,21 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock the WASM module before importing ShieldBrowser
-vi.mock('../pkg/shield_browser.js', () => ({
-  default: vi.fn().mockResolvedValue(undefined),
-  ShieldClient: vi.fn().mockImplementation(() => ({
-    setKey: vi.fn(),
-    decrypt: vi.fn().mockReturnValue(new Uint8Array([1, 2, 3])),
-    decryptEnvelope: vi.fn().mockReturnValue('{"decrypted":true}'),
-    isValid: vi.fn().mockReturnValue(true),
-    getSessionId: vi.fn().mockReturnValue('session-123'),
-    getExpiresAt: vi.fn().mockReturnValue(BigInt(Date.now() / 1000 + 3600)),
-    clear: vi.fn(),
-  })),
-}));
+vi.mock('../pkg/shield_browser.js', () => {
+  const MockShieldClient = vi.fn(function (this: any) {
+    this.setKey = vi.fn();
+    this.decrypt = vi.fn().mockReturnValue(new Uint8Array([1, 2, 3]));
+    this.decryptEnvelope = vi.fn().mockReturnValue('{"decrypted":true}');
+    this.isValid = vi.fn().mockReturnValue(true);
+    this.getSessionId = vi.fn().mockReturnValue('session-123');
+    this.getExpiresAt = vi.fn().mockReturnValue(BigInt(Date.now() / 1000 + 3600));
+    this.clear = vi.fn();
+  });
+  return {
+    default: vi.fn().mockResolvedValue(undefined),
+    ShieldClient: MockShieldClient,
+  };
+});
 
 // Mock fetch-hook module
 vi.mock('../js/fetch-hook.js', () => ({
