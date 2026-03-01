@@ -657,6 +657,16 @@ impl SecureSession {
     }
 }
 
+impl Drop for IdentityProvider {
+    fn drop(&mut self) {
+        self.master_key.zeroize();
+        for user in self.users.values_mut() {
+            user.password_hash.zeroize();
+            user.salt.zeroize();
+        }
+    }
+}
+
 impl Drop for SecureSession {
     fn drop(&mut self) {
         self.master_key.zeroize();

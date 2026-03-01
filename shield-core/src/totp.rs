@@ -34,7 +34,11 @@ impl TOTP {
     pub fn new(secret: Vec<u8>, digits: usize, interval: u64) -> Self {
         Self {
             secret,
-            digits: if digits == 0 { 6 } else { digits },
+            digits: match digits {
+                0 => 6,
+                d if d > 9 => 9,
+                d => d,
+            },
             interval: if interval == 0 { 30 } else { interval },
         }
     }
@@ -91,8 +95,6 @@ impl TOTP {
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs())
         });
-
-        let window = if window == 0 { 1 } else { window };
 
         for i in 0..=window {
             let t = time.saturating_sub(u64::from(i) * self.interval);
@@ -203,11 +205,13 @@ impl RecoveryCodes {
         let mut codes = Vec::with_capacity(count);
 
         for _ in 0..count {
-            let bytes: [u8; 4] = crate::random::random_bytes()?;
+            let bytes: [u8; 8] = crate::random::random_bytes()?;
             let code = format!(
-                "{:04X}-{:04X}",
+                "{:04X}-{:04X}-{:04X}-{:04X}",
                 u16::from_be_bytes([bytes[0], bytes[1]]),
-                u16::from_be_bytes([bytes[2], bytes[3]])
+                u16::from_be_bytes([bytes[2], bytes[3]]),
+                u16::from_be_bytes([bytes[4], bytes[5]]),
+                u16::from_be_bytes([bytes[6], bytes[7]])
             );
             codes.push(code);
         }
@@ -218,8 +222,14 @@ impl RecoveryCodes {
     /// Verify and consume a recovery code.
     pub fn verify(&mut self, code: &str) -> bool {
         let normalized = code.to_uppercase().replace([' ', '-'], "");
-        let formatted = if normalized.len() == 8 {
-            format!("{}-{}", &normalized[0..4], &normalized[4..8])
+        let formatted = if normalized.len() == 16 {
+            format!(
+                "{}-{}-{}-{}",
+                &normalized[0..4],
+                &normalized[4..8],
+                &normalized[8..12],
+                &normalized[12..16]
+            )
         } else {
             code.to_uppercase()
         };
