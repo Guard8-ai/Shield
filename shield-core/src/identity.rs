@@ -19,7 +19,9 @@ use crate::error::{Result, ShieldError};
 fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Result<Vec<u8>> {
     let num_blocks = length.div_ceil(32);
     if u32::try_from(num_blocks).is_err() {
-        return Err(ShieldError::StreamError("keystream too long: counter overflow".into()));
+        return Err(ShieldError::StreamError(
+            "keystream too long: counter overflow".into(),
+        ));
     }
     let mut keystream = Vec::with_capacity(num_blocks * 32);
     let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
@@ -223,7 +225,8 @@ impl IdentityProvider {
             return None;
         }
 
-        self.create_token(user_id, permissions, ttl.unwrap_or(self.token_ttl)).ok()
+        self.create_token(user_id, permissions, ttl.unwrap_or(self.token_ttl))
+            .ok()
     }
 
     /// Create session token.
@@ -500,7 +503,8 @@ impl IdentityProvider {
     #[must_use]
     pub fn refresh_token(&self, token: &str) -> Option<String> {
         let session = self.validate_token(token)?;
-        self.create_token(&session.user_id, &session.permissions, self.token_ttl).ok()
+        self.create_token(&session.user_id, &session.permissions, self.token_ttl)
+            .ok()
     }
 
     /// Get user identity.

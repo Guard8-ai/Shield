@@ -18,7 +18,9 @@ use crate::error::{Result, ShieldError};
 fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Result<Vec<u8>> {
     let num_blocks = length.div_ceil(32);
     if u32::try_from(num_blocks).is_err() {
-        return Err(ShieldError::StreamError("keystream too long: counter overflow".into()));
+        return Err(ShieldError::StreamError(
+            "keystream too long: counter overflow".into(),
+        ));
     }
     let mut keystream = Vec::with_capacity(num_blocks * 32);
     let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
@@ -211,7 +213,6 @@ impl GroupEncryption {
         self.group_key = crate::random::random_bytes()?;
         Ok(old_key)
     }
-
 }
 
 impl Drop for GroupEncryption {

@@ -8,12 +8,13 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Deserialize;
-use base64::{Engine as _, engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD}};
-
-use super::base::{
-    AttestationError, AttestationProvider, AttestationResult, TEEType,
+use base64::{
+    engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD},
+    Engine as _,
 };
+use serde::Deserialize;
+
+use super::base::{AttestationError, AttestationProvider, AttestationResult, TEEType};
 
 const GCP_METADATA_URL: &str = "http://metadata.google.internal/computeMetadata/v1";
 
@@ -104,9 +105,8 @@ impl AttestationProvider for SEVAttestationProvider {
     }
 
     async fn verify(&self, evidence: &[u8]) -> Result<AttestationResult, AttestationError> {
-        let token = std::str::from_utf8(evidence).map_err(|e| {
-            AttestationError::InvalidFormat(format!("Invalid token encoding: {e}"))
-        })?;
+        let token = std::str::from_utf8(evidence)
+            .map_err(|e| AttestationError::InvalidFormat(format!("Invalid token encoding: {e}")))?;
 
         let payload = Self::parse_jwt(token)?;
 
@@ -133,28 +133,36 @@ impl AttestationProvider for SEVAttestationProvider {
         let mut claims = HashMap::new();
         if let Some(ref google) = payload.google {
             claims.insert("project_id".into(), serde_json::json!(google.project_id));
-            claims.insert("project_number".into(), serde_json::json!(google.project_number));
+            claims.insert(
+                "project_number".into(),
+                serde_json::json!(google.project_number),
+            );
             claims.insert("zone".into(), serde_json::json!(google.zone));
             claims.insert("instance_id".into(), serde_json::json!(google.instance_id));
-            claims.insert("instance_name".into(), serde_json::json!(google.instance_name));
-            claims.insert("confidential_vm".into(), serde_json::json!(google.confidential_vm));
+            claims.insert(
+                "instance_name".into(),
+                serde_json::json!(google.instance_name),
+            );
+            claims.insert(
+                "confidential_vm".into(),
+                serde_json::json!(google.confidential_vm),
+            );
         }
-        claims.insert("sev_snp_enabled".into(), serde_json::json!(payload.sev_snp.is_some()));
+        claims.insert(
+            "sev_snp_enabled".into(),
+            serde_json::json!(payload.sev_snp.is_some()),
+        );
         claims.insert("iat".into(), serde_json::json!(payload.iat));
         claims.insert("exp".into(), serde_json::json!(payload.exp));
 
         // Verify confidential VM flag
-        let is_confidential = payload
-            .google
-            .as_ref()
-            .is_some_and(|g| g.confidential_vm);
+        let is_confidential = payload.google.as_ref().is_some_and(|g| g.confidential_vm);
 
         if !is_confidential {
-            return Ok(AttestationResult::failure(
-                self.tee_type(),
-                "VM is not a Confidential VM",
-            )
-            .with_raw_evidence(evidence.to_vec()));
+            return Ok(
+                AttestationResult::failure(self.tee_type(), "VM is not a Confidential VM")
+                    .with_raw_evidence(evidence.to_vec()),
+            );
         }
 
         // Verify project ID
@@ -175,10 +183,7 @@ impl AttestationProvider for SEVAttestationProvider {
 
         // Verify zone
         if !self.allowed_zones.is_empty() {
-            let zone = payload
-                .google
-                .as_ref()
-                .map_or("", |g| g.zone.as_str());
+            let zone = payload.google.as_ref().map_or("", |g| g.zone.as_str());
 
             if !self.allowed_zones.iter().any(|z| z == zone) {
                 return Ok(AttestationResult::failure(
@@ -196,10 +201,8 @@ impl AttestationProvider for SEVAttestationProvider {
             .unwrap_or(0);
 
         if payload.exp > 0 && now > payload.exp {
-            return Ok(
-                AttestationResult::failure(self.tee_type(), "Token expired")
-                    .with_raw_evidence(evidence.to_vec()),
-            );
+            return Ok(AttestationResult::failure(self.tee_type(), "Token expired")
+                .with_raw_evidence(evidence.to_vec()));
         }
 
         // Verify measurements
@@ -363,11 +366,10 @@ impl AttestationProvider for ConfidentialSpaceProvider {
                 .and_then(|v| v.as_str());
 
             if actual != Some(expected.as_str()) {
-                return Ok(AttestationResult::failure(
-                    self.tee_type(),
-                    "Image digest mismatch",
-                )
-                .with_raw_evidence(evidence.to_vec()));
+                return Ok(
+                    AttestationResult::failure(self.tee_type(), "Image digest mismatch")
+                        .with_raw_evidence(evidence.to_vec()),
+                );
             }
         }
 
@@ -424,9 +426,7 @@ impl GCPSecretManager {
 
         // Get access token from GCP metadata service
         let client = reqwest::Client::new();
-        let token_url = format!(
-            "{GCP_METADATA_URL}/instance/service-accounts/default/token"
-        );
+        let token_url = format!("{GCP_METADATA_URL}/instance/service-accounts/default/token");
 
         let token_response = client
             .get(&token_url)
@@ -434,7 +434,9 @@ impl GCPSecretManager {
             .timeout(std::time::Duration::from_secs(10))
             .send()
             .await
-            .map_err(|e| AttestationError::IoError(format!("Metadata token request failed: {e}")))?;
+            .map_err(|e| {
+                AttestationError::IoError(format!("Metadata token request failed: {e}"))
+            })?;
 
         if !token_response.status().is_success() {
             return Err(AttestationError::IoError(format!(
@@ -463,7 +465,9 @@ impl GCPSecretManager {
             .timeout(std::time::Duration::from_secs(10))
             .send()
             .await
-            .map_err(|e| AttestationError::IoError(format!("Secret Manager request failed: {e}")))?;
+            .map_err(|e| {
+                AttestationError::IoError(format!("Secret Manager request failed: {e}"))
+            })?;
 
         if !secret_response.status().is_success() {
             return Err(AttestationError::KeyReleaseFailed(format!(
@@ -481,9 +485,9 @@ impl GCPSecretManager {
             .as_str()
             .ok_or_else(|| AttestationError::IoError("Missing payload.data in response".into()))?;
 
-        base64::engine::general_purpose::STANDARD.decode(payload_b64).map_err(|e| {
-            AttestationError::IoError(format!("Failed to decode secret payload: {e}"))
-        })
+        base64::engine::general_purpose::STANDARD
+            .decode(payload_b64)
+            .map_err(|e| AttestationError::IoError(format!("Failed to decode secret payload: {e}")))
     }
 }
 
@@ -496,9 +500,9 @@ fn base64_url_decode(input: &str) -> Result<Vec<u8>, AttestationError> {
         _ => input.to_string(),
     };
 
-    URL_SAFE.decode(&padded).map_err(|e| {
-        AttestationError::InvalidFormat(format!("Invalid base64: {e}"))
-    })
+    URL_SAFE
+        .decode(&padded)
+        .map_err(|e| AttestationError::InvalidFormat(format!("Invalid base64: {e}")))
 }
 
 #[cfg(test)]

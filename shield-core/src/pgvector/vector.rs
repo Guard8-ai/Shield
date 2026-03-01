@@ -2,8 +2,8 @@
 
 use super::error::{PgVectorError, Result};
 use crate::Shield;
-use serde::{Deserialize, Serialize};
 use ring::digest;
+use serde::{Deserialize, Serialize};
 
 /// Encrypted vector with deterministic encryption for searchability
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,11 +46,17 @@ impl EncryptedVector {
         // Verify MAC first
         let computed_mac = Self::compute_mac(shield, &self.encrypted_data, &self.nonce);
         if !constant_time_compare(&computed_mac, &self.mac) {
-            return Err(PgVectorError::Shield(crate::error::ShieldError::AuthenticationFailed));
+            return Err(PgVectorError::Shield(
+                crate::error::ShieldError::AuthenticationFailed,
+            ));
         }
 
         // Decrypt components
-        Ok(Self::decrypt_components(shield, &self.encrypted_data, &self.nonce))
+        Ok(Self::decrypt_components(
+            shield,
+            &self.encrypted_data,
+            &self.nonce,
+        ))
     }
 
     /// Derive deterministic nonce from vector content

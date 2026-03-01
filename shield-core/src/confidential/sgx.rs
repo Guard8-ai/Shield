@@ -12,9 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ring::digest::{digest, SHA256};
 use ring::hmac;
 
-use super::base::{
-    AttestationError, AttestationProvider, AttestationResult, TEEType,
-};
+use super::base::{AttestationError, AttestationProvider, AttestationResult, TEEType};
 use crate::Shield;
 
 const SGX_REPORT_BODY_SIZE: usize = 384;
@@ -76,7 +74,9 @@ impl SGXAttestationProvider {
     /// Parse SGX quote header.
     fn parse_quote_header(data: &[u8]) -> Result<QuoteHeader, AttestationError> {
         if data.len() < SGX_QUOTE_HEADER_SIZE {
-            return Err(AttestationError::InvalidFormat("Quote header too small".into()));
+            return Err(AttestationError::InvalidFormat(
+                "Quote header too small".into(),
+            ));
         }
 
         Ok(QuoteHeader {
@@ -91,7 +91,9 @@ impl SGXAttestationProvider {
     /// Parse SGX report body.
     fn parse_report_body(data: &[u8]) -> Result<ReportBody, AttestationError> {
         if data.len() < SGX_REPORT_BODY_SIZE {
-            return Err(AttestationError::InvalidFormat("Report body too small".into()));
+            return Err(AttestationError::InvalidFormat(
+                "Report body too small".into(),
+            ));
         }
 
         Ok(ReportBody {
@@ -143,12 +145,24 @@ impl AttestationProvider for SGXAttestationProvider {
         // Build claims
         let mut claims = HashMap::new();
         claims.insert("quote_version".into(), serde_json::json!(header.version));
-        claims.insert("att_key_type".into(), serde_json::json!(header.att_key_type));
+        claims.insert(
+            "att_key_type".into(),
+            serde_json::json!(header.att_key_type),
+        );
         claims.insert("tee_type".into(), serde_json::json!(header.tee_type));
-        claims.insert("isv_prod_id".into(), serde_json::json!(report_body.isv_prod_id));
+        claims.insert(
+            "isv_prod_id".into(),
+            serde_json::json!(report_body.isv_prod_id),
+        );
         claims.insert("isv_svn".into(), serde_json::json!(report_body.isv_svn));
-        claims.insert("attributes".into(), serde_json::json!(report_body.attributes));
-        claims.insert("misc_select".into(), serde_json::json!(report_body.misc_select));
+        claims.insert(
+            "attributes".into(),
+            serde_json::json!(report_body.attributes),
+        );
+        claims.insert(
+            "misc_select".into(),
+            serde_json::json!(report_body.misc_select),
+        );
         claims.insert("vendor_id".into(), serde_json::json!(header.vendor_id));
         claims.insert("user_data".into(), serde_json::json!(header.user_data));
 
@@ -238,27 +252,23 @@ impl SGXAttestationProvider {
             })?;
         }
 
-        fs::read("/dev/attestation/quote").map_err(|e| {
-            AttestationError::IoError(format!("Failed to read quote: {e}"))
-        })
+        fs::read("/dev/attestation/quote")
+            .map_err(|e| AttestationError::IoError(format!("Failed to read quote: {e}")))
     }
 
     /// Generate quote via `/dev/sgx` interface (Occlum legacy).
     ///
     /// Reads the SGX quote from `/dev/sgx/quote` after writing report data
     /// to `/dev/sgx/user_report_data`.
-    fn sgx_dev_generate_quote(
-        report_data: Option<&[u8; 64]>,
-    ) -> Result<Vec<u8>, AttestationError> {
+    fn sgx_dev_generate_quote(report_data: Option<&[u8; 64]>) -> Result<Vec<u8>, AttestationError> {
         if let Some(data) = report_data {
             fs::write("/dev/sgx/user_report_data", data).map_err(|e| {
                 AttestationError::IoError(format!("Failed to write SGX report data: {e}"))
             })?;
         }
 
-        fs::read("/dev/sgx/quote").map_err(|e| {
-            AttestationError::IoError(format!("Failed to read SGX quote: {e}"))
-        })
+        fs::read("/dev/sgx/quote")
+            .map_err(|e| AttestationError::IoError(format!("Failed to read SGX quote: {e}")))
     }
 }
 
@@ -327,12 +337,10 @@ impl SealedStorage {
 
         // Read sealing key
         let mut seal_key = [0u8; 16];
-        let mut file = fs::File::open(key_path).map_err(|e| {
-            AttestationError::IoError(format!("Failed to open sealing key: {e}"))
-        })?;
-        file.read_exact(&mut seal_key).map_err(|e| {
-            AttestationError::IoError(format!("Failed to read sealing key: {e}"))
-        })?;
+        let mut file = fs::File::open(key_path)
+            .map_err(|e| AttestationError::IoError(format!("Failed to open sealing key: {e}")))?;
+        file.read_exact(&mut seal_key)
+            .map_err(|e| AttestationError::IoError(format!("Failed to read sealing key: {e}")))?;
 
         // Derive encryption key using keyed HMAC (not unkeyed SHA256)
         let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &seal_key);
@@ -341,9 +349,8 @@ impl SealedStorage {
         key.copy_from_slice(&derived.as_ref()[..32]);
 
         // Encrypt with Shield
-        Shield::encrypt_with_key(&key, data).map_err(|e| {
-            AttestationError::IoError(format!("Encryption failed: {e}"))
-        })
+        Shield::encrypt_with_key(&key, data)
+            .map_err(|e| AttestationError::IoError(format!("Encryption failed: {e}")))
     }
 
     /// Unseal data.
@@ -361,12 +368,10 @@ impl SealedStorage {
 
         // Read sealing key
         let mut seal_key = [0u8; 16];
-        let mut file = fs::File::open(key_path).map_err(|e| {
-            AttestationError::IoError(format!("Failed to open sealing key: {e}"))
-        })?;
-        file.read_exact(&mut seal_key).map_err(|e| {
-            AttestationError::IoError(format!("Failed to read sealing key: {e}"))
-        })?;
+        let mut file = fs::File::open(key_path)
+            .map_err(|e| AttestationError::IoError(format!("Failed to open sealing key: {e}")))?;
+        file.read_exact(&mut seal_key)
+            .map_err(|e| AttestationError::IoError(format!("Failed to read sealing key: {e}")))?;
 
         // Derive encryption key using keyed HMAC (not unkeyed SHA256)
         let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &seal_key);
@@ -375,9 +380,8 @@ impl SealedStorage {
         key.copy_from_slice(&derived.as_ref()[..32]);
 
         // Decrypt with Shield
-        Shield::decrypt_with_key(&key, sealed_data).map_err(|e| {
-            AttestationError::IoError(format!("Decryption failed: {e}"))
-        })
+        Shield::decrypt_with_key(&key, sealed_data)
+            .map_err(|e| AttestationError::IoError(format!("Decryption failed: {e}")))
     }
 
     /// Store sealed data with a key.
@@ -387,13 +391,11 @@ impl SealedStorage {
         let key_hash = hex::encode(&digest(&SHA256, key.as_bytes()).as_ref()[..16]);
         let path = self.storage_path.join(key_hash);
 
-        fs::create_dir_all(&self.storage_path).map_err(|e| {
-            AttestationError::IoError(format!("Failed to create directory: {e}"))
-        })?;
+        fs::create_dir_all(&self.storage_path)
+            .map_err(|e| AttestationError::IoError(format!("Failed to create directory: {e}")))?;
 
-        fs::write(&path, &sealed).map_err(|e| {
-            AttestationError::IoError(format!("Failed to write sealed data: {e}"))
-        })
+        fs::write(&path, &sealed)
+            .map_err(|e| AttestationError::IoError(format!("Failed to write sealed data: {e}")))
     }
 
     /// Load and unseal data by key.
@@ -401,9 +403,8 @@ impl SealedStorage {
         let key_hash = hex::encode(&digest(&SHA256, key.as_bytes()).as_ref()[..16]);
         let path = self.storage_path.join(key_hash);
 
-        let sealed = fs::read(&path).map_err(|e| {
-            AttestationError::IoError(format!("Failed to read sealed data: {e}"))
-        })?;
+        let sealed = fs::read(&path)
+            .map_err(|e| AttestationError::IoError(format!("Failed to read sealed data: {e}")))?;
 
         self.unseal(&sealed)
     }

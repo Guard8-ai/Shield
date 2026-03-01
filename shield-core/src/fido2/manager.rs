@@ -3,8 +3,8 @@
 use super::config::{CredentialStore, WebAuthnConfig};
 use super::credential::{ShieldCredentialStore, StoredCredential};
 use super::error::{Fido2Error, Result};
-use base64::Engine;
 use crate::Shield;
+use base64::Engine;
 use ring::hmac;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -102,11 +102,12 @@ impl<S: CredentialStore> Fido2Manager<S> {
         public_key: Vec<u8>,
     ) -> Result<StoredCredential> {
         // Decode challenge
-        let challenge = b64_decode(challenge_b64)
-            .map_err(|_| Fido2Error::InvalidChallenge)?;
+        let challenge = b64_decode(challenge_b64).map_err(|_| Fido2Error::InvalidChallenge)?;
 
         // Verify challenge exists and not expired
-        let challenge_data = self.challenges.get(&challenge)
+        let challenge_data = self
+            .challenges
+            .get(&challenge)
             .ok_or(Fido2Error::InvalidChallenge)?;
 
         let now = std::time::SystemTime::now()
@@ -119,7 +120,9 @@ impl<S: CredentialStore> Fido2Manager<S> {
             return Err(Fido2Error::InvalidChallenge);
         }
 
-        let user_id = challenge_data.user_id.clone()
+        let user_id = challenge_data
+            .user_id
+            .clone()
             .ok_or(Fido2Error::InvalidChallenge)?;
 
         // Create and store credential
@@ -195,11 +198,12 @@ impl<S: CredentialStore> Fido2Manager<S> {
         counter: u32,
     ) -> Result<AuthenticationResult> {
         // Decode challenge
-        let challenge = b64_decode(challenge_b64)
-            .map_err(|_| Fido2Error::InvalidChallenge)?;
+        let challenge = b64_decode(challenge_b64).map_err(|_| Fido2Error::InvalidChallenge)?;
 
         // Verify challenge exists and not expired
-        let challenge_data = self.challenges.get(&challenge)
+        let challenge_data = self
+            .challenges
+            .get(&challenge)
             .ok_or(Fido2Error::InvalidChallenge)?;
 
         let now = std::time::SystemTime::now()
@@ -212,7 +216,9 @@ impl<S: CredentialStore> Fido2Manager<S> {
             return Err(Fido2Error::InvalidChallenge);
         }
 
-        let user_id = challenge_data.user_id.clone()
+        let user_id = challenge_data
+            .user_id
+            .clone()
             .ok_or(Fido2Error::InvalidChallenge)?;
 
         // Get stored credential
@@ -234,11 +240,11 @@ impl<S: CredentialStore> Fido2Manager<S> {
         sign_data.extend_from_slice(&challenge);
         sign_data.extend_from_slice(credential_id);
         sign_data.extend_from_slice(&counter.to_le_bytes());
-        hmac::verify(&hmac_key, &sign_data, signature)
-            .map_err(|_| Fido2Error::InvalidSignature)?;
+        hmac::verify(&hmac_key, &sign_data, signature).map_err(|_| Fido2Error::InvalidSignature)?;
 
         // Update counter
-        self.store.update_counter(&user_id, credential_id, counter)?;
+        self.store
+            .update_counter(&user_id, credential_id, counter)?;
 
         // Remove used challenge
         self.challenges.remove(&challenge);
@@ -265,8 +271,8 @@ impl<S: CredentialStore> Fido2Manager<S> {
 /// Registration challenge sent to client
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationChallenge {
-    pub challenge: String,        // base64-encoded
-    pub user_id: String,          // base64-encoded
+    pub challenge: String, // base64-encoded
+    pub user_id: String,   // base64-encoded
     pub username: String,
     pub display_name: String,
     pub rp_id: String,
@@ -277,7 +283,7 @@ pub struct RegistrationChallenge {
 /// Authentication challenge sent to client
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthenticationChallenge {
-    pub challenge: String,        // base64-encoded
+    pub challenge: String, // base64-encoded
     pub allowed_credentials: Vec<AllowedCredential>,
     pub timeout_ms: u32,
     pub rp_id: String,
@@ -286,7 +292,7 @@ pub struct AuthenticationChallenge {
 /// Allowed credential descriptor
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AllowedCredential {
-    pub id: String,              // base64-encoded credential ID
+    pub id: String, // base64-encoded credential ID
     #[serde(rename = "type")]
     pub credential_type: String, // "public-key"
 }
@@ -376,12 +382,8 @@ mod tests {
         assert_eq!(auth_challenge.allowed_credentials.len(), 1);
 
         // Compute valid HMAC signature
-        let signature = compute_test_signature(
-            &public_key,
-            &auth_challenge.challenge,
-            &credential_id,
-            1,
-        );
+        let signature =
+            compute_test_signature(&public_key, &auth_challenge.challenge, &credential_id, 1);
 
         let result = manager
             .verify_authentication(&auth_challenge.challenge, &credential_id, &signature, 1)
@@ -445,25 +447,18 @@ mod tests {
 
         // First authentication with valid signature
         let auth_challenge = manager.generate_authentication_challenge(user_id).unwrap();
-        let sig1 = compute_test_signature(
-            &public_key,
-            &auth_challenge.challenge,
-            &credential_id,
-            1,
-        );
+        let sig1 =
+            compute_test_signature(&public_key, &auth_challenge.challenge, &credential_id, 1);
         manager
             .verify_authentication(&auth_challenge.challenge, &credential_id, &sig1, 1)
             .unwrap();
 
         // Second authentication with same counter should fail (replay)
         let auth_challenge2 = manager.generate_authentication_challenge(user_id).unwrap();
-        let sig2 = compute_test_signature(
-            &public_key,
-            &auth_challenge2.challenge,
-            &credential_id,
-            1,
-        );
-        let result = manager.verify_authentication(&auth_challenge2.challenge, &credential_id, &sig2, 1);
+        let sig2 =
+            compute_test_signature(&public_key, &auth_challenge2.challenge, &credential_id, 1);
+        let result =
+            manager.verify_authentication(&auth_challenge2.challenge, &credential_id, &sig2, 1);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Fido2Error::CounterDecreased));
     }

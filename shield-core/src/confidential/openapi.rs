@@ -210,8 +210,8 @@ pub struct ShieldConfidentialApi;
 #[allow(clippy::unused_async)]
 mod openapi_handlers {
     use super::{
-        AttestationRequest, AttestationResponse, DecryptRequest, DecryptResponse,
-        EncryptRequest, EncryptResponse, HashMap, HealthResponse,
+        AttestationRequest, AttestationResponse, DecryptRequest, DecryptResponse, EncryptRequest,
+        EncryptResponse, HashMap, HealthResponse,
     };
 
     /// Verify attestation evidence.
@@ -233,7 +233,10 @@ mod openapi_handlers {
             measurements: HashMap::new(),
             claims: HashMap::new(),
             timestamp: 0,
-            error: Some(format!("Attestation verification not configured (received {} bytes)", request.attestation.len())),
+            error: Some(format!(
+                "Attestation verification not configured (received {} bytes)",
+                request.attestation.len()
+            )),
         }
     }
 

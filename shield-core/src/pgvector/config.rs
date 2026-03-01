@@ -105,10 +105,7 @@ pub struct PgVectorConfig {
 
 impl PgVectorConfig {
     /// Create a new pgvector configuration
-    pub fn new(
-        connection_string: impl Into<String>,
-        dimension: usize,
-    ) -> Self {
+    pub fn new(connection_string: impl Into<String>, dimension: usize) -> Self {
         Self {
             connection_string: connection_string.into(),
             pool_size: 10,
@@ -150,13 +147,14 @@ impl PgVectorConfig {
     /// Validate configuration
     pub fn validate(&self) -> Result<()> {
         if self.dimension == 0 || self.dimension > 4096 {
-            return Err(PgVectorError::InvalidConfig(
-                format!("Invalid dimension: {} (must be 1-4096)", self.dimension)
-            ));
+            return Err(PgVectorError::InvalidConfig(format!(
+                "Invalid dimension: {} (must be 1-4096)",
+                self.dimension
+            )));
         }
         if self.pool_size == 0 {
             return Err(PgVectorError::InvalidConfig(
-                "Pool size must be > 0".to_string()
+                "Pool size must be > 0".to_string(),
             ));
         }
         Ok(())

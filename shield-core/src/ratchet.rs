@@ -170,7 +170,9 @@ fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8], counter: u64) -> Result<Ve
     // Generate keystream using HMAC-SHA256 (keyed PRF) with enc_key
     let num_blocks = data.len().div_ceil(32);
     if u32::try_from(num_blocks).is_err() {
-        return Err(ShieldError::RatchetError("keystream too long: counter overflow".into()));
+        return Err(ShieldError::RatchetError(
+            "keystream too long: counter overflow".into(),
+        ));
     }
     let hmac_enc_key = hmac::Key::new(hmac::HMAC_SHA256, &enc_key);
     let mut keystream = Vec::with_capacity(num_blocks * 32);
@@ -232,7 +234,9 @@ fn decrypt_with_key(key: &[u8; 32], encrypted: &[u8]) -> Result<(Vec<u8>, u64)> 
     // Generate keystream using HMAC-SHA256 (keyed PRF) with enc_key
     let num_blocks = ciphertext.len().div_ceil(32);
     if u32::try_from(num_blocks).is_err() {
-        return Err(ShieldError::RatchetError("keystream too long: counter overflow".into()));
+        return Err(ShieldError::RatchetError(
+            "keystream too long: counter overflow".into(),
+        ));
     }
     let hmac_enc_key = hmac::Key::new(hmac::HMAC_SHA256, &enc_key);
     let mut keystream = Vec::with_capacity(num_blocks * 32);

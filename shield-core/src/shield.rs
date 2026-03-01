@@ -218,7 +218,11 @@ impl Shield {
     }
 
     /// Encrypt with pre-separated encryption and MAC keys.
-    fn encrypt_with_separated_keys(enc_key: &[u8; 32], mac_key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>> {
+    fn encrypt_with_separated_keys(
+        enc_key: &[u8; 32],
+        mac_key: &[u8; 32],
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>> {
         // Generate random nonce
         let nonce: [u8; NONCE_SIZE] = crate::random::random_bytes()?;
 
@@ -446,7 +450,9 @@ impl Shield {
 fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Result<Vec<u8>> {
     let num_blocks = length.div_ceil(32);
     if u32::try_from(num_blocks).is_err() {
-        return Err(ShieldError::StreamError("keystream too long: counter overflow".into()));
+        return Err(ShieldError::StreamError(
+            "keystream too long: counter overflow".into(),
+        ));
     }
     let mut keystream = Vec::with_capacity(num_blocks * 32);
 
@@ -549,7 +555,10 @@ mod tests {
         }
 
         // Due to random padding (32-128 bytes), should have multiple unique lengths
-        assert!(lengths.len() > 1, "Expected length variation due to random padding");
+        assert!(
+            lengths.len() > 1,
+            "Expected length variation due to random padding"
+        );
     }
 
     #[test]

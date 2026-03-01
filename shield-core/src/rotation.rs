@@ -116,14 +116,12 @@ impl KeyRotationManager {
         }
 
         // Parse components
-        let version = u32::from_le_bytes(
-            encrypted[..4]
-                .try_into()
-                .map_err(|_| ShieldError::CiphertextTooShort {
-                    expected: 4,
-                    actual: encrypted.len(),
-                })?,
-        );
+        let version = u32::from_le_bytes(encrypted[..4].try_into().map_err(|_| {
+            ShieldError::CiphertextTooShort {
+                expected: 4,
+                actual: encrypted.len(),
+            }
+        })?);
         let nonce = &encrypted[4..20];
         let ciphertext = &encrypted[20..encrypted.len() - 16];
         let mac = &encrypted[encrypted.len() - 16..];
@@ -212,7 +210,9 @@ fn derive_rotation_subkeys(key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
 fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Result<Vec<u8>> {
     let num_blocks = length.div_ceil(32);
     if u32::try_from(num_blocks).is_err() {
-        return Err(ShieldError::StreamError("keystream too long: counter overflow".into()));
+        return Err(ShieldError::StreamError(
+            "keystream too long: counter overflow".into(),
+        ));
     }
     let mut keystream = Vec::with_capacity(num_blocks * 32);
     let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);

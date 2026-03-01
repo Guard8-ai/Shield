@@ -101,7 +101,10 @@ fn cmd_encrypt(args: &[String]) -> ExitCode {
         }
     };
 
-    let password = match parsed.password.or_else(|| prompt_password("Password: ", true)) {
+    let password = match parsed
+        .password
+        .or_else(|| prompt_password("Password: ", true))
+    {
         Some(p) => p,
         None => {
             eprintln!("Error: Password required");
@@ -156,7 +159,10 @@ fn cmd_decrypt(args: &[String]) -> ExitCode {
         }
     };
 
-    let password = match parsed.password.or_else(|| prompt_password("Password: ", false)) {
+    let password = match parsed
+        .password
+        .or_else(|| prompt_password("Password: ", false))
+    {
         Some(p) => p,
         None => {
             eprintln!("Error: Password required");
@@ -432,7 +438,9 @@ fn parse_file_args(args: &[String]) -> Result<FileArgs, String> {
                 i += 1;
                 password = args.get(i).cloned();
                 if password.is_some() {
-                    eprintln!("Warning: Password visible in process list. Prefer interactive prompt.");
+                    eprintln!(
+                        "Warning: Password visible in process list. Prefer interactive prompt."
+                    );
                 }
             }
             "-f" | "--force" => {
