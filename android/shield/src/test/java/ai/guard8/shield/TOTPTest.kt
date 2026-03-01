@@ -41,8 +41,8 @@ class TOTPTest {
 
     @Test
     fun testBase32KnownValue() {
-        // Test vector: "JBSWY3DPEHPK3PXP" = "Hello!"
-        val decoded = TOTP.secretFromBase32("JBSWY3DPEHPK3PXP")
+        // Test vector: "JBSWY3DPEE" = "Hello!" (RFC 4648 base32)
+        val decoded = TOTP.secretFromBase32("JBSWY3DPEE")
         val expected = "Hello!".toByteArray()
         assertArrayEquals("Known base32 value should decode correctly", expected, decoded)
     }

@@ -12,7 +12,7 @@ vi.mock('../pkg/shield_browser.js', () => {
     this.decryptEnvelope = vi.fn().mockReturnValue('{"decrypted":true}');
     this.isValid = vi.fn().mockReturnValue(true);
     this.getSessionId = vi.fn().mockReturnValue('session-123');
-    this.getExpiresAt = vi.fn().mockReturnValue(BigInt(Date.now() / 1000 + 3600));
+    this.getExpiresAt = vi.fn().mockReturnValue(BigInt(Math.floor(Date.now() / 1000) + 3600));
     this.clear = vi.fn();
   });
   return {

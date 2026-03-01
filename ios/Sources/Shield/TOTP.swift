@@ -223,8 +223,9 @@ public final class TOTP {
             buffer = (buffer << 5) | index
             bitsLeft += 5
             if bitsLeft >= 8 {
-                result.append(UInt8(buffer >> (bitsLeft - 8)))
+                result.append(UInt8((buffer >> (bitsLeft - 8)) & 0xFF))
                 bitsLeft -= 8
+                buffer = buffer & ((1 << bitsLeft) - 1)
             }
         }
 
