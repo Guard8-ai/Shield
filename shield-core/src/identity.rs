@@ -16,9 +16,11 @@ use zeroize::Zeroize;
 use crate::error::{Result, ShieldError};
 
 /// Generate keystream using HMAC-SHA256 (keyed PRF).
-fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
+fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Result<Vec<u8>> {
     let num_blocks = length.div_ceil(32);
-    assert!(u32::try_from(num_blocks).is_ok(), "keystream too long: counter overflow");
+    if u32::try_from(num_blocks).is_err() {
+        return Err(ShieldError::StreamError("keystream too long: counter overflow".into()));
+    }
     let mut keystream = Vec::with_capacity(num_blocks * 32);
     let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
 
@@ -33,7 +35,7 @@ fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
     }
 
     keystream.truncate(length);
-    keystream
+    Ok(keystream)
 }
 
 /// User identity.
@@ -221,12 +223,12 @@ impl IdentityProvider {
             return None;
         }
 
-        Some(self.create_token(user_id, permissions, ttl.unwrap_or(self.token_ttl)))
+        self.create_token(user_id, permissions, ttl.unwrap_or(self.token_ttl)).ok()
     }
 
     /// Create session token.
-    fn create_token(&self, user_id: &str, permissions: &[String], ttl: u64) -> String {
-        let nonce: [u8; 16] = crate::random::random_bytes().unwrap_or([0u8; 16]);
+    fn create_token(&self, user_id: &str, permissions: &[String], ttl: u64) -> Result<String> {
+        let nonce: [u8; 16] = crate::random::random_bytes()?;
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -249,7 +251,7 @@ impl IdentityProvider {
         let (enc_key, mac_key) = self.derive_token_subkeys("session");
 
         // Encrypt with enc_key
-        let keystream = generate_keystream(&enc_key, &nonce, token_data.len());
+        let keystream = generate_keystream(&enc_key, &nonce, token_data.len())?;
         let encrypted: Vec<u8> = token_data
             .iter()
             .zip(keystream.iter())
@@ -268,7 +270,7 @@ impl IdentityProvider {
         result.extend_from_slice(&encrypted);
         result.extend_from_slice(&tag.as_ref()[..16]);
 
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&result)
+        Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&result))
     }
 
     /// Validate session token.
@@ -301,7 +303,7 @@ impl IdentityProvider {
         }
 
         // Decrypt with enc_key
-        let keystream = generate_keystream(&enc_key, nonce, encrypted.len());
+        let keystream = generate_keystream(&enc_key, nonce, encrypted.len()).ok()?;
         let token_data: Vec<u8> = encrypted
             .iter()
             .zip(keystream.iter())
@@ -385,7 +387,7 @@ impl IdentityProvider {
 
         // Derive separate enc/mac keys for service-specific token
         let (enc_key, mac_key) = self.derive_token_subkeys(&format!("service:{service}"));
-        let keystream = generate_keystream(&enc_key, &nonce, token_data.len());
+        let keystream = generate_keystream(&enc_key, &nonce, token_data.len()).ok()?;
         let encrypted: Vec<u8> = token_data
             .iter()
             .zip(keystream.iter())
@@ -436,7 +438,7 @@ impl IdentityProvider {
         }
 
         // Decrypt with enc_key
-        let keystream = generate_keystream(&enc_key, nonce, encrypted.len());
+        let keystream = generate_keystream(&enc_key, nonce, encrypted.len()).ok()?;
         let token_data: Vec<u8> = encrypted
             .iter()
             .zip(keystream.iter())
@@ -498,7 +500,7 @@ impl IdentityProvider {
     #[must_use]
     pub fn refresh_token(&self, token: &str) -> Option<String> {
         let session = self.validate_token(token)?;
-        Some(self.create_token(&session.user_id, &session.permissions, self.token_ttl))
+        self.create_token(&session.user_id, &session.permissions, self.token_ttl).ok()
     }
 
     /// Get user identity.
@@ -509,8 +511,26 @@ impl IdentityProvider {
 
     /// Revoke user.
     pub fn revoke_user(&mut self, user_id: &str) {
-        self.users.remove(user_id);
+        if let Some(mut user) = self.users.remove(user_id) {
+            user.password_hash.zeroize();
+            user.salt.zeroize();
+        }
     }
+}
+
+/// Derive separated encryption and MAC subkeys for session operations.
+fn derive_session_subkeys(key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+
+    let enc_tag = hmac::sign(&hmac_key, b"shield-session-encrypt");
+    let mut enc_key = [0u8; 32];
+    enc_key.copy_from_slice(&enc_tag.as_ref()[..32]);
+
+    let mac_tag = hmac::sign(&hmac_key, b"shield-session-authenticate");
+    let mut mac_key = [0u8; 32];
+    mac_key.copy_from_slice(&mac_tag.as_ref()[..32]);
+
+    (enc_key, mac_key)
 }
 
 /// Secure session with automatic key rotation.
@@ -568,10 +588,13 @@ impl SecureSession {
             self.keys.insert(self.key_version, new_key);
             self.last_rotation = now;
 
-            // Prune old keys
+            // Prune old keys (zeroize before removing)
             let mut versions: Vec<u32> = self.keys.keys().copied().collect();
             versions.sort_by(|a, b| b.cmp(a));
             for v in versions.into_iter().skip(self.max_old_keys + 1) {
+                if let Some(key) = self.keys.get_mut(&v) {
+                    key.zeroize();
+                }
                 self.keys.remove(&v);
             }
         }
@@ -585,9 +608,10 @@ impl SecureSession {
             .keys
             .get(&self.key_version)
             .ok_or(ShieldError::UnknownVersion(self.key_version))?;
+        let (enc_key, mac_key) = derive_session_subkeys(key);
         let nonce: [u8; 16] = crate::random::random_bytes()?;
 
-        let keystream = generate_keystream(key, &nonce, data.len());
+        let keystream = generate_keystream(&enc_key, &nonce, data.len())?;
         let ciphertext: Vec<u8> = data
             .iter()
             .zip(keystream.iter())
@@ -596,12 +620,12 @@ impl SecureSession {
 
         let version_bytes = self.key_version.to_le_bytes();
 
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+        let hmac_signing_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
         let mut hmac_data = Vec::with_capacity(4 + 16 + ciphertext.len());
         hmac_data.extend_from_slice(&version_bytes);
         hmac_data.extend_from_slice(&nonce);
         hmac_data.extend_from_slice(&ciphertext);
-        let tag = hmac::sign(&hmac_key, &hmac_data);
+        let tag = hmac::sign(&hmac_signing_key, &hmac_data);
 
         let mut result = Vec::with_capacity(4 + 16 + ciphertext.len() + 16);
         result.extend_from_slice(&version_bytes);
@@ -626,16 +650,17 @@ impl SecureSession {
         let mac = &encrypted[encrypted.len() - 16..];
 
         let key = self.keys.get(&version)?;
+        let (enc_key, mac_key) = derive_session_subkeys(key);
 
-        // Verify MAC
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
-        let expected_tag = hmac::sign(&hmac_key, &encrypted[..encrypted.len() - 16]);
+        // Verify MAC with mac_key
+        let hmac_signing_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
+        let expected_tag = hmac::sign(&hmac_signing_key, &encrypted[..encrypted.len() - 16]);
 
         if mac.ct_eq(&expected_tag.as_ref()[..16]).unwrap_u8() != 1 {
             return None;
         }
 
-        let keystream = generate_keystream(key, nonce, ciphertext.len());
+        let keystream = generate_keystream(&enc_key, nonce, ciphertext.len()).ok()?;
         let plaintext: Vec<u8> = ciphertext
             .iter()
             .zip(keystream.iter())

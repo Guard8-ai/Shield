@@ -34,11 +34,7 @@ impl TOTP {
     pub fn new(secret: Vec<u8>, digits: usize, interval: u64) -> Self {
         Self {
             secret,
-            digits: match digits {
-                0 => 6,
-                d if d > 9 => 9,
-                d => d,
-            },
+            digits: digits.clamp(6, 9),
             interval: if interval == 0 { 30 } else { interval },
         }
     }
@@ -288,6 +284,31 @@ mod tests {
         let totp = TOTP::with_secret(secret);
         let code = totp.generate(None);
         assert!(totp.verify(&code, None, 1));
+    }
+
+    #[test]
+    fn test_totp_minimum_digits_clamping() {
+        let secret = b"12345678901234567890".to_vec();
+
+        // digits=1 should be clamped to 6
+        let totp1 = TOTP::new(secret.clone(), 1, 30);
+        let code1 = totp1.generate(Some(59));
+        assert_eq!(code1.len(), 6);
+
+        // digits=5 should be clamped to 6
+        let totp5 = TOTP::new(secret.clone(), 5, 30);
+        let code5 = totp5.generate(Some(59));
+        assert_eq!(code5.len(), 6);
+
+        // digits=0 should be clamped to 6
+        let totp0 = TOTP::new(secret.clone(), 0, 30);
+        let code0 = totp0.generate(Some(59));
+        assert_eq!(code0.len(), 6);
+
+        // digits=6 should stay 6
+        let totp6 = TOTP::new(secret, 6, 30);
+        let code6 = totp6.generate(Some(59));
+        assert_eq!(code6.len(), 6);
     }
 
     #[test]

@@ -74,10 +74,11 @@ impl KeyRotationManager {
             .keys
             .get(&self.current_version)
             .ok_or(ShieldError::UnknownVersion(self.current_version))?;
+        let (enc_key, mac_key) = derive_rotation_subkeys(key);
         let nonce: [u8; 16] = crate::random::random_bytes()?;
 
-        // Generate keystream
-        let keystream = generate_keystream(key, &nonce, plaintext.len());
+        // Generate keystream with enc_key
+        let keystream = generate_keystream(&enc_key, &nonce, plaintext.len())?;
         let ciphertext: Vec<u8> = plaintext
             .iter()
             .zip(keystream.iter())
@@ -87,13 +88,13 @@ impl KeyRotationManager {
         // Version bytes
         let version_bytes = self.current_version.to_le_bytes();
 
-        // HMAC over version || nonce || ciphertext
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+        // HMAC over version || nonce || ciphertext with mac_key
+        let hmac_signing_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
         let mut hmac_data = Vec::with_capacity(4 + 16 + ciphertext.len());
         hmac_data.extend_from_slice(&version_bytes);
         hmac_data.extend_from_slice(&nonce);
         hmac_data.extend_from_slice(&ciphertext);
-        let tag = hmac::sign(&hmac_key, &hmac_data);
+        let tag = hmac::sign(&hmac_signing_key, &hmac_data);
 
         // Result: version || nonce || ciphertext || mac
         let mut result = Vec::with_capacity(4 + 16 + ciphertext.len() + 16);
@@ -132,17 +133,18 @@ impl KeyRotationManager {
             .keys
             .get(&version)
             .ok_or(ShieldError::UnknownVersion(version))?;
+        let (enc_key, mac_key) = derive_rotation_subkeys(key);
 
-        // Verify MAC
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
-        let expected_tag = hmac::sign(&hmac_key, &encrypted[..encrypted.len() - 16]);
+        // Verify MAC with mac_key
+        let hmac_signing_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
+        let expected_tag = hmac::sign(&hmac_signing_key, &encrypted[..encrypted.len() - 16]);
 
         if mac.ct_eq(&expected_tag.as_ref()[..16]).unwrap_u8() != 1 {
             return Err(ShieldError::AuthenticationFailed);
         }
 
-        // Decrypt
-        let keystream = generate_keystream(key, nonce, ciphertext.len());
+        // Decrypt with enc_key
+        let keystream = generate_keystream(&enc_key, nonce, ciphertext.len())?;
         let plaintext: Vec<u8> = ciphertext
             .iter()
             .zip(keystream.iter())
@@ -164,6 +166,10 @@ impl KeyRotationManager {
         let mut pruned = Vec::new();
         for v in self.keys.keys().copied().collect::<Vec<_>>() {
             if !to_keep.contains(&v) {
+                // Zeroize key material before removing from map
+                if let Some(key) = self.keys.get_mut(&v) {
+                    key.zeroize();
+                }
                 self.keys.remove(&v);
                 pruned.push(v);
             }
@@ -187,10 +193,27 @@ impl Drop for KeyRotationManager {
     }
 }
 
+/// Derive separated encryption and MAC subkeys from a rotation key using HMAC-SHA256.
+fn derive_rotation_subkeys(key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
+
+    let enc_tag = hmac::sign(&hmac_key, b"shield-rotation-encrypt");
+    let mut enc_key = [0u8; 32];
+    enc_key.copy_from_slice(&enc_tag.as_ref()[..32]);
+
+    let mac_tag = hmac::sign(&hmac_key, b"shield-rotation-authenticate");
+    let mut mac_key = [0u8; 32];
+    mac_key.copy_from_slice(&mac_tag.as_ref()[..32]);
+
+    (enc_key, mac_key)
+}
+
 /// Generate keystream using HMAC-SHA256 (keyed PRF).
-fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
+fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Result<Vec<u8>> {
     let num_blocks = length.div_ceil(32);
-    assert!(u32::try_from(num_blocks).is_ok(), "keystream too long: counter overflow");
+    if u32::try_from(num_blocks).is_err() {
+        return Err(ShieldError::StreamError("keystream too long: counter overflow".into()));
+    }
     let mut keystream = Vec::with_capacity(num_blocks * 32);
     let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
 
@@ -205,7 +228,7 @@ fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
     }
 
     keystream.truncate(length);
-    keystream
+    Ok(keystream)
 }
 
 #[cfg(test)]
