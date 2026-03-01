@@ -104,18 +104,22 @@ class RatchetSession(
      *   messages will fail with ShieldException.
      */
     fun decrypt(ciphertext: ByteArray): ByteArray {
-        // Ratchet BEFORE decrypt (matches Rust core)
+        // Speculatively compute next chain state without committing
         val (newChain, msgKey) = ratchetChain(recvChain)
-        recvChain = newChain
 
-        // Decrypt with message key
+        // Decrypt and verify MAC — if this fails, chain is untouched
         val (plaintext, counter) = decryptWithKey(msgKey, ciphertext)
 
-        // Verify counter (replay protection)
+        // Verify counter — if this fails, chain is untouched
+        if (counter < _recvCounter) {
+            throw ShieldException.ReplayDetected()
+        }
         if (counter != _recvCounter) {
             throw ShieldException.OutOfOrder()
         }
 
+        // All checks passed — now commit the chain advance
+        recvChain = newChain
         _recvCounter++
         return plaintext
     }

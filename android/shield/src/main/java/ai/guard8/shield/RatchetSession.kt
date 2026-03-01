@@ -103,21 +103,26 @@ class RatchetSession(
      *   Messages must be decrypted in order. Out-of-order
      *   messages will fail with ShieldException.
      */
-    fun decrypt(ciphertext: ByteArray): ByteArray {
-        // Ratchet BEFORE decrypt (matches Rust core)
-        val (newChain, msgKey) = ratchetChain(recvChain)
-        recvChain = newChain
+    fun decrypt(ciphertext: ByteArray): ByteArray? {
+        return try {
+            // Speculatively compute next chain state without committing
+            val (newChain, msgKey) = ratchetChain(recvChain)
 
-        // Decrypt with message key
-        val (plaintext, counter) = decryptWithKey(msgKey, ciphertext)
+            // Decrypt with message key — if this fails, chain is untouched
+            val (plaintext, counter) = decryptWithKey(msgKey, ciphertext)
 
-        // Verify counter (replay protection)
-        if (counter != _recvCounter) {
-            throw ShieldException.OutOfOrder()
+            // Verify counter (replay protection) — if this fails, chain is untouched
+            if (counter != _recvCounter) {
+                return null
+            }
+
+            // All checks passed — commit chain advance
+            recvChain = newChain
+            _recvCounter++
+            plaintext
+        } catch (_: Exception) {
+            null
         }
-
-        _recvCounter++
-        return plaintext
     }
 
     override fun close() {
