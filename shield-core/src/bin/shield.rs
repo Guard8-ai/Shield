@@ -20,7 +20,8 @@
 //! ```
 
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, BufRead, Write};
+use std::path::Path;
 use std::process::ExitCode;
 
 use shield_core::password::{check_password, StrengthLevel};
@@ -76,6 +77,7 @@ OPTIONS:
     -o, --output <file>    Output file
     -p, --password <pass>  Password (prefer prompt for security)
     -s, --service <name>   Service identifier
+    -f, --force            Overwrite output file if it exists
     -h, --help             Show help
     -V, --version          Show version
 
@@ -91,7 +93,7 @@ For more info: https://github.com/Guard8-ai/Shield"#
 }
 
 fn cmd_encrypt(args: &[String]) -> ExitCode {
-    let (file, output, password) = match parse_file_args(args) {
+    let parsed = match parse_file_args(args) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("Error: {e}");
@@ -99,7 +101,7 @@ fn cmd_encrypt(args: &[String]) -> ExitCode {
         }
     };
 
-    let password = match password.or_else(|| prompt_password("Password: ", true)) {
+    let password = match parsed.password.or_else(|| prompt_password("Password: ", true)) {
         Some(p) => p,
         None => {
             eprintln!("Error: Password required");
@@ -120,14 +122,22 @@ fn cmd_encrypt(args: &[String]) -> ExitCode {
         );
     }
 
-    let output = output.unwrap_or_else(|| format!("{}.enc", file));
+    let output = parsed
+        .output
+        .unwrap_or_else(|| format!("{}.enc", parsed.file));
+
+    // Check for overwrite
+    if !parsed.force && Path::new(&output).exists() {
+        eprintln!("Error: Output file '{output}' already exists. Use --force to overwrite.");
+        return ExitCode::FAILURE;
+    }
 
     // Use filename as service identifier for deterministic key derivation
-    let shield = Shield::new(&password, &file);
+    let shield = Shield::new(&password, &parsed.file);
 
-    match encrypt_file(&shield, &file, &output) {
+    match encrypt_file(&shield, &parsed.file, &output) {
         Ok(()) => {
-            println!("Encrypted: {file} -> {output}");
+            println!("Encrypted: {} -> {output}", parsed.file);
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -138,7 +148,7 @@ fn cmd_encrypt(args: &[String]) -> ExitCode {
 }
 
 fn cmd_decrypt(args: &[String]) -> ExitCode {
-    let (file, output, password) = match parse_file_args(args) {
+    let parsed = match parse_file_args(args) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("Error: {e}");
@@ -146,7 +156,7 @@ fn cmd_decrypt(args: &[String]) -> ExitCode {
         }
     };
 
-    let password = match password.or_else(|| prompt_password("Password: ", false)) {
+    let password = match parsed.password.or_else(|| prompt_password("Password: ", false)) {
         Some(p) => p,
         None => {
             eprintln!("Error: Password required");
@@ -154,26 +164,32 @@ fn cmd_decrypt(args: &[String]) -> ExitCode {
         }
     };
 
-    let output = output.unwrap_or_else(|| {
-        if file.ends_with(".enc") {
-            file[..file.len() - 4].to_string()
+    let output = parsed.output.unwrap_or_else(|| {
+        if parsed.file.ends_with(".enc") {
+            parsed.file[..parsed.file.len() - 4].to_string()
         } else {
-            format!("{file}.dec")
+            format!("{}.dec", parsed.file)
         }
     });
 
+    // Check for overwrite
+    if !parsed.force && Path::new(&output).exists() {
+        eprintln!("Error: Output file '{output}' already exists. Use --force to overwrite.");
+        return ExitCode::FAILURE;
+    }
+
     // Use original filename as service identifier
-    let original_name = if file.ends_with(".enc") {
-        &file[..file.len() - 4]
+    let original_name = if parsed.file.ends_with(".enc") {
+        &parsed.file[..parsed.file.len() - 4]
     } else {
-        &file
+        &parsed.file
     };
 
     let shield = Shield::new(&password, original_name);
 
-    match decrypt_file(&shield, &file, &output) {
+    match decrypt_file(&shield, &parsed.file, &output) {
         Ok(()) => {
-            println!("Decrypted: {file} -> {output}");
+            println!("Decrypted: {} -> {output}", parsed.file);
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -189,12 +205,22 @@ fn cmd_decrypt(args: &[String]) -> ExitCode {
 }
 
 fn cmd_check(args: &[String]) -> ExitCode {
-    if args.is_empty() {
-        eprintln!("Usage: shield check <password>");
-        return ExitCode::FAILURE;
-    }
-
-    let password = &args[0];
+    let password = if args.is_empty() {
+        // Read from stdin to avoid leaking password in process list
+        eprint!("Password to check: ");
+        io::stderr().flush().ok();
+        match io::stdin().lock().lines().next() {
+            Some(Ok(line)) => line,
+            _ => {
+                eprintln!("Error: Failed to read password from stdin");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        eprintln!("Warning: Password visible in process list. Prefer: echo 'pass' | shield check");
+        args[0].clone()
+    };
+    let password = &password;
     let result = check_password(password);
 
     let level_str = match result.level {
@@ -262,10 +288,23 @@ fn cmd_text(args: &[String]) -> ExitCode {
     }
 
     let data = match data {
-        Some(d) => d,
+        Some(d) => {
+            if subcmd == "encrypt" {
+                eprintln!("Warning: Plaintext visible in process list. Prefer: echo 'data' | shield text encrypt -p pass -s svc");
+            }
+            d
+        }
         None => {
-            eprintln!("Error: Data required");
-            return ExitCode::FAILURE;
+            // Read from stdin to avoid leaking plaintext in process list
+            eprint!("Data: ");
+            io::stderr().flush().ok();
+            match io::stdin().lock().lines().next() {
+                Some(Ok(line)) => line,
+                _ => {
+                    eprintln!("Error: Failed to read data from stdin");
+                    return ExitCode::FAILURE;
+                }
+            }
         }
     };
 
@@ -365,7 +404,14 @@ fn cmd_info() -> ExitCode {
 
 // Helper functions
 
-fn parse_file_args(args: &[String]) -> Result<(String, Option<String>, Option<String>), String> {
+struct FileArgs {
+    file: String,
+    output: Option<String>,
+    password: Option<String>,
+    force: bool,
+}
+
+fn parse_file_args(args: &[String]) -> Result<FileArgs, String> {
     if args.is_empty() {
         return Err("File path required".to_string());
     }
@@ -373,6 +419,7 @@ fn parse_file_args(args: &[String]) -> Result<(String, Option<String>, Option<St
     let mut file: Option<String> = None;
     let mut output: Option<String> = None;
     let mut password: Option<String> = None;
+    let mut force = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -384,6 +431,12 @@ fn parse_file_args(args: &[String]) -> Result<(String, Option<String>, Option<St
             "-p" | "--password" => {
                 i += 1;
                 password = args.get(i).cloned();
+                if password.is_some() {
+                    eprintln!("Warning: Password visible in process list. Prefer interactive prompt.");
+                }
+            }
+            "-f" | "--force" => {
+                force = true;
             }
             _ if file.is_none() => {
                 file = Some(args[i].clone());
@@ -394,7 +447,12 @@ fn parse_file_args(args: &[String]) -> Result<(String, Option<String>, Option<St
     }
 
     match file {
-        Some(f) => Ok((f, output, password)),
+        Some(f) => Ok(FileArgs {
+            file: f,
+            output,
+            password,
+            force,
+        }),
         None => Err("File path required".to_string()),
     }
 }

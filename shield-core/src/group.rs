@@ -186,11 +186,6 @@ impl GroupEncryption {
         Ok(old_key)
     }
 
-    /// Get the group key.
-    #[must_use]
-    pub fn group_key(&self) -> &[u8; 32] {
-        &self.group_key
-    }
 }
 
 impl Drop for GroupEncryption {
@@ -227,12 +222,6 @@ pub struct BroadcastEncryption {
 }
 
 impl BroadcastEncryption {
-    /// Get the master key for this broadcast group.
-    #[must_use]
-    pub fn master_key(&self) -> &[u8; 32] {
-        &self.master_key
-    }
-
     /// Create new broadcast encryption.
     pub fn new(master_key: Option<[u8; 32]>, subgroup_size: usize) -> Result<Self> {
         let key = if let Some(k) = master_key {
