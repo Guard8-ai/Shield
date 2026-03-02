@@ -81,7 +81,10 @@ class ShieldTest {
             RatchetSession(rootKey, false).use { bob ->
                 val encrypted = alice.encrypt("test".toByteArray())
                 bob.decrypt(encrypted)
-                // Replayed message fails MAC because chain has advanced
+                // Replay fails: chain advanced → different msgKey → MAC mismatch
+                // AuthenticationFailed is thrown by decryptWithKey before
+                // counter checks are reached (forward secrecy makes replay
+                // detection implicit via key derivation)
                 assertThrows<ShieldException.AuthenticationFailed> {
                     bob.decrypt(encrypted)
                 }

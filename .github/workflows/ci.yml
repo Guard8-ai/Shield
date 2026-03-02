@@ -236,7 +236,7 @@ jobs:
       - name: Run iOS tests
         run: |
           cd ios
-          xcodebuild test -scheme Shield -destination 'platform=iOS Simulator,name=iPhone 16' -skip-testing:ShieldTests/SecureKeychainTests
+          xcodebuild test -scheme Shield -destination 'platform=iOS Simulator,name=iPhone 16'
 
   # Cross-language Interoperability
   interop:
