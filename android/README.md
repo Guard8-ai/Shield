@@ -102,11 +102,11 @@ Shield.withKey(key: ByteArray): Shield
 
 // Encrypt/decrypt
 fun encrypt(plaintext: ByteArray): ByteArray
-fun decrypt(ciphertext: ByteArray): ByteArray?
+fun decrypt(ciphertext: ByteArray): ByteArray  // throws ShieldException.AuthenticationFailed
 
 // Static convenience methods
 Shield.quickEncrypt(key: ByteArray, plaintext: ByteArray): ByteArray
-Shield.quickDecrypt(key: ByteArray, ciphertext: ByteArray): ByteArray?
+Shield.quickDecrypt(key: ByteArray, ciphertext: ByteArray): ByteArray
 ```
 
 ### SecureKeyStore

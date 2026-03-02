@@ -1,5 +1,7 @@
 package ai.guard8.shield
 
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.security.SecureRandom
 import javax.crypto.Mac
 import javax.crypto.SecretKeyFactory
@@ -23,11 +25,40 @@ import java.security.MessageDigest
  */
 class Shield private constructor(private val key: ByteArray) {
 
+    private val encKey: ByteArray  // encryption subkey
+    private val macKey: ByteArray  // authentication subkey
+
+    init {
+        val subkeys = deriveSubkeys(key)
+        encKey = subkeys[0]
+        macKey = subkeys[1]
+    }
+
     companion object {
         private const val PBKDF2_ITERATIONS = 100_000
         private const val NONCE_SIZE = 16
         private const val MAC_SIZE = 16
         private const val KEY_SIZE = 32
+
+        // V2 constants
+        private const val V2_HEADER_SIZE = 17  // counter(8) + timestamp(8) + pad_len(1)
+        private const val MIN_PADDING = 32
+        private const val MAX_PADDING = 128
+        private const val MIN_TIMESTAMP_MS = 1577836800000L  // 2020-01-01
+        private const val MAX_TIMESTAMP_MS = 4102444800000L  // 2100-01-01
+        private const val DEFAULT_MAX_AGE_MS = 60000L
+
+        /**
+         * Derive separated encryption and MAC subkeys from master key.
+         */
+        private fun deriveSubkeys(masterKey: ByteArray): Array<ByteArray> {
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(masterKey, "HmacSHA256"))
+            val encKey = mac.doFinal("shield-encrypt".toByteArray(Charsets.UTF_8))
+            mac.init(SecretKeySpec(masterKey, "HmacSHA256"))
+            val macKey = mac.doFinal("shield-authenticate".toByteArray(Charsets.UTF_8))
+            return arrayOf(encKey, macKey)
+        }
 
         /**
          * Create Shield instance from password and service name.
@@ -72,115 +103,179 @@ class Shield private constructor(private val key: ByteArray) {
          */
         @JvmStatic
         fun quickEncrypt(key: ByteArray, plaintext: ByteArray): ByteArray {
-            return withKey(key).encrypt(plaintext)
+            require(key.size == KEY_SIZE) { "Key must be $KEY_SIZE bytes" }
+            val subkeys = deriveSubkeys(key)
+            return encryptWithSeparatedKeys(subkeys[0], subkeys[1], plaintext)
         }
 
         /**
          * Quick decrypt with pre-shared key.
          */
         @JvmStatic
-        fun quickDecrypt(key: ByteArray, ciphertext: ByteArray): ByteArray? {
-            return withKey(key).decrypt(ciphertext)
+        fun quickDecrypt(key: ByteArray, ciphertext: ByteArray): ByteArray {
+            require(key.size == KEY_SIZE) { "Key must be $KEY_SIZE bytes" }
+            val subkeys = deriveSubkeys(key)
+            return decryptWithSeparatedKeys(subkeys[0], subkeys[1], ciphertext, null)
+        }
+
+        private fun encryptWithSeparatedKeys(
+            encKey: ByteArray, macKey: ByteArray, plaintext: ByteArray
+        ): ByteArray {
+            val random = SecureRandom()
+            val nonce = ByteArray(NONCE_SIZE).also { random.nextBytes(it) }
+
+            // Counter prefix (8 bytes of zeros)
+            val counter = ByteArray(8)
+
+            // Timestamp in milliseconds (little-endian)
+            val timestampMs = System.currentTimeMillis()
+            val timestamp = ByteArray(8)
+            ByteBuffer.wrap(timestamp).order(ByteOrder.LITTLE_ENDIAN).putLong(timestampMs)
+
+            // Random padding: 32-128 bytes (rejection sampling to avoid modulo bias)
+            val padRange = MAX_PADDING - MIN_PADDING + 1  // 97
+            val padLen: Int
+            while (true) {
+                val v = random.nextInt() and 0xFF
+                if (v < padRange * (256 / padRange)) {
+                    padLen = (v % padRange) + MIN_PADDING
+                    break
+                }
+            }
+            val padding = ByteArray(padLen).also { random.nextBytes(it) }
+
+            // Data to encrypt: counter || timestamp || pad_len || padding || plaintext
+            val dataToEncrypt = ByteArray(8 + 8 + 1 + padLen + plaintext.size)
+            var pos = 0
+            System.arraycopy(counter, 0, dataToEncrypt, pos, 8); pos += 8
+            System.arraycopy(timestamp, 0, dataToEncrypt, pos, 8); pos += 8
+            dataToEncrypt[pos] = padLen.toByte(); pos += 1
+            System.arraycopy(padding, 0, dataToEncrypt, pos, padLen); pos += padLen
+            System.arraycopy(plaintext, 0, dataToEncrypt, pos, plaintext.size)
+
+            // Generate keystream and XOR (using encryption subkey)
+            val keystream = generateKeystream(encKey, nonce, dataToEncrypt.size)
+            val ciphertext = ByteArray(dataToEncrypt.size)
+            for (i in dataToEncrypt.indices) {
+                ciphertext[i] = (dataToEncrypt[i].toInt() xor keystream[i].toInt()).toByte()
+            }
+
+            // Compute HMAC over nonce || ciphertext (using MAC subkey)
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(macKey, "HmacSHA256"))
+            mac.update(nonce)
+            mac.update(ciphertext)
+            val tag = mac.doFinal().copyOf(MAC_SIZE)
+
+            return nonce + ciphertext + tag
+        }
+
+        private fun decryptWithSeparatedKeys(
+            encKey: ByteArray, macKey: ByteArray, encrypted: ByteArray, maxAgeMs: Long?
+        ): ByteArray {
+            val minSize = NONCE_SIZE + 8 + MAC_SIZE
+            require(encrypted.size >= minSize) { "Ciphertext too short" }
+
+            val nonce = encrypted.copyOfRange(0, NONCE_SIZE)
+            val ciphertext = encrypted.copyOfRange(NONCE_SIZE, encrypted.size - MAC_SIZE)
+            val receivedMac = encrypted.copyOfRange(encrypted.size - MAC_SIZE, encrypted.size)
+
+            // Verify MAC (using MAC subkey, constant-time)
+            val hmac = Mac.getInstance("HmacSHA256")
+            hmac.init(SecretKeySpec(macKey, "HmacSHA256"))
+            hmac.update(nonce)
+            hmac.update(ciphertext)
+            val expectedMac = hmac.doFinal().copyOf(MAC_SIZE)
+
+            if (!ShieldUtils.constantTimeEquals(receivedMac, expectedMac)) {
+                throw ShieldException.AuthenticationFailed()
+            }
+
+            // Decrypt (using encryption subkey)
+            val keystream = generateKeystream(encKey, nonce, ciphertext.size)
+            val decrypted = ByteArray(ciphertext.size)
+            for (i in ciphertext.indices) {
+                decrypted[i] = (ciphertext[i].toInt() xor keystream[i].toInt()).toByte()
+            }
+
+            // Auto-detect v2 by timestamp range
+            if (decrypted.size >= V2_HEADER_SIZE) {
+                val timestampBytes = decrypted.copyOfRange(8, 16)
+                val timestampMs = ByteBuffer.wrap(timestampBytes)
+                    .order(ByteOrder.LITTLE_ENDIAN).getLong()
+
+                if (timestampMs in MIN_TIMESTAMP_MS..MAX_TIMESTAMP_MS) {
+                    // v2 format detected
+                    val padLen = decrypted[16].toInt() and 0xFF
+
+                    if (padLen < MIN_PADDING || padLen > MAX_PADDING) {
+                        throw ShieldException.AuthenticationFailed()
+                    }
+
+                    val dataStart = V2_HEADER_SIZE + padLen
+                    if (decrypted.size < dataStart) {
+                        throw ShieldException.CiphertextTooShort()
+                    }
+
+                    if (maxAgeMs != null) {
+                        val nowMs = System.currentTimeMillis()
+                        val age = nowMs - timestampMs
+                        if (timestampMs > nowMs + 5000 || age > maxAgeMs) {
+                            throw ShieldException.AuthenticationFailed()
+                        }
+                    }
+
+                    return decrypted.copyOfRange(dataStart, decrypted.size)
+                }
+            }
+
+            // v1 format: skip counter (8 bytes)
+            return decrypted.copyOfRange(8, decrypted.size)
+        }
+
+        private fun generateKeystream(key: ByteArray, nonce: ByteArray, length: Int): ByteArray {
+            val numBlocks = (length + 31) / 32
+            val keystream = ByteArray(numBlocks * 32)
+            val md = MessageDigest.getInstance("SHA-256")
+
+            for (i in 0 until numBlocks) {
+                md.reset()
+                md.update(key)
+                md.update(nonce)
+                md.update(byteArrayOf(
+                    (i and 0xFF).toByte(),
+                    ((i shr 8) and 0xFF).toByte(),
+                    ((i shr 16) and 0xFF).toByte(),
+                    ((i shr 24) and 0xFF).toByte()
+                ))
+                val block = md.digest()
+                System.arraycopy(block, 0, keystream, i * 32, 32)
+            }
+
+            return keystream.copyOf(length)
         }
     }
 
-    private var counter: Long = 0
-
     /**
-     * Encrypt data.
+     * Encrypt data (v2 format).
      *
      * @param plaintext Data to encrypt
      * @return Ciphertext: nonce(16) || encrypted_data || mac(16)
      */
     fun encrypt(plaintext: ByteArray): ByteArray {
-        val nonce = ByteArray(NONCE_SIZE).also { SecureRandom().nextBytes(it) }
-        val counterBytes = ByteArray(8)
-        for (i in 0..7) counterBytes[i] = (counter shr (i * 8)).toByte()
-        counter++
-
-        // Data to encrypt: counter || plaintext
-        val data = counterBytes + plaintext
-
-        // Generate keystream and XOR
-        val keystream = generateKeystream(key, nonce, data.size)
-        val ciphertext = ByteArray(data.size)
-        for (i in data.indices) {
-            ciphertext[i] = (data[i].toInt() xor keystream[i].toInt()).toByte()
-        }
-
-        // HMAC authenticate
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(key, "HmacSHA256"))
-        mac.update(nonce)
-        mac.update(ciphertext)
-        val tag = mac.doFinal().copyOf(MAC_SIZE)
-
-        return nonce + ciphertext + tag
+        return encryptWithSeparatedKeys(encKey, macKey, plaintext)
     }
 
     /**
-     * Decrypt and verify data.
+     * Decrypt and verify data (auto-detects v1/v2).
      *
      * @param encrypted Ciphertext from encrypt()
-     * @return Plaintext bytes, or null if authentication fails
+     * @return Plaintext bytes
+     * @throws ShieldException.AuthenticationFailed if MAC verification fails
+     * @throws ShieldException.CiphertextTooShort if data is too small
      */
-    fun decrypt(encrypted: ByteArray): ByteArray? {
-        val minSize = NONCE_SIZE + 8 + MAC_SIZE
-        if (encrypted.size < minSize) return null
-
-        val nonce = encrypted.copyOfRange(0, NONCE_SIZE)
-        val ciphertext = encrypted.copyOfRange(NONCE_SIZE, encrypted.size - MAC_SIZE)
-        val mac = encrypted.copyOfRange(encrypted.size - MAC_SIZE, encrypted.size)
-
-        // Verify MAC first (constant-time)
-        val hmac = Mac.getInstance("HmacSHA256")
-        hmac.init(SecretKeySpec(key, "HmacSHA256"))
-        hmac.update(nonce)
-        hmac.update(ciphertext)
-        val expectedMac = hmac.doFinal().copyOf(MAC_SIZE)
-
-        if (!constantTimeEquals(mac, expectedMac)) return null
-
-        // Decrypt
-        val keystream = generateKeystream(key, nonce, ciphertext.size)
-        val decrypted = ByteArray(ciphertext.size)
-        for (i in ciphertext.indices) {
-            decrypted[i] = (ciphertext[i].toInt() xor keystream[i].toInt()).toByte()
-        }
-
-        // Skip counter prefix (8 bytes)
-        return decrypted.copyOfRange(8, decrypted.size)
-    }
-
-    private fun generateKeystream(key: ByteArray, nonce: ByteArray, length: Int): ByteArray {
-        val numBlocks = (length + 31) / 32
-        val keystream = ByteArray(numBlocks * 32)
-        val md = MessageDigest.getInstance("SHA-256")
-
-        for (i in 0 until numBlocks) {
-            md.reset()
-            md.update(key)
-            md.update(nonce)
-            md.update(byteArrayOf(
-                (i and 0xFF).toByte(),
-                ((i shr 8) and 0xFF).toByte(),
-                ((i shr 16) and 0xFF).toByte(),
-                ((i shr 24) and 0xFF).toByte()
-            ))
-            val block = md.digest()
-            System.arraycopy(block, 0, keystream, i * 32, 32)
-        }
-
-        return keystream.copyOf(length)
-    }
-
-    private fun constantTimeEquals(a: ByteArray, b: ByteArray): Boolean {
-        if (a.size != b.size) return false
-        var result = 0
-        for (i in a.indices) {
-            result = result or (a[i].toInt() xor b[i].toInt())
-        }
-        return result == 0
+    fun decrypt(encrypted: ByteArray): ByteArray {
+        return decryptWithSeparatedKeys(encKey, macKey, encrypted, DEFAULT_MAX_AGE_MS)
     }
 }
 

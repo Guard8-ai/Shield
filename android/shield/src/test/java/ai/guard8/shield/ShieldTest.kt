@@ -18,7 +18,6 @@ class ShieldTest {
         val encrypted = shield.encrypt(plaintext)
         val decrypted = shield.decrypt(encrypted)
 
-        assertNotNull(decrypted)
         assertArrayEquals(plaintext, decrypted)
     }
 
@@ -30,7 +29,6 @@ class ShieldTest {
         val encrypted = shield.encrypt(plaintext)
         val decrypted = shield.decrypt(encrypted)
 
-        assertNotNull(decrypted)
         assertArrayEquals(plaintext, decrypted)
     }
 
@@ -42,7 +40,6 @@ class ShieldTest {
         val encrypted = shield.encrypt(plaintext)
         val decrypted = shield.decrypt(encrypted)
 
-        assertNotNull(decrypted)
         assertArrayEquals(plaintext, decrypted)
     }
 
@@ -53,9 +50,10 @@ class ShieldTest {
         val plaintext = "Secret message".toByteArray()
 
         val encrypted = shield1.encrypt(plaintext)
-        val decrypted = shield2.decrypt(encrypted)
-
-        assertNull("Decryption with wrong password should fail", decrypted)
+        assertThrows("Decryption with wrong password should throw",
+            ShieldException.AuthenticationFailed::class.java) {
+            shield2.decrypt(encrypted)
+        }
     }
 
     @Test
@@ -65,9 +63,10 @@ class ShieldTest {
         val plaintext = "Secret message".toByteArray()
 
         val encrypted = shield1.encrypt(plaintext)
-        val decrypted = shield2.decrypt(encrypted)
-
-        assertNull("Decryption with wrong service should fail", decrypted)
+        assertThrows("Decryption with wrong service should throw",
+            ShieldException.AuthenticationFailed::class.java) {
+            shield2.decrypt(encrypted)
+        }
     }
 
     @Test
@@ -82,8 +81,10 @@ class ShieldTest {
             encrypted[20] = (encrypted[20].toInt() xor 0xFF).toByte()
         }
 
-        val decrypted = shield.decrypt(encrypted)
-        assertNull("Tampered data should fail MAC verification", decrypted)
+        assertThrows("Tampered data should throw AuthenticationFailed",
+            ShieldException.AuthenticationFailed::class.java) {
+            shield.decrypt(encrypted)
+        }
     }
 
     @Test
@@ -94,8 +95,10 @@ class ShieldTest {
         val encrypted = shield.encrypt(plaintext)
         val truncated = encrypted.copyOf(encrypted.size - 1)
 
-        val decrypted = shield.decrypt(truncated)
-        assertNull("Truncated data should fail", decrypted)
+        // Truncated data should fail MAC verification
+        assertThrows(ShieldException.AuthenticationFailed::class.java) {
+            shield.decrypt(truncated)
+        }
     }
 
     // MARK: - Quick Encrypt/Decrypt Tests
@@ -108,7 +111,6 @@ class ShieldTest {
         val encrypted = Shield.quickEncrypt(key, plaintext)
         val decrypted = Shield.quickDecrypt(key, encrypted)
 
-        assertNotNull(decrypted)
         assertArrayEquals(plaintext, decrypted)
     }
 
@@ -136,8 +138,6 @@ class ShieldTest {
         val decrypted1 = shield2.decrypt(encrypted1)
         val decrypted2 = shield1.decrypt(encrypted2)
 
-        assertNotNull(decrypted1)
-        assertNotNull(decrypted2)
         assertArrayEquals(plaintext, decrypted1)
         assertArrayEquals(plaintext, decrypted2)
     }
@@ -150,7 +150,6 @@ class ShieldTest {
         val encrypted = shield.encrypt(plaintext)
         val decrypted = shield.decrypt(encrypted)
 
-        assertNotNull(decrypted)
         assertArrayEquals(plaintext, decrypted)
     }
 
@@ -166,7 +165,6 @@ class ShieldTest {
         val encrypted = shield.encrypt(plaintext)
         val decrypted = shield.decrypt(encrypted)
 
-        assertNotNull(decrypted)
         assertArrayEquals(plaintext, decrypted)
     }
 
@@ -188,8 +186,6 @@ class ShieldTest {
 
     @Test
     fun testKnownVector() {
-        // This test ensures the implementation produces compatible output
-        // with other Shield implementations (Python, JS, Go, etc.)
         val shield = Shield.create("test", "test")
         val plaintext = "hello".toByteArray()
 
@@ -200,8 +196,6 @@ class ShieldTest {
 
         // Verify decryption works
         val decrypted = shield.decrypt(encrypted)
-        assertNotNull(decrypted)
         assertArrayEquals(plaintext, decrypted)
     }
-
 }
