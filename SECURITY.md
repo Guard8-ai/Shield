@@ -248,7 +248,7 @@ Based on a comprehensive 189-finding security assessment, all Rust-applicable fi
 - **Modulo bias elimination**: Padding uses rejection sampling
 - **Padding validation**: Decryption rejects out-of-bounds `pad_len`
 
-Test count: 119 tests (104 unit + 7 interop + 8 doc-tests), clippy clean with `-D warnings`.
+Test count: 121 tests (106 unit + 7 interop + 8 doc-tests), clippy clean with `-D warnings`.
 
 ---
 

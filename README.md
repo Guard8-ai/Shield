@@ -107,7 +107,7 @@ go get github.com/Dikestra-ai/shield
 import "github.com/Dikestra-ai/shield/shield"
 
 // Basic encryption
-s := shield.New("password", "myapp.com")
+s := shield.New("password", "myapp.com", nil)
 encrypted, _ := s.Encrypt([]byte("Hello, World!"))
 decrypted, _ := s.Decrypt(encrypted)
 
@@ -264,7 +264,7 @@ open("data.enc", "wb").write(encrypted)
 Decrypt in Go:
 ```go
 encrypted, _ := os.ReadFile("data.enc")
-decrypted, _ := shield.New("pw", "app").Decrypt(encrypted)
+decrypted, _ := shield.New("pw", "app", nil).Decrypt(encrypted)
 // decrypted = "secret"
 ```
 
@@ -356,19 +356,19 @@ For comparison: AES-256-GCM achieves ~3.4 GB/s with hardware acceleration. Shiel
 ## Tests
 
 ```bash
-# Rust core (119 tests: 104 unit + 7 interop + 8 doc-tests)
+# Rust core (121 tests: 106 unit + 7 interop + 8 doc-tests)
 cd shield-core && cargo test
 
-# Python (153 tests)
+# Python (161 tests)
 cd python && python -m pytest
 
-# JavaScript (81 tests)
+# JavaScript (89 tests)
 cd javascript && npm test
 
-# Go (31 tests)
+# Go (39 tests)
 cd go && go test ./...
 
-# C (16 tests)
+# C (21 tests)
 cd c && make test
 
 # Java (19 tests)
@@ -378,7 +378,7 @@ cd java && gradle test
 cd wasm && cargo test
 ```
 
-**Total: 400+ tests across all implementations**
+**Total: 460+ tests across all implementations**
 
 ---
 

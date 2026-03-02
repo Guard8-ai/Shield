@@ -24,14 +24,14 @@ For WebAssembly:
 
 ```toml
 [dependencies]
-shield-core = { version = "1.1", features = ["wasm"] }
+shield-core = { version = "2.1", features = ["wasm"] }
 ```
 
 For Confidential Computing (TEE attestation):
 
 ```toml
 [dependencies]
-shield-core = { version = "1.1", features = ["confidential"] }
+shield-core = { version = "2.1", features = ["confidential"] }
 ```
 
 ## Quick Start
@@ -264,7 +264,7 @@ Comprehensive hardening based on 189-finding security assessment:
 - HMAC-SHA256 in all 13 internal modules (ratchet, rotation, group, identity, exchange, signatures)
 - Counter overflow guards in all 8 keystream generators
 - Timing-safe authentication preventing user enumeration
-- 119 tests (104 unit + 7 interop + 8 doc-tests), clippy clean with `-D warnings`
+- 121 tests (106 unit + 7 interop + 8 doc-tests), clippy clean with `-D warnings`
 
 ## Safety
 
@@ -275,7 +275,7 @@ This crate uses `#![forbid(unsafe_code)]` and relies on audited cryptographic li
 
 ## License
 
-CC0-1.0 (Public Domain) - Use freely, no attribution required.
+MIT License - Use freely.
 
 ## See Also
 

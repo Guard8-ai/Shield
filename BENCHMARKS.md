@@ -139,7 +139,7 @@ let encrypted: Vec<_> = messages.iter()
 | Maximum security | Use Shield (EXPTIME guarantee) |
 | High throughput + security | Use AES-GCM (hardware accelerated) |
 | No hardware AES + security | Use ChaCha20-Poly1305 |
-| Cross-language interop | Use Shield (10 identical implementations) |
+| Cross-language interop | Use Shield (13 identical implementations) |
 
 Shield's ~150-200 MB/s is sufficient for:
 - API request/response encryption

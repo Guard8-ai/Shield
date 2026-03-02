@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Shield::master_key()` restricted to `pub(crate)` behind feature gates
 
 ### Changed
-- Rust test count increased from 97 to 119 (104 unit + 7 interop + 8 doc-tests)
+- Rust test count increased from 97 to 121 (106 unit + 7 interop + 8 doc-tests)
 - Desktop fingerprinting implementation for JS/Go/Java/C (v2.1.0)
 - **v2.1 hardening ported to all SDKs**: C#, Swift, Kotlin, Android, and iOS now include HMAC domain separation (`shield-encrypt` / `shield-authenticate` subkeys), v2 padding format with rejection sampling, timestamp-based replay protection, and v1/v2 auto-detection on decrypt
 - **API breaking changes (5 SDKs)**:

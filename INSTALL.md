@@ -268,7 +268,7 @@ shield-core = "2.1"
 **From source:**
 ```bash
 git clone https://github.com/Dikestra-ai/Shield.git
-cd Shield/wasm  # Rust source is in wasm/
+cd Shield/shield-core  # Rust source
 cargo build
 cargo test
 ```

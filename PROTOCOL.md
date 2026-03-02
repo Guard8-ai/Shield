@@ -387,7 +387,7 @@ code = (hmac[offset:offset+4] & 0x7FFFFFFF) % 1000000
 
 | Version | Release Date | Format Changes | Breaking Changes |
 |---------|--------------|----------------|------------------|
-| 1.0 | 2025-01-11 | Initial specification | N/A |
+| 1.0 | 2026-01-11 | Initial specification | N/A |
 | 2.0 | 2026-02-20 | Replay protection (timestamp) + length obfuscation (random padding) | V1 implementations cannot decrypt v2 messages (by design) |
 | 2.1 | 2026-03-01 | Key separation (enc_key/mac_key via HMAC domain labels), HMAC-SHA256 in all internal modules, counter overflow guards, sync channel timeout | Wire format unchanged; internal crypto hardening only |
 
