@@ -27,7 +27,6 @@ class RatchetSessionTest {
         val encrypted = alice.encrypt(plaintext)
         val decrypted = bob.decrypt(encrypted)
 
-        assertNotNull("Decryption should succeed", decrypted)
         assertArrayEquals("Decrypted should match original", plaintext, decrypted)
     }
 
@@ -43,8 +42,7 @@ class RatchetSessionTest {
             val encrypted = alice.encrypt(msg.toByteArray())
             val decrypted = bob.decrypt(encrypted)
 
-            assertNotNull("Decryption should succeed for: $msg", decrypted)
-            assertEquals("Message should round-trip", msg, String(decrypted!!))
+            assertEquals("Message should round-trip", msg, String(decrypted))
         }
     }
 
@@ -120,9 +118,10 @@ class RatchetSessionTest {
         val bob = RatchetSession(key2, isInitiator = false)
 
         val encrypted = alice.encrypt("secret".toByteArray())
-        val decrypted = bob.decrypt(encrypted)
-
-        assertNull("Decryption with wrong key should fail", decrypted)
+        assertThrows("Decryption with wrong key should throw AuthenticationFailed",
+            ShieldException.AuthenticationFailed::class.java) {
+            bob.decrypt(encrypted)
+        }
     }
 
     @Test
@@ -137,8 +136,10 @@ class RatchetSessionTest {
         val tampered = encrypted.copyOf()
         tampered[20] = (tampered[20].toInt() xor 0xFF).toByte()
 
-        val decrypted = bob.decrypt(tampered)
-        assertNull("Tampered ciphertext should fail to decrypt", decrypted)
+        assertThrows("Tampered ciphertext should throw AuthenticationFailed",
+            ShieldException.AuthenticationFailed::class.java) {
+            bob.decrypt(tampered)
+        }
     }
 
     @Test
@@ -151,18 +152,17 @@ class RatchetSessionTest {
 
         // First decrypt should succeed
         val first = bob.decrypt(encrypted)
-        assertNotNull("First decrypt should succeed", first)
+        assertArrayEquals("First decrypt should succeed", "message".toByteArray(), first)
 
-        // Replaying same message should fail (counter mismatch after ratchet)
-        // Note: This is a new session so we need fresh encrypted message
-        val encrypted2 = alice.encrypt("message2".toByteArray())
-        // But if we try the first message again, counter won't match
-        // Actually, in this implementation, each decrypt advances the chain
-        // so replaying encrypted1 won't work even on a fresh session
+        // Replay fails: chain advanced → different msgKey → MAC mismatch
+        assertThrows("Replayed message should throw AuthenticationFailed",
+            ShieldException.AuthenticationFailed::class.java) {
+            bob.decrypt(encrypted)
+        }
     }
 
     @Test
-    fun testOutOfOrderMessagesFailRatchet() {
+    fun testOutOfOrderMessagesFail() {
         val rootKey = randomKey()
         val alice = RatchetSession(rootKey, isInitiator = true)
         val bob = RatchetSession(rootKey, isInitiator = false)
@@ -172,9 +172,39 @@ class RatchetSessionTest {
         val msg2 = alice.encrypt("second".toByteArray())
 
         // Bob tries to decrypt out of order (skipping msg1)
-        // This should fail because the chain has to advance in order
-        val result = bob.decrypt(msg2)
-        assertNull("Out-of-order message should fail", result)
+        // msg2 was encrypted with chain key at position 2, but Bob's chain is at position 1
+        // → different derived key → MAC mismatch → AuthenticationFailed
+        assertThrows("Out-of-order message should throw AuthenticationFailed",
+            ShieldException.AuthenticationFailed::class.java) {
+            bob.decrypt(msg2)
+        }
+    }
+
+    @Test
+    fun testTamperedDoesNotAdvanceChain() {
+        val rootKey = randomKey()
+        val alice = RatchetSession(rootKey, isInitiator = true)
+        val bob = RatchetSession(rootKey, isInitiator = false)
+
+        val msg1 = alice.encrypt("first".toByteArray())
+        val msg2 = alice.encrypt("second".toByteArray())
+
+        // Tamper with msg1
+        val tampered = msg1.copyOf()
+        tampered[20] = (tampered[20].toInt() xor 0xFF).toByte()
+
+        // Failed decrypt should NOT advance chain
+        assertThrows(ShieldException.AuthenticationFailed::class.java) {
+            bob.decrypt(tampered)
+        }
+
+        // Original msg1 should still work (chain not advanced)
+        val decrypted1 = bob.decrypt(msg1)
+        assertArrayEquals("first".toByteArray(), decrypted1)
+
+        // msg2 should also work (chain now at position 2)
+        val decrypted2 = bob.decrypt(msg2)
+        assertArrayEquals("second".toByteArray(), decrypted2)
     }
 
     // MARK: - Edge Cases
@@ -189,7 +219,6 @@ class RatchetSessionTest {
         val encrypted = alice.encrypt(empty)
         val decrypted = bob.decrypt(encrypted)
 
-        assertNotNull(decrypted)
         assertArrayEquals("Empty message should round-trip", empty, decrypted)
     }
 
@@ -203,7 +232,6 @@ class RatchetSessionTest {
         val encrypted = alice.encrypt(large)
         val decrypted = bob.decrypt(encrypted)
 
-        assertNotNull(decrypted)
         assertArrayEquals("Large message should round-trip", large, decrypted)
     }
 
@@ -212,10 +240,11 @@ class RatchetSessionTest {
         val rootKey = randomKey()
         val bob = RatchetSession(rootKey, isInitiator = false)
 
-        val tooShort = ByteArray(30)  // Less than minimum size
-        val result = bob.decrypt(tooShort)
-
-        assertNull("Too short ciphertext should fail", result)
+        val tooShort = ByteArray(30)  // Less than minimum size (nonce + counter + mac)
+        assertThrows("Too short ciphertext should throw CiphertextTooShort",
+            ShieldException.CiphertextTooShort::class.java) {
+            bob.decrypt(tooShort)
+        }
     }
 
     @Test
@@ -229,7 +258,6 @@ class RatchetSessionTest {
         val encrypted = alice.encrypt(binary)
         val decrypted = bob.decrypt(encrypted)
 
-        assertNotNull(decrypted)
         assertArrayEquals("Binary data should round-trip", binary, decrypted)
     }
 
@@ -239,15 +267,17 @@ class RatchetSessionTest {
     fun testInitiatorRoleMatters() {
         val rootKey = randomKey()
 
-        // Both as initiator
+        // Both as initiator — send/recv chains are swapped
         val alice1 = RatchetSession(rootKey, isInitiator = true)
         val alice2 = RatchetSession(rootKey, isInitiator = true)
 
         val encrypted = alice1.encrypt("test".toByteArray())
-        val decrypted = alice2.decrypt(encrypted)
-
-        // Should fail because both have same role (same send/recv chains)
-        assertNull("Same role sessions should not communicate", decrypted)
+        // Both have same role → alice1's send chain == alice2's send chain
+        // → alice2's recv chain derives a different key → MAC fails
+        assertThrows("Same role sessions should not communicate",
+            ShieldException.AuthenticationFailed::class.java) {
+            alice2.decrypt(encrypted)
+        }
     }
 
     @Test
@@ -259,9 +289,9 @@ class RatchetSessionTest {
         val bob2 = RatchetSession(rootKey, isInitiator = false)
 
         val encrypted = bob1.encrypt("test".toByteArray())
-        val decrypted = bob2.decrypt(encrypted)
-
-        // Should fail because both have same role
-        assertNull("Same role sessions should not communicate", decrypted)
+        assertThrows("Same role sessions should not communicate",
+            ShieldException.AuthenticationFailed::class.java) {
+            bob2.decrypt(encrypted)
+        }
     }
 }

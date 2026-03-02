@@ -282,7 +282,6 @@ class ShieldChannel private constructor(
         val encrypted = readFrame(input)
         messagesReceivedCount++
         return session.decrypt(encrypted)
-            ?: throw ShieldException.AuthenticationFailed()
     }
 
     /**

@@ -13,6 +13,17 @@ final class SecureKeychainTests: XCTestCase {
     override func setUp() {
         super.setUp()
         keychain = SecureKeychain(serviceName: "ai.guard8.shield.tests")
+
+        // Keychain requires entitlements that aren't available in all CI environments.
+        // Error -34018 (errSecMissingEntitlement) means the test host lacks Keychain access.
+        do {
+            let probeKey: [UInt8] = [0xDE, 0xAD]
+            let probeAlias = "keychain_probe_\(UUID().uuidString)"
+            try keychain.store(key: probeKey, for: probeAlias)
+            try keychain.delete(for: probeAlias)
+        } catch {
+            try XCTSkipIf(true, "Keychain not available in this environment: \(error)")
+        }
     }
 
     override func tearDown() {

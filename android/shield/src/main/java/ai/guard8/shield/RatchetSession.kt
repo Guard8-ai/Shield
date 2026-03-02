@@ -103,26 +103,22 @@ class RatchetSession(
      *   Messages must be decrypted in order. Out-of-order
      *   messages will fail with ShieldException.
      */
-    fun decrypt(ciphertext: ByteArray): ByteArray? {
-        return try {
-            // Speculatively compute next chain state without committing
-            val (newChain, msgKey) = ratchetChain(recvChain)
+    fun decrypt(ciphertext: ByteArray): ByteArray {
+        // Speculatively compute next chain state without committing
+        val (newChain, msgKey) = ratchetChain(recvChain)
 
-            // Decrypt with message key — if this fails, chain is untouched
-            val (plaintext, counter) = decryptWithKey(msgKey, ciphertext)
+        // Decrypt and verify MAC — if this fails, chain is untouched
+        val (plaintext, counter) = decryptWithKey(msgKey, ciphertext)
 
-            // Verify counter (replay protection) — if this fails, chain is untouched
-            if (counter != _recvCounter) {
-                return null
-            }
-
-            // All checks passed — commit chain advance
-            recvChain = newChain
-            _recvCounter++
-            plaintext
-        } catch (_: Exception) {
-            null
+        // Verify counter (replay protection) — if this fails, chain is untouched
+        if (counter != _recvCounter) {
+            throw ShieldException.OutOfOrder()
         }
+
+        // All checks passed — now commit the chain advance
+        recvChain = newChain
+        _recvCounter++
+        return plaintext
     }
 
     override fun close() {
