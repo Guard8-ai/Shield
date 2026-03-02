@@ -164,7 +164,7 @@ import (
 
 func main() {{
     ciphertext, _ := base64.StdEncoding.DecodeString("{ciphertext_b64}")
-    s := shield.New("{TEST_PASSWORD}", "{TEST_SERVICE}")
+    s := shield.New("{TEST_PASSWORD}", "{TEST_SERVICE}", nil)
     decrypted, err := s.Decrypt(ciphertext)
     if err != nil {{
         fmt.Println("DECRYPT_FAILED")
@@ -210,7 +210,7 @@ import (
 )
 
 func main() {{
-    s := shield.New("{TEST_PASSWORD}", "{TEST_SERVICE}")
+    s := shield.New("{TEST_PASSWORD}", "{TEST_SERVICE}", nil)
     plaintext, _ := base64.StdEncoding.DecodeString("{plaintext_b64}")
     encrypted, err := s.Encrypt(plaintext)
     if err != nil {{
@@ -472,7 +472,7 @@ import (
 )
 
 func main() {{
-    s := shield.New("{TEST_PASSWORD}", "{TEST_SERVICE}")
+    s := shield.New("{TEST_PASSWORD}", "{TEST_SERVICE}", nil)
     fmt.Print(hex.EncodeToString(s.DerivedKey()))
 }}
 '''
