@@ -55,7 +55,7 @@ key theft and unauthorized device usage. Use cases:
 - [ ] Implementation tasks created for all 5 languages (Python, JS, Go, Java, C)
 
 ## Notes
-**Source Code**: /data/git/Guard8.ai/SaaSClient-SideLicensingSystem/src/saas_client.rs
+**Source Code**: /data/git/Dikestra.ai/SaaSClient-SideLicensingSystem/src/saas_client.rs
 
 **Key Functions**:
 - `get_hardware_id()` - combines motherboard + CPU, returns MD5 hash

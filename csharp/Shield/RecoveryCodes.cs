@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 
-namespace Guard8.Shield
+namespace Dikestra.Shield
 {
     /// <summary>
     /// RecoveryCodes - Backup codes for 2FA.

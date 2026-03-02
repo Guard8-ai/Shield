@@ -25,22 +25,22 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Guard8-ai/Shield.git", from: "0.1.0")
+    .package(url: "https://github.com/Dikestra-ai/Shield.git", from: "2.1.0")
 ]
 ```
 
-Or in Xcode: File → Add Packages → `https://github.com/Guard8-ai/Shield`
+Or in Xcode: File → Add Packages → `https://github.com/Dikestra-ai/Shield`
 
 ### CocoaPods
 
 ```ruby
-pod 'Shield', '~> 0.1.0'
+pod 'Shield', '~> 2.1.0'
 ```
 
 ### Carthage
 
 ```
-github "Guard8-ai/Shield" ~> 0.1.0
+github "Dikestra-ai/Shield" ~> 2.1.0
 ```
 
 ## Quick Start
@@ -52,10 +52,9 @@ import Shield
 
 // Password-based encryption
 let shield = Shield(password: "my_password", service: "github.com")
-let encrypted = shield.encrypt(Array("secret data".utf8))
-if let decrypted = shield.decrypt(encrypted) {
-    print(String(bytes: decrypted, encoding: .utf8)!)  // "secret data"
-}
+let encrypted = try shield.encrypt(Array("secret data".utf8))
+let decrypted = try shield.decrypt(encrypted)
+print(String(bytes: decrypted, encoding: .utf8)!)  // "secret data"
 ```
 
 ### Pre-shared Key
@@ -125,12 +124,12 @@ init(password: String, service: String, iterations: UInt32 = 100_000)
 init(key: [UInt8]) throws
 
 // Encrypt/decrypt
-func encrypt(_ plaintext: [UInt8]) -> [UInt8]
-func decrypt(_ encrypted: [UInt8]) -> [UInt8]?
+func encrypt(_ plaintext: [UInt8]) throws -> [UInt8]
+func decrypt(_ encrypted: [UInt8]) throws -> [UInt8]  // throws ShieldError on auth failure
 
 // Static convenience methods
 static func quickEncrypt(key: [UInt8], plaintext: [UInt8]) throws -> [UInt8]
-static func quickDecrypt(key: [UInt8], ciphertext: [UInt8]) throws -> [UInt8]?
+static func quickDecrypt(key: [UInt8], ciphertext: [UInt8]) throws -> [UInt8]
 ```
 
 ### SecureKeychain
@@ -195,15 +194,15 @@ class EncryptionManager: ObservableObject {
         )
     }
 
-    func encrypt(_ text: String) -> Data? {
+    func encrypt(_ text: String) throws -> Data? {
         guard let shield = shield else { return nil }
-        let encrypted = shield.encrypt(Array(text.utf8))
+        let encrypted = try shield.encrypt(Array(text.utf8))
         return Data(encrypted)
     }
 
-    func decrypt(_ data: Data) -> String? {
-        guard let shield = shield,
-              let decrypted = shield.decrypt(Array(data)) else { return nil }
+    func decrypt(_ data: Data) throws -> String? {
+        guard let shield = shield else { return nil }
+        let decrypted = try shield.decrypt(Array(data))
         return String(bytes: decrypted, encoding: .utf8)
     }
 }
@@ -234,9 +233,14 @@ Encrypt on iOS, decrypt on any platform.
 
 ```swift
 do {
-    let shield = try Shield(key: invalidKey)
+    let encrypted = try shield.encrypt(plaintext)
+    let decrypted = try shield.decrypt(encrypted)
+} catch ShieldError.authenticationFailed {
+    // Wrong key or tampered data
 } catch ShieldError.invalidKeySize(let expected, let actual) {
     print("Key must be \(expected) bytes, got \(actual)")
+} catch ShieldError.ciphertextTooShort {
+    // Input too short to be valid ciphertext
 } catch ShieldError.keychainError(let status) {
     print("Keychain error: \(status)")
 }
@@ -250,5 +254,5 @@ MIT License - Use freely.
 
 - [Shield Android](../android) - Android implementation
 - [Shield Python](https://pypi.org/project/shield-crypto/)
-- [Shield npm](https://npmjs.com/package/@guard8/shield)
-- [GitHub Repository](https://github.com/Guard8-ai/Shield)
+- [Shield npm](https://npmjs.com/package/@dikestra/shield)
+- [GitHub Repository](https://github.com/Dikestra-ai/Shield)

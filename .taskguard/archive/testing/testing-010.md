@@ -44,7 +44,7 @@ These are critical security components that need verification.
 - [x] Test concurrent access (14 tests)
 
 ## Files to Create
-- `android/shield/src/test/java/ai/guard8/shield/SecureKeyStoreTest.kt`
+- `android/shield/src/test/java/ai/dikestra/shield/SecureKeyStoreTest.kt`
 - `ios/Tests/ShieldTests/SecureKeychainTests.swift`
 
 ## Acceptance Criteria

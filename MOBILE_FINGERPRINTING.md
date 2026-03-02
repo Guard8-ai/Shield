@@ -43,9 +43,9 @@ enum class FingerprintMode {
 ### Usage
 
 ```kotlin
-import ai.guard8.shield.Shield
-import ai.guard8.shield.DeviceFingerprint
-import ai.guard8.shield.withFingerprint
+import ai.dikestra.shield.Shield
+import ai.dikestra.shield.DeviceFingerprint
+import ai.dikestra.shield.withFingerprint
 
 // Simple usage (recommended: HARDWARE_BACKED)
 val shield = Shield.withFingerprint(

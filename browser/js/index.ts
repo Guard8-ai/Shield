@@ -5,7 +5,7 @@
  *
  * @example
  * ```javascript
- * import { ShieldBrowser } from '@guard8/shield-browser';
+ * import { ShieldBrowser } from '@dikestra/shield-browser';
  *
  * // Initialize (fetches key and installs fetch hook)
  * await ShieldBrowser.init('/api/shield-key');

@@ -6,10 +6,10 @@
 
 **EXPTIME-ready encryption that survives P=NP and quantum computers.**
 
-[![CI](https://github.com/Guard8-ai/Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/Guard8-ai/Shield/actions/workflows/ci.yml)
+[![CI](https://github.com/Dikestra-ai/Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/Dikestra-ai/Shield/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Crates.io](https://img.shields.io/crates/v/shield-core.svg)](https://crates.io/crates/shield-core)
-[![npm](https://img.shields.io/npm/v/@guard8/shield.svg)](https://www.npmjs.com/package/@guard8/shield)
+[![npm](https://img.shields.io/npm/v/@dikestra/shield.svg)](https://www.npmjs.com/package/@dikestra/shield)
 [![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](shield-core/)
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](python/)
 [![JavaScript](https://img.shields.io/badge/JavaScript-ES6+-yellow.svg)](javascript/)
@@ -19,8 +19,8 @@
 
 ```bash
 pip install shield-crypto    # Python
-npm install @guard8/shield   # JavaScript
-go get github.com/Guard8-ai/shield  # Go
+npm install @dikestra/shield   # JavaScript
+go get github.com/Dikestra-ai/shield  # Go
 ```
 
 ## The 30-Second Version
@@ -83,10 +83,10 @@ decrypted = bob.decrypt(encrypted)
 
 ### JavaScript
 ```bash
-npm install @guard8/shield
+npm install @dikestra/shield
 ```
 ```javascript
-const { Shield, TOTP, RatchetSession } = require('@guard8/shield');
+const { Shield, TOTP, RatchetSession } = require('@dikestra/shield');
 
 // Basic encryption
 const s = new Shield('password', 'myapp.com');
@@ -101,10 +101,10 @@ totp.verify(code);             // true
 
 ### Go
 ```bash
-go get github.com/Guard8-ai/shield
+go get github.com/Dikestra-ai/shield
 ```
 ```go
-import "github.com/Guard8-ai/shield/shield"
+import "github.com/Dikestra-ai/shield/shield"
 
 // Basic encryption
 s := shield.New("password", "myapp.com")
@@ -122,16 +122,16 @@ code := totp.Generate(time.Now().Unix())
 | Language | Install | Docs |
 |----------|---------|------|
 | Python | `pip install shield-crypto` | [python/](python/) |
-| JavaScript | `npm install @guard8/shield` | [javascript/](javascript/) |
-| Go | `go get github.com/Guard8-ai/shield` | [go/](go/) |
+| JavaScript | `npm install @dikestra/shield` | [javascript/](javascript/) |
+| Go | `go get github.com/Dikestra-ai/shield` | [go/](go/) |
 | C | `make` in `c/` | [c/](c/) |
-| Java | Gradle: `ai.guard8:shield` | [java/](java/) |
-| C# | NuGet: `Guard8.Shield` | [csharp/](csharp/) |
+| Java | Gradle: `ai.dikestra:shield` | [java/](java/) |
+| C# | NuGet: `Dikestra.Shield` | [csharp/](csharp/) |
 | Swift | Swift Package | [swift/](swift/) |
-| Kotlin | Gradle: `ai.guard8:shield` | [kotlin/](kotlin/) |
+| Kotlin | Gradle: `ai.dikestra:shield` | [kotlin/](kotlin/) |
 | WebAssembly | `wasm-pack build` | [wasm/](wasm/) |
-| **Browser** | `npm install @guard8/shield-browser` | [browser/](browser/) |
-| **Android** | Gradle: `ai.guard8:shield-android` | [android/](android/) |
+| **Browser** | `npm install @dikestra/shield-browser` | [browser/](browser/) |
+| **Android** | Gradle: `ai.dikestra:shield-android` | [android/](android/) |
 | **iOS** | CocoaPods / SPM | [ios/](ios/) |
 
 ---
@@ -253,7 +253,7 @@ shield keygen
 
 ## Interoperability
 
-All 10 implementations produce **byte-identical output**.
+All implementations produce **byte-identical output** across 13 platforms.
 
 Encrypt in Python:
 ```python
@@ -287,6 +287,9 @@ const decrypted = new Shield('pw', 'app').decrypt(encrypted);
 | Nonce | 128 bits random | Unique per encryption |
 | MAC | HMAC-SHA256 (128-bit) | Tamper detection |
 | Stream cipher | SHA256-CTR | Symmetric, EXPTIME-hard |
+| Key separation | HMAC domain labels | Separate enc/mac subkeys |
+| Replay protection | Timestamp validation | 60-second default window |
+| Length obfuscation | Random padding (32-128 bytes) | Hides message size |
 
 ---
 
@@ -317,8 +320,8 @@ Shield/
 ├── android/         # Android SDK (Keystore integration)
 ├── ios/             # iOS SDK (Keychain + Face ID/Touch ID)
 ├── python/          # pip install shield-crypto
-├── javascript/      # npm install @guard8/shield
-├── go/              # go get github.com/Guard8-ai/shield
+├── javascript/      # npm install @dikestra/shield
+├── go/              # go get github.com/Dikestra-ai/shield
 ├── c/               # libshield.a
 ├── java/            # Gradle project
 ├── csharp/          # .NET project
@@ -400,4 +403,4 @@ Use freely. No attribution required (but appreciated).
 
 **Shield** - Because 2^256 is enough for anyone.
 
-*Built by [Guard8.ai](https://guard8.ai)*
+*Built by [Dikestra.ai](https://dikestra.ai)*

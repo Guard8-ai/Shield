@@ -24,7 +24,7 @@ If the answer is "no," simplify until the answer is "yes."
 
 ```bash
 # Clone the repository
-git clone https://github.com/Guard8-ai/Shield.git
+git clone https://github.com/Dikestra-ai/Shield.git
 cd Shield
 
 # Pick your language and run tests
@@ -307,6 +307,6 @@ Violations will result in removal from the project.
 ## Questions?
 
 - Open an issue with the "question" label
-- Email: contribute@guard8.ai
+- Email: admin@gibraltarcloud.dev
 
 Thank you for helping make Shield better!

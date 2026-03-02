@@ -204,7 +204,7 @@ Other language implementations rely on garbage collection with best-effort clean
 If you discover a security vulnerability:
 
 1. **Do NOT** open a public issue
-2. Email: security@guard8.ai
+2. Email: admin@gibraltarcloud.dev
 3. Include:
    - Description of the vulnerability
    - Steps to reproduce
@@ -220,9 +220,16 @@ If you discover a security vulnerability:
 |-----------|--------|
 | Rust core (shield-core) | v2.1 security hardening complete (189-finding assessment) |
 | Core algorithms | Internal review + hardened |
-| Python implementation | Internal review |
-| JavaScript implementation | Internal review |
-| Go implementation | Internal review |
+| Python implementation | v2.1 compliant (domain separation + v2 padding) |
+| JavaScript implementation | v2.1 compliant (domain separation + v2 padding) |
+| Go implementation | v2.1 compliant (domain separation + v2 padding) |
+| Java implementation | v2.1 compliant (domain separation + v2 padding) |
+| C implementation | v2.1 compliant (domain separation + v2 padding) |
+| C# implementation | v2.1 compliant (domain separation + v2 padding) |
+| Swift implementation | v2.1 compliant (domain separation + v2 padding) |
+| Kotlin implementation | v2.1 compliant (domain separation + v2 padding) |
+| Android SDK | v2.1 compliant (domain separation + v2 padding) |
+| iOS SDK | v2.1 compliant (domain separation + v2 padding) |
 | Formal verification | Planned |
 | External audit | Planned |
 
@@ -252,7 +259,7 @@ Test count: 119 tests (104 unit + 7 interop + 8 doc-tests), clippy clean with `-
 | Post-quantum ready | Yes | Partial | No | No |
 | P=NP safe | Yes | Partial | No | No |
 | Zero dependencies | Yes | No | No | No |
-| Cross-language | 10 langs | Many | C only | CLI |
+| Cross-language | 13 platforms | Many | C only | CLI |
 | Forward secrecy | Built-in | External | External | No |
 
 ---

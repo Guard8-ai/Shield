@@ -38,7 +38,7 @@ All 19 Android tests will fail because they call a private constructor.
 - [ ] Build Android SDK to ensure compilation
 
 ## Files to Modify
-- `android/shield/src/test/java/ai/guard8/shield/ShieldTest.kt`
+- `android/shield/src/test/java/ai/dikestra/shield/ShieldTest.kt`
 
 ## Acceptance Criteria
 - [ ] All 19 Android tests pass
@@ -47,7 +47,7 @@ All 19 Android tests will fail because they call a private constructor.
 
 ---
 **Session Handoff**:
-- Changed: `android/shield/src/test/java/ai/guard8/shield/ShieldTest.kt` - 13 constructor calls fixed, 1 test removed
+- Changed: `android/shield/src/test/java/ai/dikestra/shield/ShieldTest.kt` - 13 constructor calls fixed, 1 test removed
 - Causality: Shield class uses factory methods (Shield.create), not public constructors
 - Verify: `cd android && gradle test --no-daemon`
 - Next: Add SecureKeyStore tests (testing-010)

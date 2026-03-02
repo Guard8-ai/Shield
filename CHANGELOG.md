@@ -47,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Rust test count increased from 97 to 119 (104 unit + 7 interop + 8 doc-tests)
 - Desktop fingerprinting implementation for JS/Go/Java/C (v2.1.0)
+- **v2.1 hardening ported to all SDKs**: C#, Swift, Kotlin, Android, and iOS now include HMAC domain separation (`shield-encrypt` / `shield-authenticate` subkeys), v2 padding format with rejection sampling, timestamp-based replay protection, and v1/v2 auto-detection on decrypt
+- **API breaking changes (5 SDKs)**:
+  - **C#**: `Decrypt()` now throws `ShieldException` instead of returning `null`
+  - **Swift**: `encrypt()` and `decrypt()` now `throw` instead of returning optionals
+  - **Kotlin**: `decrypt()` now throws `ShieldException.AuthenticationFailed` instead of returning `null`
+  - **Android**: `decrypt()` now throws `ShieldException.AuthenticationFailed` instead of returning `ByteArray?`
+  - **iOS**: `encrypt()` and `decrypt()` now `throw ShieldError` instead of returning optionals
+- All SDK versions aligned to 2.1.0 (Python, JavaScript, Java, C#, Swift, Kotlin, Android, iOS, Browser)
 
 ## [1.1.0] - 2026-01-17
 
@@ -180,7 +188,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AsyncShieldChannel` - Tokio-based async version for high-performance networking
 - `ChannelConfig` - Configuration for password, service, iterations, timeout
 - `password` module - Password strength checker with entropy calculation
-- Browser SDK (`@guard8/shield-browser`) - Auto-decrypt fetch() responses
+- Browser SDK (`@dikestra/shield-browser`) - Auto-decrypt fetch() responses
 - Python web integrations:
   - `ShieldMiddleware` for FastAPI
   - `ShieldFlask` extension
@@ -216,13 +224,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 10 language implementations:
   - Rust (shield-core)
   - Python (shield-crypto)
-  - JavaScript (@guard8/shield)
-  - Go (github.com/Guard8-ai/shield)
+  - JavaScript (@dikestra/shield)
+  - Go (github.com/Dikestra-ai/shield)
   - C (libshield)
-  - Java (ai.guard8:shield)
-  - C# (Guard8.Shield)
+  - Java (ai.dikestra:shield)
+  - C# (Dikestra.Shield)
   - Swift (Shield package)
-  - Kotlin (ai.guard8:shield)
+  - Kotlin (ai.dikestra:shield)
   - WebAssembly (shield-wasm)
 - Cross-language interoperability (byte-identical output)
 - Comprehensive documentation (README, CHEATSHEET, MIGRATION, SECURITY)
@@ -234,11 +242,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Random 128-bit nonce per encryption
 - EXPTIME security guarantees
 
-[Unreleased]: https://github.com/Guard8-ai/Shield/compare/v2.1.0...HEAD
-[2.1.0]: https://github.com/Guard8-ai/Shield/compare/v1.1.0...v2.1.0
-[1.1.0]: https://github.com/Guard8-ai/Shield/compare/v1.0.2...v1.1.0
-[1.0.2]: https://github.com/Guard8-ai/Shield/compare/v1.0.1...v1.0.2
-[1.0.1]: https://github.com/Guard8-ai/Shield/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/Guard8-ai/Shield/compare/v0.2.0...v1.0.0
-[0.2.0]: https://github.com/Guard8-ai/Shield/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/Guard8-ai/Shield/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Dikestra-ai/Shield/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/Dikestra-ai/Shield/compare/v1.1.0...v2.1.0
+[1.1.0]: https://github.com/Dikestra-ai/Shield/compare/v1.0.2...v1.1.0
+[1.0.2]: https://github.com/Dikestra-ai/Shield/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/Dikestra-ai/Shield/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/Dikestra-ai/Shield/compare/v0.2.0...v1.0.0
+[0.2.0]: https://github.com/Dikestra-ai/Shield/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/Dikestra-ai/Shield/releases/tag/v0.1.0

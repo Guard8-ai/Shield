@@ -257,5 +257,5 @@ CC0-1.0 (Public Domain) - Use freely, no attribution required.
 ## See Also
 
 - [Shield Rust Crate](https://crates.io/crates/shield-core)
-- [Shield npm Package](https://npmjs.com/package/@guard8/shield)
-- [GitHub Repository](https://github.com/Guard8-ai/Shield)
+- [Shield npm Package](https://npmjs.com/package/@dikestra/shield)
+- [GitHub Repository](https://github.com/Dikestra-ai/Shield)

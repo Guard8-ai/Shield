@@ -5,7 +5,7 @@
  *
  * Usage:
  *   const express = require('express');
- *   const { shieldMiddleware, shieldProtected } = require('@guard8/shield/integrations/express');
+ *   const { shieldMiddleware, shieldProtected } = require('@dikestra/shield/integrations/express');
  *
  *   const app = express();
  *

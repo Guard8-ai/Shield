@@ -19,7 +19,7 @@ python -c "from shield import Shield; print('OK')"
 
 **From source:**
 ```bash
-git clone https://github.com/Guard8-ai/Shield.git
+git clone https://github.com/Dikestra-ai/Shield.git
 cd Shield/python
 pip install -e .
 ```
@@ -31,17 +31,17 @@ pip install -e .
 **Requirements:** Node.js 14+
 
 ```bash
-npm install @guard8/shield
+npm install @dikestra/shield
 ```
 
 **Verify installation:**
 ```bash
-node -e "const {Shield} = require('@guard8/shield'); console.log('OK')"
+node -e "const {Shield} = require('@dikestra/shield'); console.log('OK')"
 ```
 
 **From source:**
 ```bash
-git clone https://github.com/Guard8-ai/Shield.git
+git clone https://github.com/Dikestra-ai/Shield.git
 cd Shield/javascript
 npm install
 npm link  # Makes it available globally
@@ -54,22 +54,22 @@ npm link  # Makes it available globally
 **Requirements:** Go 1.19+
 
 ```bash
-go get github.com/Guard8-ai/shield
+go get github.com/Dikestra-ai/shield
 ```
 
 **In your code:**
 ```go
-import "github.com/Guard8-ai/shield/shield"
+import "github.com/Dikestra-ai/shield/shield"
 ```
 
 **Verify installation:**
 ```bash
-go run -e 'package main; import "github.com/Guard8-ai/shield/shield"; func main() { println("OK") }'
+go run -e 'package main; import "github.com/Dikestra-ai/shield/shield"; func main() { println("OK") }'
 ```
 
 **From source:**
 ```bash
-git clone https://github.com/Guard8-ai/Shield.git
+git clone https://github.com/Dikestra-ai/Shield.git
 cd Shield/go
 go test ./...
 ```
@@ -81,7 +81,7 @@ go test ./...
 **Requirements:** GCC or Clang, Make
 
 ```bash
-git clone https://github.com/Guard8-ai/Shield.git
+git clone https://github.com/Dikestra-ai/Shield.git
 cd Shield/c
 make
 ```
@@ -113,13 +113,13 @@ repositories {
 }
 
 dependencies {
-    implementation 'ai.guard8:shield:1.0.0'
+    implementation 'ai.dikestra:shield:2.1.0'
 }
 ```
 
 **From source:**
 ```bash
-git clone https://github.com/Guard8-ai/Shield.git
+git clone https://github.com/Dikestra-ai/Shield.git
 cd Shield/java
 gradle build
 gradle test
@@ -127,7 +127,7 @@ gradle test
 
 **Use in your code:**
 ```java
-import ai.guard8.shield.Shield;
+import ai.dikestra.shield.Shield;
 
 Shield s = Shield.create("password", "service");
 byte[] encrypted = s.encrypt(data);
@@ -141,12 +141,12 @@ byte[] encrypted = s.encrypt(data);
 
 **NuGet:**
 ```bash
-dotnet add package Guard8.Shield
+dotnet add package Dikestra.Shield
 ```
 
 **From source:**
 ```bash
-git clone https://github.com/Guard8-ai/Shield.git
+git clone https://github.com/Dikestra-ai/Shield.git
 cd Shield/csharp
 dotnet build
 dotnet test
@@ -154,7 +154,7 @@ dotnet test
 
 **Use in your code:**
 ```csharp
-using Guard8.Shield;
+using Dikestra.Shield;
 
 var s = Shield.Create("password", "service");
 byte[] encrypted = s.Encrypt(data);
@@ -169,13 +169,13 @@ byte[] encrypted = s.Encrypt(data);
 **Package.swift:**
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Guard8-ai/Shield.git", from: "1.0.0")
+    .package(url: "https://github.com/Dikestra-ai/Shield.git", from: "2.1.0")
 ]
 ```
 
 **From source:**
 ```bash
-git clone https://github.com/Guard8-ai/Shield.git
+git clone https://github.com/Dikestra-ai/Shield.git
 cd Shield/swift
 swift build
 swift test
@@ -198,13 +198,13 @@ let encrypted = try s.encrypt(data)
 **build.gradle.kts:**
 ```kotlin
 dependencies {
-    implementation("ai.guard8:shield:1.0.0")
+    implementation("ai.dikestra:shield:2.1.0")
 }
 ```
 
 **From source:**
 ```bash
-git clone https://github.com/Guard8-ai/Shield.git
+git clone https://github.com/Dikestra-ai/Shield.git
 cd Shield/kotlin
 gradle build
 gradle test
@@ -212,7 +212,7 @@ gradle test
 
 **Use in your code:**
 ```kotlin
-import ai.guard8.shield.Shield
+import ai.dikestra.shield.Shield
 
 Shield.create("password", "service").use { s ->
     val encrypted = s.encrypt(data)
@@ -232,7 +232,7 @@ cargo install wasm-pack
 
 **Build for web:**
 ```bash
-git clone https://github.com/Guard8-ai/Shield.git
+git clone https://github.com/Dikestra-ai/Shield.git
 cd Shield/wasm
 wasm-pack build --target web
 ```
@@ -262,12 +262,12 @@ const encrypted = s.encrypt(new TextEncoder().encode("secret"));
 **Cargo.toml:**
 ```toml
 [dependencies]
-shield-core = "1.0"
+shield-core = "2.1"
 ```
 
 **From source:**
 ```bash
-git clone https://github.com/Guard8-ai/Shield.git
+git clone https://github.com/Dikestra-ai/Shield.git
 cd Shield/wasm  # Rust source is in wasm/
 cargo build
 cargo test
@@ -290,7 +290,7 @@ print(enc.hex())
 
 # JavaScript decrypts
 node -e "
-const {Shield} = require('@guard8/shield');
+const {Shield} = require('@dikestra/shield');
 const fs = require('fs');
 const hex = fs.readFileSync('/tmp/test.hex', 'utf8').trim();
 const enc = Buffer.from(hex, 'hex');
@@ -309,15 +309,15 @@ console.log(s.decrypt(enc).toString());
 pip install --upgrade shield-crypto
 ```
 
-### JavaScript: "Cannot find module '@guard8/shield'"
+### JavaScript: "Cannot find module '@dikestra/shield'"
 ```bash
-npm install @guard8/shield
+npm install @dikestra/shield
 ```
 
 ### Go: "package not found"
 ```bash
 go mod tidy
-go get github.com/Guard8-ai/shield@latest
+go get github.com/Dikestra-ai/shield@latest
 ```
 
 ### C: "undefined reference to shield_*"
@@ -334,5 +334,5 @@ Make sure the dependency is in your build.gradle and you ran `gradle build`.
 ## Getting Help
 
 - [CHEATSHEET.md](CHEATSHEET.md) - Quick reference
-- [GitHub Issues](https://github.com/Guard8-ai/Shield/issues) - Bug reports
+- [GitHub Issues](https://github.com/Dikestra-ai/Shield/issues) - Bug reports
 - [SECURITY.md](SECURITY.md) - Security best practices

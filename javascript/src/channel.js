@@ -7,7 +7,7 @@
  * - Message authentication and replay protection
  *
  * @example
- * const { ShieldChannel, ChannelConfig } = require('@guard8/shield');
+ * const { ShieldChannel, ChannelConfig } = require('@dikestra/shield');
  * const net = require('net');
  *
  * // Both parties share a password

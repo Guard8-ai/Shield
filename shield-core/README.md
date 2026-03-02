@@ -243,7 +243,7 @@ Shield produces byte-identical output across all implementations:
 
 - Python: `pip install shield-crypto`
 - Rust: `cargo add shield-core`
-- JavaScript: `npm install @guard8/shield`
+- JavaScript: `npm install @dikestra/shield`
 
 ## Security Model
 
@@ -280,7 +280,7 @@ CC0-1.0 (Public Domain) - Use freely, no attribution required.
 ## See Also
 
 - [Shield Python Package](https://pypi.org/project/shield-crypto/)
-- [Shield npm Package](https://npmjs.com/package/@guard8/shield)
-- [GitHub Repository](https://github.com/Guard8-ai/Shield)
+- [Shield npm Package](https://npmjs.com/package/@dikestra/shield)
+- [GitHub Repository](https://github.com/Dikestra-ai/Shield)
 - [BENCHMARKS.md](../BENCHMARKS.md) - Performance comparison vs AES-GCM
 - [MIGRATION.md](../MIGRATION.md) - Migration from Fernet, NaCl, etc.

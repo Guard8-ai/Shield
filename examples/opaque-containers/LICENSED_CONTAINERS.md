@@ -1,6 +1,6 @@
 # Licensed Opaque Containers with SaaS Protection
 
-Combine Shield's opaque containers with Guard8.ai's SaaS licensing system for maximum commercial software protection.
+Combine Shield's opaque containers with Dikestra.ai's SaaS licensing system for maximum commercial software protection.
 
 ## Overview
 
@@ -77,7 +77,7 @@ This integration provides **triple-layer protection**:
                      │ 3. License check
                      │
 ┌─────────────────────────────────────────────────────────────┐
-│            Guard8.ai SaaS License Server                    │
+│            Dikestra.ai SaaS License Server                    │
 │  ┌───────────────────────────────────────────────────────┐ │
 │  │ • Hardware ID validation                              │ │
 │  │ • Subscription status                                 │ │
@@ -101,7 +101,7 @@ This integration provides **triple-layer protection**:
 
 2. **SaaS Licensing System** (for license management)
    ```bash
-   git clone https://github.com/Guard8-ai/SaaSClient-SideLicensingSystem.git
+   git clone https://github.com/Dikestra-ai/SaaSClient-SideLicensingSystem.git
    cd SaaSClient-SideLicensingSystem
    ./test/start_test_server.sh  # Start license server
    ```
@@ -775,7 +775,7 @@ Set up alerts for:
 
 1. **Set up license server:**
    ```bash
-   git clone https://github.com/Guard8-ai/SaaSClient-SideLicensingSystem.git
+   git clone https://github.com/Dikestra-ai/SaaSClient-SideLicensingSystem.git
    cd SaaSClient-SideLicensingSystem
    ./test/start_test_server.sh
    ```
@@ -804,4 +804,4 @@ Set up alerts for:
 **Resources:**
 - Shield: `/Shield/examples/opaque-containers/`
 - SaaS Licensing: `/SaaSClient-SideLicensingSystem/`
-- Support: security@guard8.ai
+- Support: admin@gibraltarcloud.dev

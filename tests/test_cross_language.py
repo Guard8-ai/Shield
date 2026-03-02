@@ -159,7 +159,7 @@ package main
 import (
     "encoding/base64"
     "fmt"
-    "github.com/Guard8-ai/shield/shield"
+    "github.com/Dikestra-ai/shield/shield"
 )
 
 func main() {{
@@ -206,7 +206,7 @@ package main
 import (
     "encoding/base64"
     "fmt"
-    "github.com/Guard8-ai/shield/shield"
+    "github.com/Dikestra-ai/shield/shield"
 )
 
 func main() {{
@@ -252,7 +252,7 @@ import (
     "encoding/base64"
     "encoding/hex"
     "fmt"
-    "github.com/Guard8-ai/shield/shield"
+    "github.com/Dikestra-ai/shield/shield"
 )
 
 func main() {{
@@ -299,7 +299,7 @@ import (
     "encoding/base64"
     "encoding/hex"
     "fmt"
-    "github.com/Guard8-ai/shield/shield"
+    "github.com/Dikestra-ai/shield/shield"
 )
 
 func main() {{
@@ -468,7 +468,7 @@ package main
 import (
     "encoding/hex"
     "fmt"
-    "github.com/Guard8-ai/shield/shield"
+    "github.com/Dikestra-ai/shield/shield"
 )
 
 func main() {{

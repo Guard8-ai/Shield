@@ -88,7 +88,7 @@ EXAMPLES:
     shield text encrypt "hello" -p mypass -s myservice
     shield keygen
 
-For more info: https://github.com/Guard8-ai/Shield"#
+For more info: https://github.com/Dikestra-ai/Shield"#
     );
 }
 
@@ -404,7 +404,7 @@ fn cmd_info() -> ExitCode {
     println!("KDF:         PBKDF2-SHA256 (100,000 iterations)");
     println!("Security:    2^256 operations to break");
     println!();
-    println!("Repository:  https://github.com/Guard8-ai/Shield");
+    println!("Repository:  https://github.com/Dikestra-ai/Shield");
     ExitCode::SUCCESS
 }
 

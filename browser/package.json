@@ -1,5 +1,5 @@
 {
-  "name": "@guard8/shield-browser",
+  "name": "@dikestra/shield-browser",
   "version": "2.1.0",
   "description": "Shield Browser SDK - Transparent auto-decryption for web applications",
   "type": "module",
@@ -37,11 +37,11 @@
     "security",
     "auto-decrypt"
   ],
-  "author": "Guard8.ai",
+  "author": "Dikestra.ai",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Guard8-ai/Shield.git",
+    "url": "https://github.com/Dikestra-ai/Shield.git",
     "directory": "browser"
   },
   "devDependencies": {

@@ -1,6 +1,6 @@
 # Shield - EXPTIME-Secure Encryption (Android)
 
-[![Maven Central](https://img.shields.io/maven-central/v/ai.guard8/shield-android.svg)](https://search.maven.org/artifact/ai.guard8/shield-android)
+[![Maven Central](https://img.shields.io/maven-central/v/ai.dikestra/shield-android.svg)](https://search.maven.org/artifact/ai.dikestra/shield-android)
 [![API](https://img.shields.io/badge/API-23%2B-brightgreen.svg)](https://android-arsenal.com/api?level=23)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -20,13 +20,13 @@ Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Bre
 ### Gradle (Kotlin DSL)
 
 ```kotlin
-implementation("ai.guard8:shield-android:0.1.0")
+implementation("ai.dikestra:shield-android:2.1.0")
 ```
 
 ### Gradle (Groovy)
 
 ```groovy
-implementation 'ai.guard8:shield-android:0.1.0'
+implementation 'ai.dikestra:shield-android:2.1.0'
 ```
 
 ## Quick Start
@@ -34,19 +34,19 @@ implementation 'ai.guard8:shield-android:0.1.0'
 ### Basic Encryption
 
 ```kotlin
-import ai.guard8.shield.Shield
+import ai.dikestra.shield.Shield
 
 // Password-based encryption
 val shield = Shield.create("my_password", "github.com")
 val encrypted = shield.encrypt("secret data".toByteArray())
 val decrypted = shield.decrypt(encrypted)
-println(String(decrypted!!))  // "secret data"
+println(String(decrypted))  // "secret data"
 ```
 
 ### Pre-shared Key
 
 ```kotlin
-import ai.guard8.shield.Shield
+import ai.dikestra.shield.Shield
 import java.security.SecureRandom
 
 val key = ByteArray(32).also { SecureRandom().nextBytes(it) }
@@ -58,7 +58,7 @@ val decrypted = Shield.quickDecrypt(key, encrypted)
 ### Secure Key Storage (Android Keystore)
 
 ```kotlin
-import ai.guard8.shield.SecureKeyStore
+import ai.dikestra.shield.SecureKeyStore
 
 val keyStore = SecureKeyStore(context)
 
@@ -75,7 +75,7 @@ val hwKey = keyStore.generateHardwareKey("hw_backed_key")
 ### Create Shield with Stored Key
 
 ```kotlin
-import ai.guard8.shield.SecureKeyStore
+import ai.dikestra.shield.SecureKeyStore
 
 val keyStore = SecureKeyStore(context)
 
@@ -158,7 +158,7 @@ val spec = KeyGenParameterSpec.Builder(alias, purposes)
 Shield Android works seamlessly from Java:
 
 ```java
-import ai.guard8.shield.Shield;
+import ai.dikestra.shield.Shield;
 
 Shield shield = Shield.create("password", "service");
 byte[] encrypted = shield.encrypt("secret".getBytes());
@@ -194,5 +194,5 @@ MIT License - Use freely.
 
 - [Shield iOS](../ios) - iOS/Swift implementation
 - [Shield Python](https://pypi.org/project/shield-crypto/)
-- [Shield npm](https://npmjs.com/package/@guard8/shield)
-- [GitHub Repository](https://github.com/Guard8-ai/Shield)
+- [Shield npm](https://npmjs.com/package/@dikestra/shield)
+- [GitHub Repository](https://github.com/Dikestra-ai/Shield)

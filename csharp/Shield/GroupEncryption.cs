@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 
-namespace Guard8.Shield
+namespace Dikestra.Shield
 {
     /// <summary>
     /// GroupEncryption - Multi-recipient encryption.

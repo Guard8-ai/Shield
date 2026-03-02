@@ -1,6 +1,6 @@
 # Shield - EXPTIME-Secure Encryption (C#/.NET)
 
-[![NuGet](https://img.shields.io/nuget/v/Guard8.Shield.svg)](https://www.nuget.org/packages/Guard8.Shield/)
+[![NuGet](https://img.shields.io/nuget/v/Dikestra.Shield.svg)](https://www.nuget.org/packages/Dikestra.Shield/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Symmetric cryptography with proven exponential-time security.
@@ -18,19 +18,19 @@ Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Bre
 ### NuGet Package Manager
 
 ```bash
-Install-Package Guard8.Shield
+Install-Package Dikestra.Shield
 ```
 
 ### .NET CLI
 
 ```bash
-dotnet add package Guard8.Shield
+dotnet add package Dikestra.Shield
 ```
 
 ### PackageReference
 
 ```xml
-<PackageReference Include="Guard8.Shield" Version="0.1.0" />
+<PackageReference Include="Dikestra.Shield" Version="2.1.0" />
 ```
 
 ## Quick Start
@@ -38,7 +38,7 @@ dotnet add package Guard8.Shield
 ### Basic Encryption
 
 ```csharp
-using Guard8.Shield;
+using Dikestra.Shield;
 
 // Password-based encryption
 var s = new Shield("my_password", "github.com");
@@ -50,7 +50,7 @@ Console.WriteLine(Encoding.UTF8.GetString(decrypted));  // "secret data"
 ### Pre-shared Key
 
 ```csharp
-using Guard8.Shield;
+using Dikestra.Shield;
 using System.Security.Cryptography;
 
 byte[] key = RandomNumberGenerator.GetBytes(32);
@@ -62,7 +62,7 @@ byte[] decrypted = Shield.QuickDecrypt(key, encrypted);
 ### Forward Secrecy (Ratchet)
 
 ```csharp
-using Guard8.Shield;
+using Dikestra.Shield;
 using System.Security.Cryptography;
 
 byte[] rootKey = RandomNumberGenerator.GetBytes(32);
@@ -78,7 +78,7 @@ byte[] decrypted = bob.Decrypt(encrypted);  // "Hello!"
 ### TOTP (2FA)
 
 ```csharp
-using Guard8.Shield;
+using Dikestra.Shield;
 
 // Setup
 byte[] secret = TOTP.GenerateSecret();
@@ -95,7 +95,7 @@ bool isValid = totp.Verify(code);  // true
 ### Digital Signatures
 
 ```csharp
-using Guard8.Shield;
+using Dikestra.Shield;
 using System.Security.Cryptography;
 
 // HMAC-based symmetric signature
@@ -121,7 +121,7 @@ Main encryption class with password-derived keys.
 new Shield(string password, string service)
 new Shield(byte[] key)  // Pre-shared key
 byte[] Encrypt(byte[] plaintext)
-byte[] Decrypt(byte[] ciphertext)  // Returns null on auth failure
+byte[] Decrypt(byte[] ciphertext)  // throws ShieldException on auth failure
 
 // Static methods
 static byte[] QuickEncrypt(byte[] key, byte[] plaintext)
@@ -135,7 +135,7 @@ Forward secrecy with key ratcheting.
 ```csharp
 new RatchetSession(byte[] rootKey, bool isInitiator)
 byte[] Encrypt(byte[] plaintext)
-byte[] Decrypt(byte[] ciphertext)  // Returns null on auth failure
+byte[] Decrypt(byte[] ciphertext)  // throws on auth failure
 ```
 
 ### TOTP
@@ -176,10 +176,11 @@ bool IsUsed { get; }
 try
 {
     byte[] decrypted = shield.Decrypt(ciphertext);
-    if (decrypted == null)
-    {
-        // Authentication failed - wrong key or tampered data
-    }
+    // Success - use decrypted data
+}
+catch (ShieldException ex)
+{
+    // Authentication failed - wrong key or tampered data
 }
 catch (ArgumentException ex)
 {
@@ -218,6 +219,6 @@ MIT License - Use freely.
 ## See Also
 
 - [Shield Python Package](https://pypi.org/project/shield-crypto/)
-- [Shield npm Package](https://npmjs.com/package/@guard8/shield)
+- [Shield npm Package](https://npmjs.com/package/@dikestra/shield)
 - [Shield Rust Crate](https://crates.io/crates/shield-core)
-- [GitHub Repository](https://github.com/Guard8-ai/Shield)
+- [GitHub Repository](https://github.com/Dikestra-ai/Shield)

@@ -1,4 +1,4 @@
-module github.com/Guard8-ai/shield
+module github.com/Dikestra-ai/shield
 
 go 1.24.0
 

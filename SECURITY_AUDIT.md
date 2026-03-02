@@ -124,8 +124,8 @@ Preferred auditors with cryptography expertise:
 ## Contact
 
 For audit coordination:
-- **Email**: security@guard8.ai
-- **PGP Key**: Available at https://guard8.ai/.well-known/pgp-key.txt
+- **Email**: admin@gibraltarcloud.dev
+- **PGP Key**: Available at https://dikestra.ai/.well-known/pgp-key.txt
 
 ## Post-Audit
 

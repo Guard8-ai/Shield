@@ -5,7 +5,7 @@
  * Breaking requires 2^256 operations - no shortcut exists.
  *
  * @example
- * const { Shield, quickEncrypt, quickDecrypt } = require('@guard8/shield');
+ * const { Shield, quickEncrypt, quickDecrypt } = require('@dikestra/shield');
  *
  * // Password-based encryption
  * const s = new Shield('password', 'service.com');

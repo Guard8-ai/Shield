@@ -35,10 +35,10 @@ This security audit examined the Shield encryption library across all 10 languag
 ### CRIT-001: Missing Key Zeroization After Use
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/shield-core/src/shield.rs` (lines 30-35)
-- `/data/git/Guard8.ai/Shield/shield-core/src/ratchet.rs` (lines 20-25)
-- `/data/git/Guard8.ai/Shield/python/shield/core.py` (lines 65-75)
-- `/data/git/Guard8.ai/Shield/javascript/src/shield.js` (lines 49-57)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/shield.rs` (lines 30-35)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/ratchet.rs` (lines 20-25)
+- `/data/git/Dikestra.ai/Shield/python/shield/core.py` (lines 65-75)
+- `/data/git/Dikestra.ai/Shield/javascript/src/shield.js` (lines 49-57)
 - All other language implementations
 
 **Description:**
@@ -94,9 +94,9 @@ impl Drop for Shield {
 ### CRIT-002: Counter Reuse with Same Nonce in Error Paths
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/shield-core/src/shield.rs` (line 85, counter increment)
-- `/data/git/Guard8.ai/Shield/python/shield/core.py` (lines 108-110)
-- `/data/git/Guard8.ai/Shield/javascript/src/shield.js` (lines 98-100)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/shield.rs` (line 85, counter increment)
+- `/data/git/Dikestra.ai/Shield/python/shield/core.py` (lines 108-110)
+- `/data/git/Dikestra.ai/Shield/javascript/src/shield.js` (lines 98-100)
 
 **Description:**
 The Shield implementation increments the internal counter (`self._counter += 1` in Python, `self._counter++` in JavaScript) even when encryption fails. However, the counter is incremented AFTER nonce generation but potentially BEFORE error handling completes. If encryption fails mid-operation, the counter is consumed but no ciphertext produced.
@@ -171,9 +171,9 @@ fn generate_keystream(key: &[u8], nonce: &[u8], msg_counter: u64, length: usize)
 ### CRIT-003: Insufficient Entropy Validation for RNG
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/shield-core/src/shield.rs` (line 93)
-- `/data/git/Guard8.ai/Shield/python/shield/core.py` (line 107)
-- `/data/git/Guard8.ai/Shield/c/src/shield.c` (RNG initialization)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/shield.rs` (line 93)
+- `/data/git/Dikestra.ai/Shield/python/shield/core.py` (line 107)
+- `/data/git/Dikestra.ai/Shield/c/src/shield.c` (RNG initialization)
 
 **Description:**
 The library uses `os.urandom()` (Python), `crypto.randomBytes()` (JavaScript), and `ring::rand::SystemRandom` (Rust) for nonce generation but does not validate:
@@ -243,8 +243,8 @@ fn secure_random_nonce() -> Result<[u8; NONCE_SIZE]> {
 > **Status: ACKNOWLEDGED** — The ratchet counter is not a secret value (it's a monotonically incrementing sequence number), and is only checked AFTER constant-time MAC verification succeeds. The counter comparison is not a timing oracle for secret material. All MAC verifications in the Rust core use `subtle::ConstantTimeEq` as of v2.1.0.
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/shield-core/src/ratchet.rs` (lines 97-103)
-- `/data/git/Guard8.ai/Shield/python/shield/ratchet.py` (lines 111-113)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/ratchet.rs` (lines 97-103)
+- `/data/git/Dikestra.ai/Shield/python/shield/ratchet.py` (lines 111-113)
 
 **Description:**
 The ratchet counter verification uses a simple equality check:
@@ -295,8 +295,8 @@ if expected_bytes.ct_eq(&actual_bytes).unwrap_u8() != 1 {
 ### HIGH-002: Unbounded Memory Consumption in Stream Cipher
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/python/shield/stream.py` (lines 145-165)
-- `/data/git/Guard8.ai/Shield/shield-core/src/stream.rs`
+- `/data/git/Dikestra.ai/Shield/python/shield/stream.py` (lines 145-165)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/stream.rs`
 
 **Description:**
 The `decrypt_stream()` function accumulates data in a buffer without size limits:
@@ -340,8 +340,8 @@ for data in enc_iter:
 ### HIGH-003: Inadequate Error Messages Leak Implementation Details
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/shield-core/src/error.rs` (lines 10-60)
-- `/data/git/Guard8.ai/Shield/shield-core/src/shield.rs` (error handling)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/error.rs` (lines 10-60)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/shield.rs` (error handling)
 
 **Description:**
 Error messages expose detailed internal state information:
@@ -395,8 +395,8 @@ pub enum ShieldError {
 ### HIGH-004: TOTP Time Window Too Permissive by Default
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/shield-core/src/totp.rs` (line 88)
-- `/data/git/Guard8.ai/Shield/python/shield/totp.py` (lines 122-138)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/totp.rs` (line 88)
+- `/data/git/Dikestra.ai/Shield/python/shield/totp.py` (lines 122-138)
 
 **Description:**
 The TOTP `verify()` function uses a default window of 1 interval (±30 seconds = 3 codes accepted). Combined with the loop structure:
@@ -451,7 +451,7 @@ pub struct TOTP {
 ### HIGH-005: Channel Handshake Vulnerable to MITM Without Mutual Authentication
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/shield-core/src/channel.rs` (lines 229-280)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/channel.rs` (lines 229-280)
 
 **Description:**
 The `ShieldChannel` handshake derives keys from password but exchanges contributions in plaintext:
@@ -490,8 +490,8 @@ The confirmation messages at the end authenticate the session, but by then keys 
 ### MED-001: Weak Password Policy Enforcement
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/shield-core/src/shield.rs` (Shield::new accepts any password)
-- `/data/git/Guard8.ai/Shield/python/shield/core.py` (no validation)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/shield.rs` (Shield::new accepts any password)
+- `/data/git/Dikestra.ai/Shield/python/shield/core.py` (no validation)
 
 **Description:**
 The `Shield::new()` and `Shield.__init__()` constructors accept any password without validation. While a password strength checker exists (`shield-core/src/password.rs`), it's not used automatically. Users can create Shield instances with passwords like "123" or "password", undermining EXPTIME security.
@@ -518,7 +518,7 @@ The `Shield::new()` and `Shield.__init__()` constructors accept any password wit
 ### MED-002: PBKDF2 Iteration Count Below Current Recommendations
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/shield-core/src/shield.rs` (line 16: `const PBKDF2_ITERATIONS: u32 = 100_000`)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/shield.rs` (line 16: `const PBKDF2_ITERATIONS: u32 = 100_000`)
 - All implementations
 
 **Description:**
@@ -557,7 +557,7 @@ const PBKDF2_ITERATIONS_DEFAULT: u32 = PBKDF2_ITERATIONS_V2;
 ### MED-003: Missing Input Validation for Service Names
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/shield-core/src/shield.rs` (Shield::new)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/shield.rs` (Shield::new)
 - All implementations
 
 **Description:**
@@ -588,7 +588,7 @@ Empty strings, excessively long strings, or special characters could cause issue
 ### MED-004: JavaScript Implementation Lacks Input Type Validation
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/javascript/src/shield.js` (all methods)
+- `/data/git/Dikestra.ai/Shield/javascript/src/shield.js` (all methods)
 
 **Description:**
 JavaScript is dynamically typed, but the Shield class doesn't validate input types:
@@ -632,8 +632,8 @@ encrypt(plaintext) {
 ### MED-005: RecoveryCodes Lacks Rate Limiting
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/shield-core/src/totp.rs` (RecoveryCodes::verify)
-- `/data/git/Guard8.ai/Shield/python/shield/totp.py` (RecoveryCodes.verify)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/totp.rs` (RecoveryCodes::verify)
+- `/data/git/Dikestra.ai/Shield/python/shield/totp.py` (RecoveryCodes.verify)
 
 **Description:**
 The `RecoveryCodes::verify()` method checks codes without rate limiting. An attacker could brute force all 10 recovery codes (typically 64 bits each) in ~100 attempts with no throttling.
@@ -713,7 +713,7 @@ with Shield("password", "service") as shield:
 ### MED-007: C Implementation Uses Potentially Weak Random Source
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/c/src/shield.c` (random number generation)
+- `/data/git/Dikestra.ai/Shield/c/src/shield.c` (random number generation)
 
 **Description:**
 The C implementation's random number generation uses platform-specific sources:
@@ -745,12 +745,12 @@ The error handling for failed reads is minimal, and there's no fallback if `/dev
 > **Status: FIXED in Rust v2.1.0** — All 8 keystream generators now include `assert!(u32::try_from(num_blocks).is_ok(), "keystream too long: counter overflow")` to prevent silent `u32` wraparound at >137GB.
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/shield-core/src/shield.rs`
-- `/data/git/Guard8.ai/Shield/shield-core/src/stream.rs` (encrypt_chunk, decrypt_chunk)
-- `/data/git/Guard8.ai/Shield/shield-core/src/ratchet.rs` (encrypt_with_key, decrypt_with_key)
-- `/data/git/Guard8.ai/Shield/shield-core/src/rotation.rs`
-- `/data/git/Guard8.ai/Shield/shield-core/src/group.rs`
-- `/data/git/Guard8.ai/Shield/shield-core/src/identity.rs`
+- `/data/git/Dikestra.ai/Shield/shield-core/src/shield.rs`
+- `/data/git/Dikestra.ai/Shield/shield-core/src/stream.rs` (encrypt_chunk, decrypt_chunk)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/ratchet.rs` (encrypt_with_key, decrypt_with_key)
+- `/data/git/Dikestra.ai/Shield/shield-core/src/rotation.rs`
+- `/data/git/Dikestra.ai/Shield/shield-core/src/group.rs`
+- `/data/git/Dikestra.ai/Shield/shield-core/src/identity.rs`
 
 **Description:**
 Keystream generation calculates number of blocks:
@@ -782,9 +782,9 @@ For extremely large `length` values (near `usize::MAX`), this could theoreticall
 ### LOW-001: Missing Dependency Version Pinning
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/shield-core/Cargo.toml`
-- `/data/git/Guard8.ai/Shield/python/pyproject.toml`
-- `/data/git/Guard8.ai/Shield/javascript/package.json`
+- `/data/git/Dikestra.ai/Shield/shield-core/Cargo.toml`
+- `/data/git/Dikestra.ai/Shield/python/pyproject.toml`
+- `/data/git/Dikestra.ai/Shield/javascript/package.json`
 
 **Description:**
 Dependencies use caret requirements (e.g., `ring = "0.17"`, `serde = "1.0"`), allowing minor version updates that could introduce vulnerabilities or breaking changes.
@@ -810,7 +810,7 @@ Dependencies use caret requirements (e.g., `ring = "0.17"`, `serde = "1.0"`), al
 ### LOW-002: Insufficient Documentation of Threat Model
 
 **Location:**
-- `/data/git/Guard8.ai/Shield/SECURITY.md`
+- `/data/git/Dikestra.ai/Shield/SECURITY.md`
 - Documentation files
 
 **Description:**
@@ -897,7 +897,7 @@ The repository lacks a security disclosure policy, making it unclear how to repo
 
 **Remediation Checklist:**
 - [ ] Create `SECURITY.md` with disclosure policy
-- [ ] Set up security@guard8.ai email
+- [ ] Set up admin@gibraltarcloud.dev email
 - [ ] Define response timeline (e.g., 90 days)
 - [ ] List security update process
 - [ ] Create security advisory template

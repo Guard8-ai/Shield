@@ -1,12 +1,12 @@
 # ============================================================================
-# Guard8.ai - High Quality Code -> Great Results
+# Dikestra.ai - High Quality Code -> Great Results
 # YOU ARE NOT ALLOWED TO CHANGE THIS FILE UNLESS EXPLICITLY ASKED.
 # ============================================================================
 
 [package]
 name = "shield-wasm"
 version = "1.0.0"
-authors = ["Guard8.ai"]
+authors = ["Dikestra.ai"]
 edition = "2021"
 description = "EXPTIME-secure encryption - WebAssembly Module"
 license = "MIT"

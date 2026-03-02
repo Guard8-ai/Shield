@@ -1,6 +1,6 @@
 # Shield - EXPTIME-Secure Encryption (Go)
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/Guard8-ai/shield.svg)](https://pkg.go.dev/github.com/Guard8-ai/shield)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Dikestra-ai/shield.svg)](https://pkg.go.dev/github.com/Dikestra-ai/shield)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Symmetric cryptography with proven exponential-time security.
@@ -16,7 +16,7 @@ Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Bre
 ## Installation
 
 ```bash
-go get github.com/Guard8-ai/shield
+go get github.com/Dikestra-ai/shield
 ```
 
 ## Quick Start
@@ -28,7 +28,7 @@ package main
 
 import (
     "fmt"
-    "github.com/Guard8-ai/shield/shield"
+    "github.com/Dikestra-ai/shield/shield"
 )
 
 func main() {
@@ -48,7 +48,7 @@ func main() {
 ```go
 import (
     "crypto/rand"
-    "github.com/Guard8-ai/shield/shield"
+    "github.com/Dikestra-ai/shield/shield"
 )
 
 key := make([]byte, 32)
@@ -61,7 +61,7 @@ decrypted, err := shield.QuickDecrypt(key, encrypted)
 ### Large File Encryption
 
 ```go
-import "github.com/Guard8-ai/shield/shield"
+import "github.com/Dikestra-ai/shield/shield"
 
 cipher := shield.NewStreamCipherFromPassword("password", []byte("salt"))
 err := cipher.EncryptFile("large.bin", "large.bin.enc")
@@ -73,7 +73,7 @@ err = cipher.DecryptFile("large.bin.enc", "large.bin.dec")
 ```go
 import (
     "crypto/rand"
-    "github.com/Guard8-ai/shield/shield"
+    "github.com/Dikestra-ai/shield/shield"
 )
 
 rootKey := make([]byte, 32)
@@ -90,7 +90,7 @@ decrypted, _ := bob.Decrypt(encrypted)  // []byte("Hello!")
 ### TOTP (2FA)
 
 ```go
-import "github.com/Guard8-ai/shield/shield"
+import "github.com/Dikestra-ai/shield/shield"
 
 // Setup
 secret := shield.GenerateTOTPSecret()
@@ -107,7 +107,7 @@ isValid := totp.Verify(code)  // true
 ### Digital Signatures
 
 ```go
-import "github.com/Guard8-ai/shield/shield"
+import "github.com/Dikestra-ai/shield/shield"
 
 // HMAC-based symmetric signatures
 key := make([]byte, 32)
@@ -172,7 +172,7 @@ shield.GenerateTOTPSecret() []byte
 ## Error Handling
 
 ```go
-import "github.com/Guard8-ai/shield/shield"
+import "github.com/Dikestra-ai/shield/shield"
 
 var (
     shield.ErrAuthenticationFailed  // MAC verification failed
@@ -203,6 +203,6 @@ MIT License - Use freely.
 ## See Also
 
 - [Shield Python Package](https://pypi.org/project/shield-crypto/)
-- [Shield npm Package](https://npmjs.com/package/@guard8/shield)
+- [Shield npm Package](https://npmjs.com/package/@dikestra/shield)
 - [Shield Rust Crate](https://crates.io/crates/shield-core)
-- [GitHub Repository](https://github.com/Guard8-ai/Shield)
+- [GitHub Repository](https://github.com/Dikestra-ai/Shield)

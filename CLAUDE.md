@@ -17,8 +17,8 @@ SHIELD is an EXPTIME-secure encryption library providing symmetric cryptography 
 | `android/` | Android SDK (Keystore + biometric integration) |
 | `ios/` | iOS SDK (Keychain + Face ID/Touch ID integration) |
 | `python/` | Python package (pip install shield-crypto) |
-| `javascript/` | JavaScript/Node.js package (@guard8/shield) |
-| `go/` | Go module (github.com/Guard8-ai/shield) |
+| `javascript/` | JavaScript/Node.js package (@dikestra/shield) |
+| `go/` | Go module (github.com/Dikestra-ai/shield) |
 | `c/` | C library (libshield) |
 | `java/` | Java/Gradle project |
 | `csharp/` | C#/.NET project |

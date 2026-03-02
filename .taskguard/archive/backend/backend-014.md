@@ -41,7 +41,7 @@ Missing advanced features that exist in other implementations:
 
 ## Reference Implementations
 - Python: `python/shield/totp.py`, `python/shield/ratchet.py`
-- Kotlin: `kotlin/src/main/kotlin/ai/guard8/shield/TOTP.kt`
+- Kotlin: `kotlin/src/main/kotlin/ai/dikestra/shield/TOTP.kt`
 - Swift: `swift/Sources/Shield/TOTP.swift`
 
 ## Acceptance Criteria
@@ -54,10 +54,10 @@ Missing advanced features that exist in other implementations:
 ---
 **Session Handoff**:
 - Changed:
-  - `android/shield/src/main/java/ai/guard8/shield/TOTP.kt` - TOTP + RecoveryCodes classes
-  - `android/shield/src/main/java/ai/guard8/shield/RatchetSession.kt` - Forward secrecy session
-  - `android/shield/src/test/java/ai/guard8/shield/TOTPTest.kt` - 25 unit tests
-  - `android/shield/src/test/java/ai/guard8/shield/RatchetSessionTest.kt` - 18 unit tests
+  - `android/shield/src/main/java/ai/dikestra/shield/TOTP.kt` - TOTP + RecoveryCodes classes
+  - `android/shield/src/main/java/ai/dikestra/shield/RatchetSession.kt` - Forward secrecy session
+  - `android/shield/src/test/java/ai/dikestra/shield/TOTPTest.kt` - 25 unit tests
+  - `android/shield/src/test/java/ai/dikestra/shield/RatchetSessionTest.kt` - 18 unit tests
   - `ios/Sources/Shield/TOTP.swift` - TOTP + RecoveryCodes classes
   - `ios/Sources/Shield/RatchetSession.swift` - Forward secrecy session
   - `ios/Tests/ShieldTests/TOTPTests.swift` - 20 unit tests

@@ -14,11 +14,11 @@ Pod::Spec.new do |s|
     - Cross-platform compatible (encrypt on iOS, decrypt on Android/Web/Server)
   DESC
 
-  s.homepage         = 'https://github.com/Guard8-ai/Shield'
+  s.homepage         = 'https://github.com/Dikestra-ai/Shield'
   s.license          = { :type => 'MIT', :file => 'LICENSE' }
-  s.author           = { 'Guard8.ai' => 'security@guard8.ai' }
-  s.source           = { :git => 'https://github.com/Guard8-ai/Shield.git', :tag => "v#{s.version}" }
-  s.social_media_url = 'https://twitter.com/guard8ai'
+  s.author           = { 'Dikestra.ai' => 'admin@gibraltarcloud.dev' }
+  s.source           = { :git => 'https://github.com/Dikestra-ai/Shield.git', :tag => "v#{s.version}" }
+  s.social_media_url = 'https://twitter.com/dikestraai'
 
   s.ios.deployment_target = '13.0'
   s.osx.deployment_target = '10.15'

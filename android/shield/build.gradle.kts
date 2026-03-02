@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "ai.guard8.shield"
+    namespace = "ai.dikestra.shield"
     compileSdk = 34
 
     defaultConfig {
@@ -54,7 +54,7 @@ dependencies {
 publishing {
     publications {
         register<MavenPublication>("release") {
-            groupId = "ai.guard8"
+            groupId = "ai.dikestra"
             artifactId = "shield-android"
             version = "2.1.0"
 
@@ -65,7 +65,7 @@ publishing {
             pom {
                 name.set("Shield Android")
                 description.set("EXPTIME-secure encryption for Android")
-                url.set("https://github.com/Guard8-ai/Shield")
+                url.set("https://github.com/Dikestra-ai/Shield")
 
                 licenses {
                     license {
@@ -76,9 +76,9 @@ publishing {
 
                 developers {
                     developer {
-                        id.set("guard8")
-                        name.set("Guard8.ai")
-                        email.set("security@guard8.ai")
+                        id.set("dikestra")
+                        name.set("Dikestra.ai")
+                        email.set("admin@gibraltarcloud.dev")
                     }
                 }
             }
