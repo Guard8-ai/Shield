@@ -38,7 +38,7 @@ public final class SecureKeychain {
     ///   - serviceName: Keychain service name (default: bundle identifier)
     ///   - accessGroup: Optional keychain access group for sharing between apps
     public init(serviceName: String? = nil, accessGroup: String? = nil) {
-        self.serviceName = serviceName ?? Bundle.main.bundleIdentifier ?? "ai.guard8.shield"
+        self.serviceName = serviceName ?? Bundle.main.bundleIdentifier ?? "ai.dikestra.shield"
         self.accessGroup = accessGroup
     }
 

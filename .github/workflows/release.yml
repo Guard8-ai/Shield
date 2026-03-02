@@ -226,9 +226,9 @@ jobs:
             | Language | Package | Install |
             |----------|---------|---------|
             | Python | [shield-crypto](https://pypi.org/project/shield-crypto/) | `pip install shield-crypto` |
-            | JavaScript | [@guard8/shield](https://www.npmjs.com/package/@guard8/shield) | `npm install @guard8/shield` |
+            | JavaScript | [@dikestra/shield](https://www.npmjs.com/package/@dikestra/shield) | `npm install @dikestra/shield` |
             | Rust | [shield-core](https://crates.io/crates/shield-core) | `cargo add shield-core` |
-            | Go | [github.com/Guard8-ai/shield](https://pkg.go.dev/github.com/Guard8-ai/shield) | `go get github.com/Guard8-ai/shield` |
+            | Go | [github.com/Dikestra-ai/shield](https://pkg.go.dev/github.com/Dikestra-ai/shield) | `go get github.com/Dikestra-ai/shield` |
 
             See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
           files: |

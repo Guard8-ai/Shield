@@ -21,11 +21,11 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Guard8-ai/Shield.git", from: "0.1.0")
+    .package(url: "https://github.com/Dikestra-ai/Shield.git", from: "2.1.0")
 ]
 ```
 
-Or add via Xcode: File > Add Packages > `https://github.com/Guard8-ai/Shield`
+Or add via Xcode: File > Add Packages > `https://github.com/Dikestra-ai/Shield`
 
 ## Quick Start
 
@@ -36,10 +36,9 @@ import Shield
 
 // Password-based encryption
 let s = Shield(password: "my_password", service: "github.com")
-let encrypted = s.encrypt(Array("secret data".utf8))
-if let decrypted = s.decrypt(encrypted) {
-    print(String(bytes: decrypted, encoding: .utf8)!)  // "secret data"
-}
+let encrypted = try s.encrypt(Array("secret data".utf8))
+let decrypted = try s.decrypt(encrypted)
+print(String(bytes: decrypted, encoding: .utf8)!)  // "secret data"
 ```
 
 ### Pre-shared Key
@@ -51,10 +50,9 @@ import Security
 var key = [UInt8](repeating: 0, count: 32)
 SecRandomCopyBytes(kSecRandomDefault, 32, &key)
 
-let encrypted = Shield.quickEncrypt(key: key, plaintext: Array("data".utf8))
-if let decrypted = Shield.quickDecrypt(key: key, ciphertext: encrypted) {
-    print(String(bytes: decrypted, encoding: .utf8)!)
-}
+let encrypted = try Shield.quickEncrypt(key: key, plaintext: Array("data".utf8))
+let decrypted = try Shield.quickDecrypt(key: key, ciphertext: encrypted)
+print(String(bytes: decrypted, encoding: .utf8)!)
 ```
 
 ### Forward Secrecy (Ratchet)
@@ -71,9 +69,8 @@ let bob = RatchetSession(rootKey: rootKey, isInitiator: false)
 
 // Each message uses a new key
 let encrypted = alice.encrypt(Array("Hello!".utf8))
-if let decrypted = bob.decrypt(encrypted) {
-    print(String(bytes: decrypted, encoding: .utf8)!)  // "Hello!"
-}
+let decrypted = bob.decrypt(encrypted)
+print(String(bytes: decrypted, encoding: .utf8)!)  // "Hello!"
 ```
 
 ### TOTP (2FA)
@@ -122,13 +119,13 @@ Main encryption class with password-derived keys.
 
 ```swift
 init(password: String, service: String)
-init(key: [UInt8])  // Pre-shared key
-func encrypt(_ plaintext: [UInt8]) -> [UInt8]
-func decrypt(_ ciphertext: [UInt8]) -> [UInt8]?  // Returns nil on auth failure
+init(key: [UInt8]) throws  // Pre-shared key
+func encrypt(_ plaintext: [UInt8]) throws -> [UInt8]
+func decrypt(_ ciphertext: [UInt8]) throws -> [UInt8]  // throws ShieldError on auth failure
 
 // Static methods
-static func quickEncrypt(key: [UInt8], plaintext: [UInt8]) -> [UInt8]
-static func quickDecrypt(key: [UInt8], ciphertext: [UInt8]) -> [UInt8]?
+static func quickEncrypt(key: [UInt8], plaintext: [UInt8]) throws -> [UInt8]
+static func quickDecrypt(key: [UInt8], ciphertext: [UInt8]) throws -> [UInt8]
 ```
 
 ### RatchetSession
@@ -138,7 +135,7 @@ Forward secrecy with key ratcheting.
 ```swift
 init(rootKey: [UInt8], isInitiator: Bool)
 func encrypt(_ plaintext: [UInt8]) -> [UInt8]
-func decrypt(_ ciphertext: [UInt8]) -> [UInt8]?  // Returns nil on auth failure
+func decrypt(_ ciphertext: [UInt8]) -> [UInt8]  // throws on auth failure
 ```
 
 ### TOTP
@@ -176,25 +173,20 @@ class LamportSignature {
 
 ## Error Handling
 
-Shield Swift uses optionals for decryption failures:
-
-```swift
-if let decrypted = shield.decrypt(ciphertext) {
-    // Success
-    process(decrypted)
-} else {
-    // Authentication failed - wrong key or tampered data
-    handleError()
-}
-```
-
-For serious errors (invalid key size), Shield throws:
+Shield Swift uses typed errors for all failures:
 
 ```swift
 do {
-    let s = try Shield.withKey(invalidKey)
-} catch ShieldError.invalidKeySize {
+    let encrypted = try shield.encrypt(plaintext)
+    let decrypted = try shield.decrypt(encrypted)
+    process(decrypted)
+} catch ShieldError.authenticationFailed {
+    // Wrong key or tampered data
+    handleError()
+} catch ShieldError.invalidKeySize(let expected, let actual) {
     // Key must be exactly 32 bytes
+} catch ShieldError.ciphertextTooShort {
+    // Input too short to be valid ciphertext
 }
 ```
 
@@ -231,6 +223,6 @@ MIT License - Use freely.
 ## See Also
 
 - [Shield Python Package](https://pypi.org/project/shield-crypto/)
-- [Shield npm Package](https://npmjs.com/package/@guard8/shield)
+- [Shield npm Package](https://npmjs.com/package/@dikestra/shield)
 - [Shield Rust Crate](https://crates.io/crates/shield-core)
-- [GitHub Repository](https://github.com/Guard8-ai/Shield)
+- [GitHub Repository](https://github.com/Dikestra-ai/Shield)

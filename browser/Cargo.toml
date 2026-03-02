@@ -1,5 +1,5 @@
 # ============================================================================
-# Guard8.ai - High Quality Code -> Great Results
+# Dikestra.ai - High Quality Code -> Great Results
 # YOU ARE NOT ALLOWED TO CHANGE THIS FILE UNLESS EXPLICITLY ASKED.
 # ============================================================================
 
@@ -7,10 +7,10 @@
 name = "shield-browser"
 version = "1.0.0"
 edition = "2021"
-authors = ["Guard8.ai"]
+authors = ["Dikestra.ai"]
 description = "Shield Browser SDK - Transparent auto-decryption for web applications"
 license = "MIT"
-repository = "https://github.com/Guard8-ai/Shield"
+repository = "https://github.com/Dikestra-ai/Shield"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

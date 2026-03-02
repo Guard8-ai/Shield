@@ -475,8 +475,8 @@ If you are a:
 
 **Document Status:** Final
 **Review Cycle:** Annual (next review: February 2027)
-**Maintained By:** Guard8.ai Security Team
-**Questions:** security@guard8.ai (use Shield to encrypt your message)
+**Maintained By:** Dikestra.ai Security Team
+**Questions:** admin@gibraltarcloud.dev (use Shield to encrypt your message)
 
 ---
 

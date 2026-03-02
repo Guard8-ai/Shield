@@ -1,6 +1,6 @@
 # Shield - EXPTIME-Secure Encryption (Kotlin)
 
-[![Maven Central](https://img.shields.io/maven-central/v/ai.guard8/shield-kotlin.svg)](https://search.maven.org/artifact/ai.guard8/shield-kotlin)
+[![Maven Central](https://img.shields.io/maven-central/v/ai.dikestra/shield-kotlin.svg)](https://search.maven.org/artifact/ai.dikestra/shield-kotlin)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Symmetric cryptography with proven exponential-time security.
@@ -18,22 +18,22 @@ Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Bre
 ### Gradle (Kotlin DSL)
 
 ```kotlin
-implementation("ai.guard8:shield-kotlin:0.1.0")
+implementation("ai.dikestra:shield-kotlin:2.1.0")
 ```
 
 ### Gradle (Groovy)
 
 ```groovy
-implementation 'ai.guard8:shield-kotlin:0.1.0'
+implementation 'ai.dikestra:shield-kotlin:2.1.0'
 ```
 
 ### Maven
 
 ```xml
 <dependency>
-    <groupId>ai.guard8</groupId>
+    <groupId>ai.dikestra</groupId>
     <artifactId>shield-kotlin</artifactId>
-    <version>0.1.0</version>
+    <version>2.1.0</version>
 </dependency>
 ```
 
@@ -42,21 +42,21 @@ implementation 'ai.guard8:shield-kotlin:0.1.0'
 ### Basic Encryption
 
 ```kotlin
-import ai.guard8.shield.Shield
+import ai.dikestra.shield.Shield
 
 fun main() {
     // Password-based encryption
     val s = Shield.create("my_password", "github.com")
     val encrypted = s.encrypt("secret data".toByteArray())
     val decrypted = s.decrypt(encrypted)
-    println(String(decrypted!!))  // "secret data"
+    println(String(decrypted))  // "secret data"
 }
 ```
 
 ### Pre-shared Key
 
 ```kotlin
-import ai.guard8.shield.Shield
+import ai.dikestra.shield.Shield
 import java.security.SecureRandom
 
 val key = ByteArray(32).also { SecureRandom().nextBytes(it) }
@@ -68,7 +68,7 @@ val decrypted = Shield.quickDecrypt(key, encrypted)
 ### Forward Secrecy (Ratchet)
 
 ```kotlin
-import ai.guard8.shield.RatchetSession
+import ai.dikestra.shield.RatchetSession
 import java.security.SecureRandom
 
 val rootKey = ByteArray(32).also { SecureRandom().nextBytes(it) }
@@ -84,7 +84,7 @@ val decrypted = bob.decrypt(encrypted)  // "Hello!"
 ### TOTP (2FA)
 
 ```kotlin
-import ai.guard8.shield.TOTP
+import ai.dikestra.shield.TOTP
 
 // Setup
 val secret = TOTP.generateSecret()
@@ -101,7 +101,7 @@ val isValid = totp.verify(code)  // true
 ### Digital Signatures
 
 ```kotlin
-import ai.guard8.shield.Signatures
+import ai.dikestra.shield.Signatures
 import java.security.SecureRandom
 
 // HMAC-based symmetric signature
@@ -127,11 +127,11 @@ Main encryption class with password-derived keys.
 Shield.create(password: String, service: String): Shield
 Shield.withKey(key: ByteArray): Shield
 fun encrypt(plaintext: ByteArray): ByteArray
-fun decrypt(ciphertext: ByteArray): ByteArray?  // Returns null on auth failure
+fun decrypt(ciphertext: ByteArray): ByteArray  // throws ShieldException.AuthenticationFailed
 
 // Static methods
 Shield.quickEncrypt(key: ByteArray, plaintext: ByteArray): ByteArray
-Shield.quickDecrypt(key: ByteArray, ciphertext: ByteArray): ByteArray?
+Shield.quickDecrypt(key: ByteArray, ciphertext: ByteArray): ByteArray
 ```
 
 ### RatchetSession
@@ -141,7 +141,7 @@ Forward secrecy with key ratcheting.
 ```kotlin
 RatchetSession(rootKey: ByteArray, isInitiator: Boolean)
 fun encrypt(plaintext: ByteArray): ByteArray
-fun decrypt(ciphertext: ByteArray): ByteArray?  // Returns null on auth failure
+fun decrypt(ciphertext: ByteArray): ByteArray  // throws on auth failure
 ```
 
 ### TOTP
@@ -182,7 +182,7 @@ class Signatures.LamportSignature() {
 Shield Kotlin includes convenient extension functions:
 
 ```kotlin
-import ai.guard8.shield.extensions.*
+import ai.dikestra.shield.extensions.*
 
 // String encryption
 val encrypted = "secret".encryptWith(shield)
@@ -196,22 +196,17 @@ val base64 = encrypted.toBase64()
 
 ## Error Handling
 
-Shield Kotlin uses nullable returns for decryption failures and exceptions for invalid input:
+Shield Kotlin uses typed exceptions for authentication failures:
 
 ```kotlin
-// Decryption returns null on auth failure
-val decrypted = shield.decrypt(ciphertext)
-if (decrypted != null) {
-    process(decrypted)
-} else {
-    handleAuthenticationFailure()
-}
-
-// Invalid input throws IllegalArgumentException
 try {
-    val s = Shield.withKey(tooShortKey)
+    val decrypted = shield.decrypt(ciphertext)
+    process(decrypted)
+} catch (e: ShieldException.AuthenticationFailed) {
+    // Wrong key or tampered data
+    handleAuthenticationFailure()
 } catch (e: IllegalArgumentException) {
-    // Key must be exactly 32 bytes
+    // Invalid input (key too short, ciphertext too short)
 }
 ```
 
@@ -279,7 +274,7 @@ MIT License - Use freely.
 ## See Also
 
 - [Shield Python Package](https://pypi.org/project/shield-crypto/)
-- [Shield npm Package](https://npmjs.com/package/@guard8/shield)
+- [Shield npm Package](https://npmjs.com/package/@dikestra/shield)
 - [Shield Rust Crate](https://crates.io/crates/shield-core)
 - [Shield Java](../java)
-- [GitHub Repository](https://github.com/Guard8-ai/Shield)
+- [GitHub Repository](https://github.com/Dikestra-ai/Shield)

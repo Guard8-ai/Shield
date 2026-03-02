@@ -1,6 +1,6 @@
-# @guard8/shield
+# @dikestra/shield
 
-[![npm version](https://badge.fury.io/js/@guard8%2Fshield.svg)](https://www.npmjs.com/package/@guard8/shield)
+[![npm version](https://badge.fury.io/js/@dikestra%2Fshield.svg)](https://www.npmjs.com/package/@dikestra/shield)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 EXPTIME-secure encryption library for Node.js - symmetric cryptography with proven exponential-time security.
@@ -16,7 +16,7 @@ Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Bre
 ## Installation
 
 ```bash
-npm install @guard8/shield
+npm install @dikestra/shield
 ```
 
 ## Quick Start
@@ -24,7 +24,7 @@ npm install @guard8/shield
 ### Basic Encryption
 
 ```javascript
-const { Shield } = require('@guard8/shield');
+const { Shield } = require('@dikestra/shield');
 
 // Password-based encryption
 const s = new Shield('my_password', 'github.com');
@@ -35,7 +35,7 @@ const decrypted = s.decrypt(encrypted); // Buffer: 'secret data'
 ### Pre-shared Key
 
 ```javascript
-const { quickEncrypt, quickDecrypt } = require('@guard8/shield');
+const { quickEncrypt, quickDecrypt } = require('@dikestra/shield');
 const crypto = require('crypto');
 
 const key = crypto.randomBytes(32);
@@ -46,7 +46,7 @@ const decrypted = quickDecrypt(key, encrypted);
 ### Large File Encryption
 
 ```javascript
-const { StreamCipher } = require('@guard8/shield');
+const { StreamCipher } = require('@dikestra/shield');
 
 const cipher = StreamCipher.fromPassword('password', Buffer.from('salt'));
 cipher.encryptFile('large.bin', 'large.bin.enc');
@@ -56,7 +56,7 @@ cipher.decryptFile('large.bin.enc', 'large.bin.dec');
 ### Forward Secrecy (Ratchet)
 
 ```javascript
-const { RatchetSession } = require('@guard8/shield');
+const { RatchetSession } = require('@dikestra/shield');
 const crypto = require('crypto');
 
 const rootKey = crypto.randomBytes(32); // Exchanged via secure channel
@@ -72,7 +72,7 @@ const decrypted = bob.decrypt(encrypted); // Buffer: 'Hello!'
 ### TOTP (2FA)
 
 ```javascript
-const { TOTP } = require('@guard8/shield');
+const { TOTP } = require('@dikestra/shield');
 
 // Setup
 const secret = TOTP.generateSecret();
@@ -155,7 +155,7 @@ RecoveryCodes.generateCodes(count?, length?)
 TypeScript declarations are included. Import types:
 
 ```typescript
-import { Shield, TOTP, StreamCipher } from '@guard8/shield';
+import { Shield, TOTP, StreamCipher } from '@dikestra/shield';
 ```
 
 ## Interoperability
@@ -164,7 +164,7 @@ Shield produces byte-identical output across all implementations:
 
 - Python: `pip install shield-crypto`
 - Rust: `cargo add shield-core`
-- JavaScript: `npm install @guard8/shield`
+- JavaScript: `npm install @dikestra/shield`
 
 ## Security Model
 
@@ -185,4 +185,4 @@ CC0-1.0 (Public Domain) - Use freely, no attribution required.
 
 - [Shield Python Package](https://pypi.org/project/shield-crypto/)
 - [Shield Rust Crate](https://crates.io/crates/shield-core)
-- [GitHub Repository](https://github.com/Guard8-ai/Shield)
+- [GitHub Repository](https://github.com/Dikestra-ai/Shield)

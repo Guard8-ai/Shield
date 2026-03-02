@@ -1,23 +1,23 @@
-# @guard8/shield-browser
+# @dikestra/shield-browser
 
 Shield Browser SDK - Transparent auto-decryption for web applications.
 
 ## Installation
 
 ```bash
-npm install @guard8/shield-browser
+npm install @dikestra/shield-browser
 ```
 
 Or via CDN:
 
 ```html
-<script src="https://unpkg.com/@guard8/shield-browser"></script>
+<script src="https://unpkg.com/@dikestra/shield-browser"></script>
 ```
 
 ## Quick Start
 
 ```javascript
-import { ShieldBrowser } from '@guard8/shield-browser';
+import { ShieldBrowser } from '@dikestra/shield-browser';
 
 // Initialize (fetches key and installs fetch hook)
 await ShieldBrowser.init('/api/shield-key');

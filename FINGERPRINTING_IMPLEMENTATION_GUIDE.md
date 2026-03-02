@@ -10,7 +10,7 @@
 
 Shield v2.1 adds hardware fingerprinting for device-bound encryption. Keys are derived from `password + hardware_fingerprint`, preventing key theft and unauthorized device usage.
 
-**Source**: Adapted from `/data/git/Guard8.ai/SaaSClient-SideLicensingSystem/src/saas_client.rs`
+**Source**: Adapted from `/data/git/Dikestra.ai/SaaSClient-SideLicensingSystem/src/saas_client.rs`
 
 ---
 
@@ -283,10 +283,10 @@ func NewWithFingerprint(password, service string, mode FingerprintMode) (*Shield
 
 ### Java Pattern
 
-**File**: `java/src/main/java/ai/guard8/shield/Fingerprint.java` (new)
+**File**: `java/src/main/java/ai/dikestra/shield/Fingerprint.java` (new)
 
 ```java
-package ai.guard8.shield;
+package ai.dikestra.shield;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;

@@ -257,6 +257,6 @@ MIT License - Use freely.
 ## See Also
 
 - [Shield Python Package](https://pypi.org/project/shield-crypto/)
-- [Shield npm Package](https://npmjs.com/package/@guard8/shield)
+- [Shield npm Package](https://npmjs.com/package/@dikestra/shield)
 - [Shield Rust Crate](https://crates.io/crates/shield-core)
-- [GitHub Repository](https://github.com/Guard8-ai/Shield)
+- [GitHub Repository](https://github.com/Dikestra-ai/Shield)

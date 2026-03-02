@@ -2,7 +2,7 @@ using System;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Guard8.Shield
+namespace Dikestra.Shield
 {
     /// <summary>
     /// TOTP - Time-based One-Time Password (RFC 6238)

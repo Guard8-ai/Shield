@@ -1,8 +1,8 @@
 # Shield Android SDK ProGuard Rules
 
 # Keep all public Shield APIs
--keep class ai.guard8.shield.** { *; }
--keepclassmembers class ai.guard8.shield.** { *; }
+-keep class ai.dikestra.shield.** { *; }
+-keepclassmembers class ai.dikestra.shield.** { *; }
 
 # Keep crypto classes
 -keep class javax.crypto.** { *; }

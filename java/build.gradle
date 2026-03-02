@@ -2,7 +2,7 @@ plugins {
     id 'java-library'
 }
 
-group = 'ai.guard8'
+group = 'ai.dikestra'
 version = '2.1.0'
 
 java {

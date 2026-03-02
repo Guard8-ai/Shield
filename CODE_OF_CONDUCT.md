@@ -29,7 +29,7 @@ Examples of unacceptable behavior:
 
 As a cryptography project, we have additional standards:
 
-* **Security reports**: Report vulnerabilities privately to security@guard8.ai, not in public issues
+* **Security reports**: Report vulnerabilities privately to admin@gibraltarcloud.dev, not in public issues
 * **No backdoors**: Any contribution that intentionally weakens security will result in immediate ban
 * **Honest claims**: Do not make unsubstantiated security claims about the library
 * **Responsible disclosure**: Allow 90 days for vulnerability fixes before public disclosure
@@ -46,8 +46,8 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement at:
 
-* **Email**: conduct@guard8.ai
-* **Security issues**: security@guard8.ai
+* **Email**: admin@gibraltarcloud.dev
+* **Security issues**: admin@gibraltarcloud.dev
 
 All complaints will be reviewed and investigated promptly and fairly.
 

@@ -12,7 +12,7 @@ final class SecureKeychainTests: XCTestCase {
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        keychain = SecureKeychain(serviceName: "ai.guard8.shield.tests")
+        keychain = SecureKeychain(serviceName: "ai.dikestra.shield.tests")
 
         // Keychain requires entitlements that aren't available in all CI environments.
         // Error -34018 (errSecMissingEntitlement) means the test host lacks Keychain access.

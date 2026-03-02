@@ -1,6 +1,6 @@
 # Shield - EXPTIME-Secure Encryption (Java)
 
-[![Maven Central](https://img.shields.io/maven-central/v/ai.guard8/shield.svg)](https://search.maven.org/artifact/ai.guard8/shield)
+[![Maven Central](https://img.shields.io/maven-central/v/ai.dikestra/shield.svg)](https://search.maven.org/artifact/ai.dikestra/shield)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Symmetric cryptography with proven exponential-time security.
@@ -18,16 +18,16 @@ Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Bre
 ### Gradle
 
 ```groovy
-implementation 'ai.guard8:shield:0.1.0'
+implementation 'ai.dikestra:shield:2.1.0'
 ```
 
 ### Maven
 
 ```xml
 <dependency>
-    <groupId>ai.guard8</groupId>
+    <groupId>ai.dikestra</groupId>
     <artifactId>shield</artifactId>
-    <version>0.1.0</version>
+    <version>2.1.0</version>
 </dependency>
 ```
 
@@ -36,7 +36,7 @@ implementation 'ai.guard8:shield:0.1.0'
 ### Basic Encryption
 
 ```java
-import ai.guard8.shield.Shield;
+import ai.dikestra.shield.Shield;
 
 public class Example {
     public static void main(String[] args) {
@@ -52,7 +52,7 @@ public class Example {
 ### Pre-shared Key
 
 ```java
-import ai.guard8.shield.Shield;
+import ai.dikestra.shield.Shield;
 import java.security.SecureRandom;
 
 SecureRandom random = new SecureRandom();
@@ -66,7 +66,7 @@ byte[] decrypted = Shield.quickDecrypt(key, encrypted);
 ### Forward Secrecy (Ratchet)
 
 ```java
-import ai.guard8.shield.RatchetSession;
+import ai.dikestra.shield.RatchetSession;
 import java.security.SecureRandom;
 
 byte[] rootKey = new byte[32];
@@ -83,7 +83,7 @@ byte[] decrypted = bob.decrypt(encrypted);  // "Hello!"
 ### TOTP (2FA)
 
 ```java
-import ai.guard8.shield.TOTP;
+import ai.dikestra.shield.TOTP;
 
 // Setup
 byte[] secret = TOTP.generateSecret();
@@ -100,7 +100,7 @@ boolean isValid = totp.verify(code);  // true
 ### Digital Signatures
 
 ```java
-import ai.guard8.shield.Signatures;
+import ai.dikestra.shield.Signatures;
 import java.security.SecureRandom;
 
 // HMAC-based symmetric signature
@@ -127,7 +127,7 @@ Main encryption class with password-derived keys.
 new Shield(String password, String service)
 new Shield(byte[] key)  // Pre-shared key
 byte[] encrypt(byte[] plaintext)
-byte[] decrypt(byte[] ciphertext)  // Returns null on auth failure
+byte[] decrypt(byte[] ciphertext)  // throws SecurityException on auth failure
 
 // Static methods
 static byte[] quickEncrypt(byte[] key, byte[] plaintext)
@@ -141,7 +141,7 @@ Forward secrecy with key ratcheting.
 ```java
 new RatchetSession(byte[] rootKey, boolean isInitiator)
 byte[] encrypt(byte[] plaintext)
-byte[] decrypt(byte[] ciphertext)  // Returns null on auth failure
+byte[] decrypt(byte[] ciphertext)  // throws SecurityException on auth failure
 ```
 
 ### TOTP
@@ -181,9 +181,9 @@ boolean isUsed()
 ```java
 try {
     byte[] decrypted = shield.decrypt(ciphertext);
-    if (decrypted == null) {
-        // Authentication failed - wrong key or tampered data
-    }
+    // Success - use decrypted data
+} catch (SecurityException e) {
+    // Authentication failed - wrong key or tampered data
 } catch (IllegalArgumentException e) {
     // Invalid input (key too short, ciphertext too short)
 }
@@ -220,6 +220,6 @@ MIT License - Use freely.
 ## See Also
 
 - [Shield Python Package](https://pypi.org/project/shield-crypto/)
-- [Shield npm Package](https://npmjs.com/package/@guard8/shield)
+- [Shield npm Package](https://npmjs.com/package/@dikestra/shield)
 - [Shield Rust Crate](https://crates.io/crates/shield-core)
-- [GitHub Repository](https://github.com/Guard8-ai/Shield)
+- [GitHub Repository](https://github.com/Dikestra-ai/Shield)

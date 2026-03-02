@@ -317,8 +317,8 @@ A: Yes! See `kubernetes/` directory for Pod configurations.
 
 - Documentation: `/Shield/examples/opaque-containers/`
 - Confidential Computing: `/Shield/examples/confidential-computing/`
-- Issues: https://github.com/Guard8-ai/Shield/issues
-- Security: security@guard8.ai (encrypt with Shield!)
+- Issues: https://github.com/Dikestra-ai/Shield/issues
+- Security: admin@gibraltarcloud.dev (encrypt with Shield!)
 
 ---
 

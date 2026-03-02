@@ -6,7 +6,7 @@
 //! # Usage (JavaScript)
 //!
 //! ```javascript
-//! import init, { ShieldClient } from '@guard8/shield-browser';
+//! import init, { ShieldClient } from '@dikestra/shield-browser';
 //!
 //! // Initialize once
 //! await init();

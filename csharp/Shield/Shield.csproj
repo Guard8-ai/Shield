@@ -4,10 +4,10 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>disable</Nullable>
-    <RootNamespace>Guard8.Shield</RootNamespace>
-    <AssemblyName>Guard8.Shield</AssemblyName>
+    <RootNamespace>Dikestra.Shield</RootNamespace>
+    <AssemblyName>Dikestra.Shield</AssemblyName>
     <Version>2.1.0</Version>
-    <Authors>Guard8.ai</Authors>
+    <Authors>Dikestra.ai</Authors>
     <Description>EXPTIME-Secure Symmetric Encryption Library</Description>
   </PropertyGroup>
 

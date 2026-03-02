@@ -253,7 +253,7 @@ encrypted = s.encrypt(b"data")
 
 ## Cross-Language Migration
 
-Shield provides identical implementations across 10 languages. Data encrypted in one language decrypts in any other.
+Shield provides identical implementations across 13 platforms. Data encrypted in one language decrypts in any other.
 
 ### Encrypt in Python, Decrypt in JavaScript
 
@@ -267,7 +267,7 @@ print(encrypted.hex())  # Send to JS
 
 ```javascript
 // JavaScript
-const { Shield } = require('@guard8/shield');
+const { Shield } = require('@dikestra/shield');
 const s = new Shield('shared_password', 'shared_service');
 const encrypted = Buffer.from('...hex_from_python...', 'hex');
 const decrypted = s.decrypt(encrypted);
@@ -339,6 +339,6 @@ No. Shield is ~10-20x slower than hardware-accelerated AES-GCM. See [BENCHMARKS.
 ### Q: Why migrate to Shield?
 
 1. **Password-based**: No key files to manage
-2. **Cross-language**: 10 identical implementations
+2. **Cross-language**: 13 identical implementations
 3. **EXPTIME security**: Proven 2^256 brute-force resistance
 4. **Simpler API**: `encrypt()`/`decrypt()` handle everything

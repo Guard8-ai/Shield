@@ -7,14 +7,14 @@ Quick reference for using Shield across Python, JavaScript, Rust, Go, C, Java, C
 | Language | Package | Command |
 |----------|---------|---------|
 | Python | shield-crypto | `pip install shield-crypto` |
-| JavaScript | @guard8/shield | `npm install @guard8/shield` |
+| JavaScript | @dikestra/shield | `npm install @dikestra/shield` |
 | Rust | shield-core | `cargo add shield-core` |
-| Go | github.com/Guard8-ai/shield | `go get github.com/Guard8-ai/shield` |
+| Go | github.com/Dikestra-ai/shield | `go get github.com/Dikestra-ai/shield` |
 | C | libshield | Build from source |
-| Java | ai.guard8:shield | Maven/Gradle |
-| C# | Guard8.Shield | NuGet |
-| Swift | Guard8Shield | Swift Package |
-| Kotlin | ai.guard8:shield | Gradle |
+| Java | ai.dikestra:shield | Maven/Gradle |
+| C# | Dikestra.Shield | NuGet |
+| Swift | DikestraShield | Swift Package |
+| Kotlin | ai.dikestra:shield | Gradle |
 | WebAssembly | shield-wasm | `wasm-pack build` |
 
 ## Basic Encryption
@@ -30,7 +30,7 @@ decrypted = s.decrypt(encrypted)
 
 ### JavaScript
 ```javascript
-const { Shield } = require('@guard8/shield');
+const { Shield } = require('@dikestra/shield');
 
 const s = new Shield('password', 'service.com');
 const encrypted = s.encrypt(Buffer.from('secret data'));
@@ -48,7 +48,7 @@ let decrypted = s.decrypt(&encrypted)?;
 
 ### Go
 ```go
-import "github.com/Guard8-ai/shield/shield"
+import "github.com/Dikestra-ai/shield/shield"
 
 s := shield.New("password", "service.com")
 encrypted, _ := s.Encrypt([]byte("secret data"))
@@ -68,7 +68,7 @@ uint8_t *decrypted = shield_decrypt(&ctx, encrypted, len, &len, NULL);
 
 ### Java
 ```java
-import ai.guard8.shield.Shield;
+import ai.dikestra.shield.Shield;
 
 Shield s = new Shield("password", "service.com");
 byte[] encrypted = s.encrypt("secret data".getBytes());
@@ -77,7 +77,7 @@ byte[] decrypted = s.decrypt(encrypted);
 
 ### C#
 ```csharp
-using Guard8.Shield;
+using Dikestra.Shield;
 
 var s = new Shield("password", "service.com");
 byte[] encrypted = s.Encrypt(data);
@@ -88,18 +88,18 @@ byte[] decrypted = s.Decrypt(encrypted);
 ```swift
 import Shield
 
-let s = try Shield.create(password: "password", service: "service.com")
-let encrypted = try s.encrypt(data)
+let s = Shield(password: "password", service: "service.com")
+let encrypted = try s.encrypt(Array("secret data".utf8))
 let decrypted = try s.decrypt(encrypted)
 ```
 
 ### Kotlin
 ```kotlin
-import ai.guard8.shield.Shield
+import ai.dikestra.shield.Shield
 
 Shield.create("password", "service.com").use { s ->
-    val encrypted = s.encrypt(data)
-    val decrypted = s.decrypt(encrypted)
+    val encrypted = s.encrypt("secret data".toByteArray())
+    val decrypted = s.decrypt(encrypted)  // throws on auth failure
 }
 ```
 
@@ -127,7 +127,7 @@ decrypted = quick_decrypt(key, encrypted)
 
 ### JavaScript
 ```javascript
-const { quickEncrypt, quickDecrypt } = require('@guard8/shield');
+const { quickEncrypt, quickDecrypt } = require('@dikestra/shield');
 const crypto = require('crypto');
 
 const key = crypto.randomBytes(32);
@@ -157,7 +157,7 @@ cipher.decrypt_file("large.enc", "large.dec")
 
 ### JavaScript
 ```javascript
-const { StreamCipher } = require('@guard8/shield');
+const { StreamCipher } = require('@dikestra/shield');
 
 const cipher = StreamCipher.fromPassword('password', Buffer.from('salt'));
 cipher.encryptFile('large.bin', 'large.enc');
@@ -190,7 +190,7 @@ decrypted = bob.decrypt(encrypted)
 
 ### JavaScript
 ```javascript
-const { RatchetSession } = require('@guard8/shield');
+const { RatchetSession } = require('@dikestra/shield');
 const crypto = require('crypto');
 
 const rootKey = crypto.randomBytes(32);
@@ -228,7 +228,7 @@ uri = totp.provisioning_uri("user@example.com", "MyApp")
 
 ### JavaScript
 ```javascript
-const { TOTP } = require('@guard8/shield');
+const { TOTP } = require('@dikestra/shield');
 
 const secret = TOTP.generateSecret();
 const totp = new TOTP(secret);
@@ -251,7 +251,7 @@ rc.verify("XXXX-XXXX")   # True (consumed)
 
 ### JavaScript
 ```javascript
-const { RecoveryCodes } = require('@guard8/shield');
+const { RecoveryCodes } = require('@dikestra/shield');
 
 const rc = new RecoveryCodes();
 console.log(rc.codes);      // ['XXXX-XXXX', ...]
@@ -278,7 +278,7 @@ is_valid = LamportSignature.verify(b"message", signature, lamport.public_key)
 
 ### JavaScript
 ```javascript
-const { SymmetricSignature, LamportSignature } = require('@guard8/shield');
+const { SymmetricSignature, LamportSignature } = require('@dikestra/shield');
 
 // HMAC-based
 const signer = SymmetricSignature.generate();
@@ -311,7 +311,7 @@ recovered = KeySplitter.combine(shares)
 
 ### JavaScript
 ```javascript
-const { PAKEExchange, KeySplitter } = require('@guard8/shield');
+const { PAKEExchange, KeySplitter } = require('@dikestra/shield');
 
 // PAKE
 const salt = PAKEExchange.generateSalt();
@@ -343,7 +343,7 @@ manager.decrypt(encrypted_v2)  # Works with v2 key
 
 ### JavaScript
 ```javascript
-const { KeyRotationManager } = require('@guard8/shield');
+const { KeyRotationManager } = require('@dikestra/shield');
 
 const manager = new KeyRotationManager(initialKey);
 const encryptedV1 = manager.encrypt(Buffer.from('data'));
@@ -431,7 +431,7 @@ GroupEncryption.decrypt(encrypted, "bob", bob_shared_key)
 
 ### JavaScript
 ```javascript
-const { GroupEncryption } = require('@guard8/shield');
+const { GroupEncryption } = require('@dikestra/shield');
 
 const group = new GroupEncryption();
 group.addMember('alice', aliceKey);
@@ -462,7 +462,7 @@ provider.validate_service_token(service_token, "api.example.com")
 
 ### JavaScript
 ```javascript
-const { IdentityProvider } = require('@guard8/shield');
+const { IdentityProvider } = require('@dikestra/shield');
 
 const provider = new IdentityProvider(masterKey, 3600);
 const identity = provider.register('alice', 'password123', 'Alice Smith');
@@ -591,7 +591,7 @@ shield info
 
 ## Interoperability
 
-All implementations produce **byte-identical output**:
+All implementations produce **byte-identical output** across 13 platforms:
 
 ```python
 # Python encrypts
@@ -679,12 +679,12 @@ Shield uses only proven symmetric primitives with unconditional security bounds.
 
 ### Installation
 ```bash
-npm install @guard8/shield-browser
+npm install @dikestra/shield-browser
 ```
 
 ### Auto-Decrypt Setup
 ```javascript
-import { ShieldBrowser } from '@guard8/shield-browser';
+import { ShieldBrowser } from '@dikestra/shield-browser';
 
 // Initialize - fetches key and installs fetch hook
 await ShieldBrowser.init('/api/shield-key');

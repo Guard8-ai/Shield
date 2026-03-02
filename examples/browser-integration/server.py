@@ -90,7 +90,7 @@ async def index():
 
     <script type="module">
         // Import Shield Browser SDK
-        // In production, use: import { ShieldBrowser } from '@guard8/shield-browser';
+        // In production, use: import { ShieldBrowser } from '@dikestra/shield-browser';
         // For this demo, we'll use the local build
 
         const SESSION_ID = 'demo-' + Math.random().toString(36).substr(2, 9);

@@ -2,7 +2,7 @@ using System;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Guard8.Shield
+namespace Dikestra.Shield
 {
     /// <summary>
     /// Shield - EXPTIME-Secure Symmetric Encryption Library

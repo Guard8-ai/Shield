@@ -2,7 +2,7 @@ using System;
 using System.Linq;
 using System.Text;
 using Xunit;
-using Guard8.Shield;
+using Dikestra.Shield;
 
 namespace Shield.Tests
 {
@@ -13,7 +13,7 @@ namespace Shield.Tests
         [Fact]
         public void TestEncryptDecrypt()
         {
-            using var shield = new Guard8.Shield.Shield("password123", "test-service");
+            using var shield = new Dikestra.Shield.Shield("password123", "test-service");
             byte[] plaintext = Encoding.UTF8.GetBytes("Hello, Shield!");
 
             byte[] encrypted = shield.Encrypt(plaintext);
@@ -27,7 +27,7 @@ namespace Shield.Tests
         {
             byte[] key = Enumerable.Range(0, 32).Select(i => (byte)i).ToArray();
 
-            using var shield = new Guard8.Shield.Shield(key);
+            using var shield = new Dikestra.Shield.Shield(key);
             byte[] plaintext = Encoding.UTF8.GetBytes("Test message");
 
             byte[] encrypted = shield.Encrypt(plaintext);
@@ -42,8 +42,8 @@ namespace Shield.Tests
             byte[] key = new byte[32];
             byte[] plaintext = Encoding.UTF8.GetBytes("Quick test");
 
-            byte[] encrypted = Guard8.Shield.Shield.QuickEncrypt(key, plaintext);
-            byte[] decrypted = Guard8.Shield.Shield.QuickDecrypt(key, encrypted);
+            byte[] encrypted = Dikestra.Shield.Shield.QuickEncrypt(key, plaintext);
+            byte[] decrypted = Dikestra.Shield.Shield.QuickDecrypt(key, encrypted);
 
             Assert.Equal(plaintext, decrypted);
         }
@@ -51,13 +51,13 @@ namespace Shield.Tests
         [Fact]
         public void TestInvalidKeySize()
         {
-            Assert.Throws<ArgumentException>(() => new Guard8.Shield.Shield(new byte[16]));
+            Assert.Throws<ArgumentException>(() => new Dikestra.Shield.Shield(new byte[16]));
         }
 
         [Fact]
         public void TestAuthenticationFailed()
         {
-            using var shield = new Guard8.Shield.Shield("password", "service");
+            using var shield = new Dikestra.Shield.Shield("password", "service");
             byte[] encrypted = shield.Encrypt(Encoding.UTF8.GetBytes("test"));
 
             // Tamper with ciphertext
@@ -209,8 +209,8 @@ namespace Shield.Tests
             byte[] b = { 1, 2, 3, 4, 5, 6, 7, 8 };
             byte[] c = { 1, 2, 3, 4, 5, 6, 7, 9 };
 
-            Assert.True(Guard8.Shield.Shield.ConstantTimeEquals(a, b, 8));
-            Assert.False(Guard8.Shield.Shield.ConstantTimeEquals(a, c, 8));
+            Assert.True(Dikestra.Shield.Shield.ConstantTimeEquals(a, b, 8));
+            Assert.False(Dikestra.Shield.Shield.ConstantTimeEquals(a, c, 8));
         }
 
         [Fact]
@@ -223,15 +223,15 @@ namespace Shield.Tests
                 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad
             };
 
-            byte[] hash = Guard8.Shield.Shield.Sha256(Encoding.UTF8.GetBytes("abc"));
+            byte[] hash = Dikestra.Shield.Shield.Sha256(Encoding.UTF8.GetBytes("abc"));
             Assert.Equal(expected, hash);
         }
 
         [Fact]
         public void TestRandomBytes()
         {
-            byte[] a = Guard8.Shield.Shield.RandomBytes(32);
-            byte[] b = Guard8.Shield.Shield.RandomBytes(32);
+            byte[] a = Dikestra.Shield.Shield.RandomBytes(32);
+            byte[] b = Dikestra.Shield.Shield.RandomBytes(32);
 
             Assert.NotEqual(a, b);
         }

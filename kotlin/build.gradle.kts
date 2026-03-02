@@ -2,7 +2,7 @@ plugins {
     kotlin("jvm") version "1.9.22"
 }
 
-group = "ai.guard8"
+group = "ai.dikestra"
 version = "2.1.0"
 
 repositories {

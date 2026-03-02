@@ -10,8 +10,8 @@ Pick your language:
 
 ```bash
 pip install shield-crypto          # Python
-npm install @guard8/shield         # JavaScript
-go get github.com/Guard8-ai/shield # Go
+npm install @dikestra/shield         # JavaScript
+go get github.com/Dikestra-ai/shield # Go
 ```
 
 ---
@@ -37,7 +37,7 @@ print("Done! Encrypted data saved to secret.enc")
 
 ### JavaScript
 ```javascript
-const { Shield } = require('@guard8/shield');
+const { Shield } = require('@dikestra/shield');
 const fs = require('fs');
 
 // Create encryptor with your password
@@ -58,7 +58,7 @@ package main
 
 import (
     "os"
-    "github.com/Guard8-ai/shield/shield"
+    "github.com/Dikestra-ai/shield/shield"
 )
 
 func main() {
@@ -99,7 +99,7 @@ print("Decrypted:", decrypted.decode())
 
 ### JavaScript
 ```javascript
-const { Shield } = require('@guard8/shield');
+const { Shield } = require('@dikestra/shield');
 const fs = require('fs');
 
 // Same password and app name
@@ -121,7 +121,7 @@ package main
 
 import (
     "os"
-    "github.com/Guard8-ai/shield/shield"
+    "github.com/Dikestra-ai/shield/shield"
 )
 
 func main() {
@@ -203,4 +203,4 @@ shield keygen
 
 ---
 
-**Questions?** Open an issue: https://github.com/Guard8-ai/Shield/issues
+**Questions?** Open an issue: https://github.com/Dikestra-ai/Shield/issues

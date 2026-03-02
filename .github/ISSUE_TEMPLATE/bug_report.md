@@ -12,7 +12,7 @@ A clear description of what the bug is.
 ## Language/Platform
 - [ ] Rust (shield-core)
 - [ ] Python (shield-crypto)
-- [ ] JavaScript (@guard8/shield)
+- [ ] JavaScript (@dikestra/shield)
 - [ ] Go
 - [ ] Java
 - [ ] C#
@@ -52,4 +52,4 @@ Paste any error messages here
 Any other context about the problem.
 
 ## Security Note
-If this is a security vulnerability, please DO NOT open a public issue. Instead, email security@guard8.ai.
+If this is a security vulnerability, please DO NOT open a public issue. Instead, email admin@gibraltarcloud.dev.

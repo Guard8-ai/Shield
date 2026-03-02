@@ -3,7 +3,7 @@
 
 FROM ubuntu:22.04
 
-LABEL maintainer="Guard8.ai <dev@guard8.ai>"
+LABEL maintainer="Dikestra.ai <admin@gibraltarcloud.dev>"
 LABEL description="Shield encryption library development environment"
 
 # Avoid prompts during package installation

@@ -1,20 +1,20 @@
 # Shield V2 Security Audit Report
 
-**Date**: 2026-02-20
-**Scope**: Shield v2 implementations across Python, JavaScript, Go, Java, and C
+**Date**: 2026-02-20 (updated 2026-03-02)
+**Scope**: Shield v2 implementations across all SDKs (Python, JavaScript, Go, Java, C, C#, Swift, Kotlin, Android, iOS)
 **Auditor**: Claude Code Security Analysis
 
 ## Executive Summary
 
-This audit examined the Shield v2 protocol implementation across 5 programming languages for cryptographic vulnerabilities, protocol compliance, and common security issues. **One MEDIUM severity vulnerability was identified** affecting all implementations: missing padding length validation.
+This audit examined the Shield v2 protocol implementation across all SDKs for cryptographic vulnerabilities, protocol compliance, and common security issues. **One MEDIUM severity vulnerability was identified** — missing padding length validation — now **FIXED in all implementations** as of v2.1.0.
 
 ## Findings
 
-### 🟢 MEDIUM (FIXED in Rust): Missing Padding Length Validation (CVE-PENDING)
+### 🟢 MEDIUM (FIXED in ALL SDKs): Missing Padding Length Validation (CVE-PENDING)
 
 **Severity**: MEDIUM
-**Affected**: Python, JavaScript, Go, Java, C (remaining implementations)
-**Fixed in**: Rust (shield-core v2.1.0) — `pad_len` validated against 32-128 bounds before accessing plaintext
+**Affected**: None (all fixed as of v2.1.0)
+**Fixed in**: All SDKs — `pad_len` validated against 32-128 bounds before accessing plaintext
 **CWE**: CWE-20 (Improper Input Validation)
 
 **Description**:
@@ -24,7 +24,7 @@ All implementations extract the padding length (`pad_len`) from byte 16 of decry
 - Python (`python/shield/core.py:189`): `pad_len = decrypted[16]`
 - JavaScript (`javascript/src/shield.js:179`): `const padLen = decrypted[16];`
 - Go (`go/shield/shield.go:280`): `padLen := int(decrypted[16])`
-- Java (`java/src/main/java/ai/guard8/shield/Shield.java:218`): `int padLen = decrypted[16] & 0xFF;`
+- Java (`java/src/main/java/ai/dikestra/shield/Shield.java:218`): `int padLen = decrypted[16] & 0xFF;`
 - C (`c/src/shield.c:498`): `pad_len = decrypted[16];`
 
 **Impact**:
