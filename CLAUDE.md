@@ -127,22 +127,22 @@ Format: `nonce(16 bytes) || ciphertext || MAC(16 bytes)`
 ## Running Tests
 
 ```bash
-# Rust core (95 tests with confidential computing)
+# Rust core (121 tests with confidential computing)
 cd shield-core && cargo test --features confidential
 
 # Rust with OpenAPI support
 cd shield-core && cargo test --features openapi
 
-# Python (153 tests - includes 33 integration tests)
+# Python (161 tests - includes 33 integration tests)
 cd python && python -m pytest
 
-# JavaScript (81 tests)
+# JavaScript (89 tests)
 cd javascript && npm test
 
-# Go (31 tests)
+# Go (39 tests)
 cd go && go test ./...
 
-# C (16 tests)
+# C (21 tests)
 cd c && make test
 
 # Java (19 tests)
@@ -154,7 +154,7 @@ cd wasm && cargo test
 
 ## Cross-Language Interoperability
 
-All 10 implementations produce byte-identical output. Encrypt in any language, decrypt in any other. See `CHEATSHEET.md` for examples.
+All 13 implementations produce byte-identical output. Encrypt in any language, decrypt in any other. See `CHEATSHEET.md` for examples.
 
 ## Security Model
 

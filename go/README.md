@@ -33,8 +33,11 @@ import (
 
 func main() {
     // Password-based encryption
-    s := shield.New("my_password", "github.com")
-    encrypted := s.Encrypt([]byte("secret data"))
+    s := shield.New("my_password", "github.com", nil)
+    encrypted, err := s.Encrypt([]byte("secret data"))
+    if err != nil {
+        panic(err)
+    }
     decrypted, err := s.Decrypt(encrypted)
     if err != nil {
         panic(err)
@@ -54,7 +57,7 @@ import (
 key := make([]byte, 32)
 rand.Read(key)
 
-encrypted := shield.QuickEncrypt(key, []byte("data"))
+encrypted, _ := shield.QuickEncrypt(key, []byte("data"))
 decrypted, err := shield.QuickDecrypt(key, encrypted)
 ```
 
@@ -83,7 +86,7 @@ alice := shield.NewRatchetSession(rootKey, true)  // initiator
 bob := shield.NewRatchetSession(rootKey, false)   // responder
 
 // Each message uses a new key
-encrypted := alice.Encrypt([]byte("Hello!"))
+encrypted, _ := alice.Encrypt([]byte("Hello!"))
 decrypted, _ := bob.Decrypt(encrypted)  // []byte("Hello!")
 ```
 
@@ -130,9 +133,9 @@ valid = lamport.Verify([]byte("important message"), oneSig)
 Main encryption class with password-derived keys.
 
 ```go
-shield.New(password, service string) *Shield
+shield.New(password, service string, maxAgeMs *int64) *Shield
 shield.WithKey(key []byte) *Shield
-(*Shield) Encrypt(plaintext []byte) []byte
+(*Shield) Encrypt(plaintext []byte) ([]byte, error)
 (*Shield) Decrypt(ciphertext []byte) ([]byte, error)
 ```
 

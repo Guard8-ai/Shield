@@ -63,7 +63,7 @@ import (
 
 func main() {
     // Create encryptor with your password
-    s := shield.New("my-secret-password", "my-app")
+    s := shield.New("my-secret-password", "my-app", nil)
 
     // Encrypt
     encrypted, _ := s.Encrypt([]byte("Hello, World!"))
@@ -126,7 +126,7 @@ import (
 
 func main() {
     // Same password and app name
-    s := shield.New("my-secret-password", "my-app")
+    s := shield.New("my-secret-password", "my-app", nil)
 
     // Read encrypted file
     encrypted, _ := os.ReadFile("secret.enc")
@@ -188,7 +188,7 @@ See [SECURITY.md](SECURITY.md) for the full threat model.
 
 ---
 
-## Command Line (Python only)
+## Command Line
 
 ```bash
 # Encrypt a file

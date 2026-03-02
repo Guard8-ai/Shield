@@ -50,7 +50,7 @@ let decrypted = s.decrypt(&encrypted)?;
 ```go
 import "github.com/Dikestra-ai/shield/shield"
 
-s := shield.New("password", "service.com")
+s := shield.New("password", "service.com", nil)
 encrypted, _ := s.Encrypt([]byte("secret data"))
 decrypted, _ := s.Decrypt(encrypted)
 ```

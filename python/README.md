@@ -252,7 +252,7 @@ Breaking requires 2^256 operations - no shortcut exists.
 
 ## License
 
-CC0-1.0 (Public Domain) - Use freely, no attribution required.
+MIT License - Use freely.
 
 ## See Also
 
