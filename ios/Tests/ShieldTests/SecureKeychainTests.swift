@@ -108,10 +108,9 @@ final class SecureKeychainTests: XCTestCase {
 
         // Shield should work
         let plaintext = Array("Hello, World!".utf8)
-        let encrypted = shield.encrypt(plaintext)
-        let decrypted = shield.decrypt(encrypted)
+        let encrypted = try shield.encrypt(plaintext)
+        let decrypted = try shield.decrypt(encrypted)
 
-        XCTAssertNotNil(decrypted)
         XCTAssertEqual(decrypted, plaintext)
     }
 
@@ -125,7 +124,7 @@ final class SecureKeychainTests: XCTestCase {
 
         // Encrypt with first Shield
         let plaintext = Array("Secret data".utf8)
-        let encrypted = shield1.encrypt(plaintext)
+        let encrypted = try shield1.encrypt(plaintext)
 
         // Get Shield again (should use stored key)
         let shield2 = try keychain.getOrCreateShield(
@@ -135,9 +134,8 @@ final class SecureKeychainTests: XCTestCase {
         )
 
         // Should be able to decrypt with second Shield
-        let decrypted = shield2.decrypt(encrypted)
+        let decrypted = try shield2.decrypt(encrypted)
 
-        XCTAssertNotNil(decrypted)
         XCTAssertEqual(decrypted, plaintext)
     }
 
