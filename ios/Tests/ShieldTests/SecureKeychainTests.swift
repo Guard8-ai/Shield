@@ -10,8 +10,8 @@ final class SecureKeychainTests: XCTestCase {
     private var keychain: SecureKeychain!
     private let testAlias = "test_key_\(UUID().uuidString)"
 
-    override func setUp() {
-        super.setUp()
+    override func setUpWithError() throws {
+        try super.setUpWithError()
         keychain = SecureKeychain(serviceName: "ai.guard8.shield.tests")
 
         // Keychain requires entitlements that aren't available in all CI environments.
@@ -22,7 +22,7 @@ final class SecureKeychainTests: XCTestCase {
             try keychain.store(key: probeKey, for: probeAlias)
             try keychain.delete(for: probeAlias)
         } catch {
-            try XCTSkipIf(true, "Keychain not available in this environment: \(error)")
+            throw XCTSkip("Keychain not available in this environment: \(error)")
         }
     }
 
