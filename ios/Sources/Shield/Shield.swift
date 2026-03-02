@@ -277,7 +277,7 @@ public final class Shield {
 
 // MARK: - ShieldError
 
-public enum ShieldError: Error, LocalizedError {
+public enum ShieldError: Error, LocalizedError, Equatable {
     case invalidKeySize(expected: Int, actual: Int)
     case ciphertextTooShort
     case authenticationFailed
