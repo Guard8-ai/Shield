@@ -11,10 +11,8 @@ import Security
 /// Example:
 /// ```swift
 /// let shield = Shield(password: "my_password", service: "github.com")
-/// let encrypted = shield.encrypt(Array("secret data".utf8))
-/// if let decrypted = shield.decrypt(encrypted) {
-///     print(String(bytes: decrypted, encoding: .utf8)!)
-/// }
+/// let encrypted = try shield.encrypt(Array("secret data".utf8))
+/// let decrypted = try shield.decrypt(encrypted)
 /// ```
 public final class Shield {
 
@@ -25,37 +23,64 @@ public final class Shield {
     private static let macSize = 16
     private static let keySize = 32
 
+    // V2 constants
+    private static let v2HeaderSize = 17  // counter(8) + timestamp(8) + pad_len(1)
+    private static let minPadding = 32
+    private static let maxPadding = 128
+    private static let minTimestampMs: Int64 = 1577836800000  // 2020-01-01
+    private static let maxTimestampMs: Int64 = 4102444800000  // 2100-01-01
+    private static let defaultMaxAgeMs: Int64 = 60000
+
     // MARK: - Properties
 
-    private let key: [UInt8]
-    private var counter: UInt64 = 0
+    private var key: [UInt8]
+    private var encKey: [UInt8]  // encryption subkey
+    private var macKey: [UInt8]  // authentication subkey
+    private let maxAgeMs: Int64?
+
+    // MARK: - Subkey Derivation
+
+    /// Derive separated encryption and MAC subkeys from master key.
+    private static func deriveSubkeys(_ masterKey: [UInt8]) -> (enc: [UInt8], mac: [UInt8]) {
+        let encKey = hmacSHA256(key: masterKey, data: Array("shield-encrypt".utf8))
+        let macKey = hmacSHA256(key: masterKey, data: Array("shield-authenticate".utf8))
+        return (encKey, macKey)
+    }
 
     // MARK: - Initialization
 
     /// Create Shield instance from password and service name.
-    ///
-    /// - Parameters:
-    ///   - password: User's password
-    ///   - service: Service identifier (e.g., "github.com")
-    ///   - iterations: PBKDF2 iterations (default: 100,000)
     public init(password: String, service: String, iterations: UInt32 = pbkdf2Iterations) {
         let salt = service.data(using: .utf8)!.sha256()
-        self.key = Self.deriveKey(
-            password: password,
-            salt: Array(salt),
-            iterations: iterations
-        )
+        self.key = Self.deriveKey(password: password, salt: Array(salt), iterations: iterations)
+        let subkeys = Self.deriveSubkeys(self.key)
+        self.encKey = subkeys.enc
+        self.macKey = subkeys.mac
+        self.maxAgeMs = Self.defaultMaxAgeMs
     }
 
     /// Create Shield with pre-shared key (no password derivation).
-    ///
-    /// - Parameter key: 32-byte symmetric key
-    /// - Throws: `ShieldError.invalidKeySize` if key is not 32 bytes
     public init(key: [UInt8]) throws {
         guard key.count == Self.keySize else {
             throw ShieldError.invalidKeySize(expected: Self.keySize, actual: key.count)
         }
         self.key = key
+        let subkeys = Self.deriveSubkeys(key)
+        self.encKey = subkeys.enc
+        self.macKey = subkeys.mac
+        self.maxAgeMs = Self.defaultMaxAgeMs
+    }
+
+    /// Create Shield with pre-shared key and custom max age.
+    public init(key: [UInt8], maxAgeMs: Int64?) throws {
+        guard key.count == Self.keySize else {
+            throw ShieldError.invalidKeySize(expected: Self.keySize, actual: key.count)
+        }
+        self.key = key
+        let subkeys = Self.deriveSubkeys(key)
+        self.encKey = subkeys.enc
+        self.macKey = subkeys.mac
+        self.maxAgeMs = maxAgeMs
     }
 
     // MARK: - Static Methods
@@ -63,72 +88,128 @@ public final class Shield {
     /// Quick encrypt with pre-shared key.
     public static func quickEncrypt(key: [UInt8], plaintext: [UInt8]) throws -> [UInt8] {
         let shield = try Shield(key: key)
-        return shield.encrypt(plaintext)
+        return try shield.encrypt(plaintext)
     }
 
     /// Quick decrypt with pre-shared key.
-    public static func quickDecrypt(key: [UInt8], ciphertext: [UInt8]) throws -> [UInt8]? {
-        let shield = try Shield(key: key)
-        return shield.decrypt(ciphertext)
+    public static func quickDecrypt(key: [UInt8], ciphertext: [UInt8]) throws -> [UInt8] {
+        let shield = try Shield(key: key, maxAgeMs: nil)
+        return try shield.decrypt(ciphertext)
     }
 
     // MARK: - Encryption/Decryption
 
-    /// Encrypt data.
-    ///
-    /// - Parameter plaintext: Data to encrypt
-    /// - Returns: Ciphertext: nonce(16) || encrypted_data || mac(16)
-    public func encrypt(_ plaintext: [UInt8]) -> [UInt8] {
+    /// Encrypt data (v2 format).
+    public func encrypt(_ plaintext: [UInt8]) throws -> [UInt8] {
+        // Generate random nonce
         var nonce = [UInt8](repeating: 0, count: Self.nonceSize)
-        _ = SecRandomCopyBytes(kSecRandomDefault, Self.nonceSize, &nonce)
+        guard SecRandomCopyBytes(kSecRandomDefault, Self.nonceSize, &nonce) == errSecSuccess else {
+            throw ShieldError.randomGenerationFailed
+        }
 
-        // Counter bytes (little-endian)
-        var counterBytes = [UInt8](repeating: 0, count: 8)
+        // Counter prefix (8 bytes of zeros)
+        let counter = [UInt8](repeating: 0, count: 8)
+
+        // Timestamp in milliseconds (little-endian)
+        let timestampMs = Int64(Date().timeIntervalSince1970 * 1000)
+        var timestamp = [UInt8](repeating: 0, count: 8)
         for i in 0..<8 {
-            counterBytes[i] = UInt8(truncatingIfNeeded: counter >> (i * 8))
-        }
-        counter += 1
-
-        // Data to encrypt: counter || plaintext
-        let data = counterBytes + plaintext
-
-        // Generate keystream and XOR
-        let keystream = generateKeystream(key: key, nonce: nonce, length: data.count)
-        var ciphertext = [UInt8](repeating: 0, count: data.count)
-        for i in 0..<data.count {
-            ciphertext[i] = data[i] ^ keystream[i]
+            timestamp[i] = UInt8(truncatingIfNeeded: timestampMs >> (i * 8))
         }
 
-        // HMAC authenticate
-        let mac = hmacSHA256(key: key, data: nonce + ciphertext).prefix(Self.macSize)
+        // Random padding: 32-128 bytes (rejection sampling)
+        let padRange = Self.maxPadding - Self.minPadding + 1  // 97
+        var padLen = 0
+        var buf = [UInt8](repeating: 0, count: 1)
+        while true {
+            guard SecRandomCopyBytes(kSecRandomDefault, 1, &buf) == errSecSuccess else {
+                throw ShieldError.randomGenerationFailed
+            }
+            let v = Int(buf[0])
+            if v < padRange * (256 / padRange) {
+                padLen = (v % padRange) + Self.minPadding
+                break
+            }
+        }
+        var padding = [UInt8](repeating: 0, count: padLen)
+        guard SecRandomCopyBytes(kSecRandomDefault, padLen, &padding) == errSecSuccess else {
+            throw ShieldError.randomGenerationFailed
+        }
 
-        return nonce + ciphertext + Array(mac)
+        // Data to encrypt: counter || timestamp || pad_len || padding || plaintext
+        let dataToEncrypt = counter + timestamp + [UInt8(padLen)] + padding + plaintext
+
+        // Generate keystream and XOR (using encryption subkey)
+        let keystream = generateKeystream(key: encKey, nonce: nonce, length: dataToEncrypt.count)
+        var ciphertext = [UInt8](repeating: 0, count: dataToEncrypt.count)
+        for i in 0..<dataToEncrypt.count {
+            ciphertext[i] = dataToEncrypt[i] ^ keystream[i]
+        }
+
+        // Compute HMAC over nonce || ciphertext (using MAC subkey)
+        let macData = nonce + ciphertext
+        let mac = Self.hmacSHA256(key: macKey, data: macData)
+
+        return nonce + ciphertext + Array(mac.prefix(Self.macSize))
     }
 
-    /// Decrypt and verify data.
-    ///
-    /// - Parameter encrypted: Ciphertext from encrypt()
-    /// - Returns: Plaintext bytes, or nil if authentication fails
-    public func decrypt(_ encrypted: [UInt8]) -> [UInt8]? {
+    /// Decrypt and verify data (auto-detects v1/v2).
+    public func decrypt(_ encrypted: [UInt8]) throws -> [UInt8] {
         let minSize = Self.nonceSize + 8 + Self.macSize
-        guard encrypted.count >= minSize else { return nil }
+        guard encrypted.count >= minSize else {
+            throw ShieldError.ciphertextTooShort
+        }
 
         let nonce = Array(encrypted[0..<Self.nonceSize])
         let ciphertext = Array(encrypted[Self.nonceSize..<(encrypted.count - Self.macSize)])
-        let mac = Array(encrypted[(encrypted.count - Self.macSize)...])
+        let receivedMac = Array(encrypted[(encrypted.count - Self.macSize)...])
 
-        // Verify MAC first (constant-time)
-        let expectedMac = Array(hmacSHA256(key: key, data: nonce + ciphertext).prefix(Self.macSize))
-        guard constantTimeEquals(mac, expectedMac) else { return nil }
+        // Verify MAC (using MAC subkey, constant-time)
+        let expectedMac = Array(Self.hmacSHA256(key: macKey, data: nonce + ciphertext).prefix(Self.macSize))
+        guard Self.constantTimeEquals(receivedMac, expectedMac) else {
+            throw ShieldError.authenticationFailed
+        }
 
-        // Decrypt
-        let keystream = generateKeystream(key: key, nonce: nonce, length: ciphertext.count)
+        // Decrypt (using encryption subkey)
+        let keystream = generateKeystream(key: encKey, nonce: nonce, length: ciphertext.count)
         var decrypted = [UInt8](repeating: 0, count: ciphertext.count)
         for i in 0..<ciphertext.count {
             decrypted[i] = ciphertext[i] ^ keystream[i]
         }
 
-        // Skip counter prefix (8 bytes)
+        // Auto-detect v2 by timestamp range
+        if decrypted.count >= Self.v2HeaderSize {
+            var timestampMs: Int64 = 0
+            for i in 0..<8 {
+                timestampMs |= Int64(decrypted[8 + i]) << (i * 8)
+            }
+
+            if timestampMs >= Self.minTimestampMs && timestampMs <= Self.maxTimestampMs {
+                // v2 format detected
+                let padLen = Int(decrypted[16])
+
+                guard padLen >= Self.minPadding && padLen <= Self.maxPadding else {
+                    throw ShieldError.authenticationFailed
+                }
+
+                let dataStart = Self.v2HeaderSize + padLen
+                guard decrypted.count >= dataStart else {
+                    throw ShieldError.ciphertextTooShort
+                }
+
+                if let maxAge = maxAgeMs {
+                    let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+                    let age = nowMs - timestampMs
+                    if timestampMs > nowMs + 5000 || age > maxAge {
+                        throw ShieldError.authenticationFailed
+                    }
+                }
+
+                return Array(decrypted[dataStart...])
+            }
+        }
+
+        // v1 format: skip counter (8 bytes)
         return Array(decrypted[8...])
     }
 
@@ -176,13 +257,15 @@ public final class Shield {
         return Array(keystream.prefix(length))
     }
 
-    private func hmacSHA256(key: [UInt8], data: [UInt8]) -> [UInt8] {
+    // MARK: - Crypto Utilities (public static for use by other Shield components)
+
+    public static func hmacSHA256(key: [UInt8], data: [UInt8]) -> [UInt8] {
         var result = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
         CCHmac(CCHmacAlgorithm(kCCHmacAlgSHA256), key, key.count, data, data.count, &result)
         return result
     }
 
-    private func constantTimeEquals(_ a: [UInt8], _ b: [UInt8]) -> Bool {
+    public static func constantTimeEquals(_ a: [UInt8], _ b: [UInt8]) -> Bool {
         guard a.count == b.count else { return false }
         var result: UInt8 = 0
         for i in 0..<a.count {
@@ -196,15 +279,21 @@ public final class Shield {
 
 public enum ShieldError: Error, LocalizedError {
     case invalidKeySize(expected: Int, actual: Int)
+    case ciphertextTooShort
     case authenticationFailed
+    case randomGenerationFailed
     case keychainError(OSStatus)
 
     public var errorDescription: String? {
         switch self {
         case .invalidKeySize(let expected, let actual):
             return "Invalid key size: expected \(expected) bytes, got \(actual)"
+        case .ciphertextTooShort:
+            return "Ciphertext too short"
         case .authenticationFailed:
             return "Authentication failed: wrong key or tampered data"
+        case .randomGenerationFailed:
+            return "Random generation failed"
         case .keychainError(let status):
             return "Keychain error: \(status)"
         }

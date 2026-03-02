@@ -1,6 +1,6 @@
 {
   "name": "@guard8/shield-browser",
-  "version": "1.0.0",
+  "version": "2.1.0",
   "description": "Shield Browser SDK - Transparent auto-decryption for web applications",
   "type": "module",
   "main": "dist/shield-browser.js",

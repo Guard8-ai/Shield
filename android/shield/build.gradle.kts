@@ -56,7 +56,7 @@ publishing {
         register<MavenPublication>("release") {
             groupId = "ai.guard8"
             artifactId = "shield-android"
-            version = "1.0.0"
+            version = "2.1.0"
 
             afterEvaluate {
                 from(components["release"])
