@@ -12,6 +12,27 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{Result, ShieldError};
 
+/// Current time in milliseconds since Unix epoch (platform-aware).
+fn current_timestamp_ms() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        // WASM: use Date.now() via extern binding (SystemTime unavailable)
+        #[wasm_bindgen::prelude::wasm_bindgen]
+        extern "C" {
+            #[wasm_bindgen::prelude::wasm_bindgen(js_namespace = Date, js_name = now)]
+            fn date_now() -> f64;
+        }
+        date_now() as u64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
+}
+
 /// PBKDF2 iteration count (matches Python implementation).
 const PBKDF2_ITERATIONS: u32 = 100_000;
 
@@ -230,10 +251,7 @@ impl Shield {
         let counter_bytes = 0u64.to_le_bytes();
 
         // Timestamp in milliseconds since Unix epoch
-        let timestamp_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let timestamp_ms = current_timestamp_ms();
         let timestamp_bytes = timestamp_ms.to_le_bytes();
 
         // Random padding: 32-128 bytes (rejection sampling to avoid modulo bias)

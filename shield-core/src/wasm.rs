@@ -54,7 +54,7 @@ impl WasmShield {
     #[must_use]
     pub fn new(password: &str, service: &str) -> Self {
         Self {
-            inner: Shield::new(password, service),
+            inner: Shield::new(password, service).with_max_age(None),
         }
     }
 
