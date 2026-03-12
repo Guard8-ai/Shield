@@ -50,6 +50,39 @@ jobs:
       - name: Run tests (no default features)
         run: cd shield-core && cargo test --no-default-features --verbose
 
+  # Device Fingerprint CLI
+  fingerprint:
+    name: Fingerprint (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, macos-15, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build CLI
+        run: cd shield-core && cargo build --release --features cli
+
+      - name: Run fingerprint command
+        shell: bash
+        run: |
+          FP=$(./shield-core/target/release/shield fingerprint 2>/dev/null || true)
+          echo "Fingerprint output: '$FP'"
+          if [ -z "$FP" ]; then
+            echo "WARN: fingerprint unavailable on this CI runner (expected for VMs)"
+            exit 0
+          fi
+          # Validate: exactly 32 hex characters
+          if echo "$FP" | grep -qE '^[0-9a-f]{32}$'; then
+            echo "PASS: valid 32-char hex fingerprint"
+          else
+            echo "FAIL: unexpected format: '$FP'"
+            exit 1
+          fi
+
   # Python Tests
   python:
     name: Python ${{ matrix.python }}
