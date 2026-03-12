@@ -24,6 +24,7 @@ use std::io::{self, BufRead, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
+use shield_core::fingerprint::{collect_fingerprint, FingerprintMode};
 use shield_core::password::{check_password, StrengthLevel};
 use shield_core::Shield;
 
@@ -41,6 +42,7 @@ fn main() -> ExitCode {
         "check" => cmd_check(&args[2..]),
         "text" => cmd_text(&args[2..]),
         "keygen" => cmd_keygen(&args[2..]),
+        "fingerprint" => cmd_fingerprint(&args[2..]),
         "info" => cmd_info(),
         "--help" | "-h" | "help" => {
             print_help();
@@ -71,6 +73,7 @@ COMMANDS:
     check <password>   Check password strength
     text <encrypt|decrypt> <data>  Encrypt/decrypt text
     keygen             Generate random key
+    fingerprint        Print hardware device fingerprint
     info               Show Shield information
 
 OPTIONS:
@@ -87,6 +90,8 @@ EXAMPLES:
     shield check "MyP@ssw0rd123"
     shield text encrypt "hello" -p mypass -s myservice
     shield keygen
+    shield fingerprint
+    shield fingerprint --mode cpu
 
 For more info: https://github.com/Dikestra-ai/Shield"#
     );
@@ -406,6 +411,44 @@ fn cmd_info() -> ExitCode {
     println!();
     println!("Repository:  https://github.com/Dikestra-ai/Shield");
     ExitCode::SUCCESS
+}
+
+fn cmd_fingerprint(args: &[String]) -> ExitCode {
+    let mut mode = FingerprintMode::Combined;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--mode" | "-m" => {
+                i += 1;
+                if let Some(m) = args.get(i) {
+                    mode = match m.as_str() {
+                        "combined" => FingerprintMode::Combined,
+                        "motherboard" | "mb" => FingerprintMode::Motherboard,
+                        "cpu" => FingerprintMode::CPU,
+                        other => {
+                            eprintln!("Unknown fingerprint mode: {other}");
+                            eprintln!("Valid modes: combined (default), motherboard, cpu");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    match collect_fingerprint(mode) {
+        Ok(fp) => {
+            println!("{fp}");
+            ExitCode::SUCCESS
+        }
+        Err(_) => {
+            eprintln!("Error: Hardware fingerprint unavailable on this platform");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 // Helper functions
