@@ -197,8 +197,7 @@ impl AttestationProvider for SEVAttestationProvider {
         // Verify expiration
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_secs());
 
         if payload.exp > 0 && now > payload.exp {
             return Ok(AttestationResult::failure(self.tee_type(), "Token expired")
