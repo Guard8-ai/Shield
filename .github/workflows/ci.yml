@@ -174,6 +174,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go }}
+          cache-dependency-path: go/go.sum
 
       - name: Run tests
         run: cd go && go test -v ./...
@@ -308,6 +309,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: '1.24'
+          cache-dependency-path: go/go.sum
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
