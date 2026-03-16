@@ -1,0 +1,55 @@
+# Shield Proxy — Example Configuration
+# Copy to /etc/shield-proxy/config.toml and adjust for your environment.
+
+[proxy]
+bind_address = "0.0.0.0:8443"
+max_connections = 10000
+shutdown_timeout_secs = 30
+
+[dns]
+bind_address = "0.0.0.0:5353"
+timeout_ms = 2000
+health_check_interval_secs = 10
+
+[[dns.upstreams]]
+address = "8.8.8.8:53"
+priority = 1
+
+[[dns.upstreams]]
+address = "1.1.1.1:53"
+priority = 2
+
+[[upstream]]
+name = "backend"
+address = "10.0.0.1:80"
+protocol = "tcp"
+shield_encrypt = false
+
+# Uncomment to enable Shield encryption for an upstream:
+# [[upstream]]
+# name = "secure-backend"
+# address = "10.0.0.2:443"
+# protocol = "tcp"
+# shield_encrypt = true
+# shield_key = "your-pre-shared-key-here"
+
+[shield]
+password = "change-me-in-production"
+service = "shield-proxy"
+replay_ttl_secs = 60
+
+# [redundancy]
+# enabled = true
+# peer_address = "10.0.0.3:8444"
+# heartbeat_interval_ms = 500
+# failover_timeout_ms = 3000
+# virtual_ip = "10.0.0.100"
+
+[metrics]
+enabled = true
+bind_address = "0.0.0.0:9090"
+path = "/metrics"
+
+[logging]
+level = "info"
+format = "text"

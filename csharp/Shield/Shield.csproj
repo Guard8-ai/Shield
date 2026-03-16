@@ -6,7 +6,7 @@
     <Nullable>disable</Nullable>
     <RootNamespace>Dikestra.Shield</RootNamespace>
     <AssemblyName>Dikestra.Shield</AssemblyName>
-    <Version>2.1.0</Version>
+    <Version>2.2.0</Version>
     <Authors>Dikestra.ai</Authors>
     <Description>EXPTIME-Secure Symmetric Encryption Library</Description>
   </PropertyGroup>

@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  shield-proxy-active:
+    build:
+      context: ../..
+      dockerfile: shield-proxy/Dockerfile
+    ports:
+      - "8443:8443"
+      - "5353:5353/udp"
+      - "9090:9090"
+    volumes:
+      - ./shield-proxy.toml:/etc/shield-proxy/config.toml:ro
+    environment:
+      RUST_LOG: info
+    restart: on-failure
+
+  shield-proxy-standby:
+    build:
+      context: ../..
+      dockerfile: shield-proxy/Dockerfile
+    volumes:
+      - ./shield-proxy-standby.toml:/etc/shield-proxy/config.toml:ro
+    environment:
+      RUST_LOG: info
+    restart: on-failure

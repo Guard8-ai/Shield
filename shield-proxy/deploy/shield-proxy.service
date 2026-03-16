@@ -1,0 +1,29 @@
+[Unit]
+Description=Shield Proxy - Transparent encryption proxy with DNS failover
+Documentation=https://github.com/Guard8-ai/Shield
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shield-proxy
+Group=shield-proxy
+ExecStart=/usr/local/bin/shield-proxy
+Environment=SHIELD_PROXY_CONFIG=/etc/shield-proxy/config.toml
+Environment=RUST_LOG=info
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/etc/shield-proxy
+
+# Watchdog
+WatchdogSec=30
+
+[Install]
+WantedBy=multi-user.target

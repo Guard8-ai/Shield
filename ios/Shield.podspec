@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'Shield'
-  s.version          = '1.0.0'
+  s.version          = '2.2.0'
   s.summary          = 'EXPTIME-secure symmetric encryption for iOS/macOS'
   s.description      = <<-DESC
     Shield provides symmetric cryptography with proven exponential-time security.

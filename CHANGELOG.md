@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-03-15
+
+### Added
+
+- **Shield Proxy** (`shield-proxy/`): Transparent, protocol-agnostic proxy extension
+  - Core TCP proxy with bidirectional forwarding and graceful shutdown
+  - DNS forwarding with multi-upstream failover and health checks
+  - Shield v2.1 encryption in the transport layer (length-prefixed framing)
+  - Protocol detection: HTTP, TLS/HTTPS, WebSocket, raw TCP (non-destructive peek)
+  - TOML configuration schema with validation and sensible defaults
+  - Hot redundancy: active/standby pair with UDP heartbeat and automatic failover
+  - Prometheus metrics endpoint (`/metrics`) and health endpoint (`/health`)
+  - systemd unit file, Dockerfile (multi-stage distroless), docker-compose for HA pair
+  - 33 tests covering all modules, zero clippy warnings
+
+### Changed
+
+- Version bumped to 2.2.0 across all 13 SDK package configs
+
 ## [2.1.0] - 2026-03-01
 
 ### Security

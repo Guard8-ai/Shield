@@ -1,0 +1,78 @@
+# ============================================================================
+# Guard8.ai - Shield Proxy
+# Transparent, protocol-agnostic proxy with Shield v2.1 encryption
+# ============================================================================
+
+[package]
+name = "shield-proxy"
+version = "2.2.0"
+edition = "2021"
+authors = ["Guard8.ai"]
+description = "Transparent proxy with Shield encryption, DNS failover, and hot redundancy"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "shield-proxy"
+path = "src/main.rs"
+
+[dependencies]
+# Shield encryption core
+shield-core = { path = "../shield-core", default-features = false, features = ["std"] }
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Configuration
+toml = "0.8"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Metrics
+prometheus = "0.13"
+
+# HTTP server for metrics/health endpoints
+axum = "0.7"
+
+# Byte manipulation
+bytes = "1.0"
+
+# Error handling
+thiserror = "1.0"
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["full", "test-util"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# ============================================================================
+# Lints - strict, matching shield-core
+# ============================================================================
+[lints.rust]
+dead_code = "deny"
+unused = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+similar_names = "allow"
+too_many_lines = "allow"
+manual_let_else = "allow"
+single_match_else = "allow"
+uninlined_format_args = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
