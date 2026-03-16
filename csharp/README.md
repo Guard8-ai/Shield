@@ -30,7 +30,7 @@ dotnet add package Dikestra.Shield
 ### PackageReference
 
 ```xml
-<PackageReference Include="Dikestra.Shield" Version="2.1.0" />
+<PackageReference Include="Dikestra.Shield" Version="2.2.0" />
 ```
 
 ## Quick Start

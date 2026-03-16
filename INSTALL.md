@@ -113,7 +113,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'ai.dikestra:shield:2.1.0'
+    implementation 'ai.dikestra:shield:2.2.0'
 }
 ```
 
@@ -169,7 +169,7 @@ byte[] encrypted = s.Encrypt(data);
 **Package.swift:**
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Dikestra-ai/Shield.git", from: "2.1.0")
+    .package(url: "https://github.com/Dikestra-ai/Shield.git", from: "2.2.0")
 ]
 ```
 
@@ -198,7 +198,7 @@ let encrypted = try s.encrypt(data)
 **build.gradle.kts:**
 ```kotlin
 dependencies {
-    implementation("ai.dikestra:shield:2.1.0")
+    implementation("ai.dikestra:shield:2.2.0")
 }
 ```
 
@@ -262,7 +262,7 @@ const encrypted = s.encrypt(new TextEncoder().encode("secret"));
 **Cargo.toml:**
 ```toml
 [dependencies]
-shield-core = "2.1"
+shield-core = "2.2"
 ```
 
 **From source:**

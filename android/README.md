@@ -20,13 +20,13 @@ Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Bre
 ### Gradle (Kotlin DSL)
 
 ```kotlin
-implementation("ai.dikestra:shield-android:2.1.0")
+implementation("ai.dikestra:shield-android:2.2.0")
 ```
 
 ### Gradle (Groovy)
 
 ```groovy
-implementation 'ai.dikestra:shield-android:2.1.0'
+implementation 'ai.dikestra:shield-android:2.2.0'
 ```
 
 ## Quick Start

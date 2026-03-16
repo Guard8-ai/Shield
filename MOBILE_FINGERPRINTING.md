@@ -1,4 +1,4 @@
-# Shield v2.1 Mobile Fingerprinting - Android & iOS
+# Shield Mobile Fingerprinting - Android & iOS
 
 **Status**: ✅ Implemented for Android (Kotlin) and iOS (Swift)
 **Security Level**: SUPERIOR to desktop fingerprinting (TEE/Secure Enclave backed)

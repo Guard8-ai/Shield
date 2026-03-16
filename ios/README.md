@@ -25,7 +25,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Dikestra-ai/Shield.git", from: "2.1.0")
+    .package(url: "https://github.com/Dikestra-ai/Shield.git", from: "2.2.0")
 ]
 ```
 
@@ -34,13 +34,13 @@ Or in Xcode: File → Add Packages → `https://github.com/Dikestra-ai/Shield`
 ### CocoaPods
 
 ```ruby
-pod 'Shield', '~> 2.1.0'
+pod 'Shield', '~> 2.2.0'
 ```
 
 ### Carthage
 
 ```
-github "Dikestra-ai/Shield" ~> 2.1.0
+github "Dikestra-ai/Shield" ~> 2.2.0
 ```
 
 ## Quick Start

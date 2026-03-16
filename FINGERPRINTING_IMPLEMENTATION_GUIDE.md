@@ -1,6 +1,6 @@
-# Shield v2.1 Hardware Fingerprinting - Implementation Guide
+# Shield Hardware Fingerprinting - Implementation Guide
 
-**Version**: 2.1
+**Version**: 2.2
 **Status**: Rust ✅ + Python ✅ Implemented | JavaScript/Go/Java/C Pattern Documented
 **TaskGuard Chain**: backend-037 (design) → backend-038-043 (impl) → docs-023 + testing-014
 

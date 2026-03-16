@@ -163,6 +163,10 @@ code := totp.Generate(time.Now().Unix())
 | `BrowserBridge` | Browser key exchange | Client-side decryption |
 | **Browser SDK** | | |
 | `ShieldBrowser` | Auto-decrypt fetch() | Transparent browser encryption |
+| **Shield Proxy** (Rust) | | |
+| `shield-proxy` | Transparent encryption proxy | Network-layer Shield appliance |
+| DNS Forwarder | Multi-upstream DNS failover | Resilient DNS resolution |
+| Hot Redundancy | Active/standby heartbeat | Zero-downtime failover |
 
 ---
 
@@ -328,6 +332,7 @@ Shield/
 ├── swift/           # Swift Package
 ├── kotlin/          # Kotlin/JVM
 ├── wasm/            # WebAssembly (re-exports shield-core)
+├── shield-proxy/    # Transparent encryption proxy (DNS failover, hot redundancy)
 ├── examples/        # Integration examples
 ├── tests/           # Cross-language integration tests
 ├── CHEATSHEET.md    # Quick reference for all languages
@@ -359,6 +364,9 @@ For comparison: AES-256-GCM achieves ~3.4 GB/s with hardware acceleration. Shiel
 # Rust core (121 tests: 106 unit + 7 interop + 8 doc-tests)
 cd shield-core && cargo test
 
+# Shield Proxy (33 tests)
+cd shield-proxy && cargo test
+
 # Python (161 tests)
 cd python && python -m pytest
 
@@ -378,7 +386,7 @@ cd java && gradle test
 cd wasm && cargo test
 ```
 
-**Total: 460+ tests across all implementations**
+**Total: 493+ tests across all implementations**
 
 ---
 

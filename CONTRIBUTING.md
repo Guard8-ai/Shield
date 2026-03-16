@@ -28,6 +28,8 @@ git clone https://github.com/Dikestra-ai/Shield.git
 cd Shield
 
 # Pick your language and run tests
+cd shield-core && cargo test       # Rust core
+cd shield-proxy && cargo test      # Shield Proxy
 cd python && python -m pytest      # Python
 cd javascript && npm test          # JavaScript
 cd go && go test ./...             # Go

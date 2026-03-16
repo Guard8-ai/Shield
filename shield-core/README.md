@@ -17,21 +17,21 @@ Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Bre
 
 ```toml
 [dependencies]
-shield-core = "2.1"
+shield-core = "2.2"
 ```
 
 For WebAssembly:
 
 ```toml
 [dependencies]
-shield-core = { version = "2.1", features = ["wasm"] }
+shield-core = { version = "2.2", features = ["wasm"] }
 ```
 
 For Confidential Computing (TEE attestation):
 
 ```toml
 [dependencies]
-shield-core = { version = "2.1", features = ["confidential"] }
+shield-core = { version = "2.2", features = ["confidential"] }
 ```
 
 ## Quick Start

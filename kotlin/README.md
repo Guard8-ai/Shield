@@ -18,13 +18,13 @@ Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Bre
 ### Gradle (Kotlin DSL)
 
 ```kotlin
-implementation("ai.dikestra:shield-kotlin:2.1.0")
+implementation("ai.dikestra:shield-kotlin:2.2.0")
 ```
 
 ### Gradle (Groovy)
 
 ```groovy
-implementation 'ai.dikestra:shield-kotlin:2.1.0'
+implementation 'ai.dikestra:shield-kotlin:2.2.0'
 ```
 
 ### Maven
@@ -33,7 +33,7 @@ implementation 'ai.dikestra:shield-kotlin:2.1.0'
 <dependency>
     <groupId>ai.dikestra</groupId>
     <artifactId>shield-kotlin</artifactId>
-    <version>2.1.0</version>
+    <version>2.2.0</version>
 </dependency>
 ```
 

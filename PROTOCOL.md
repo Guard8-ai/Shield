@@ -1,8 +1,8 @@
 # Shield Wire Protocol Specification
 
-**Version**: 2.1
+**Version**: 2.2
 **Status**: Draft
-**Last Updated**: 2026-03-01
+**Last Updated**: 2026-03-16
 
 ## Overview
 
