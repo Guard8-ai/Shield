@@ -89,6 +89,12 @@ DerivedData/
 *.pem
 *.key
 
+# TaskGuard (proprietary task tracking — never commit)
+tasks/
+.taskguard/
+AGENTIC_AI_TASKGUARD_GUIDE.md
+AGENTIC_AI_DOMGUARD_GUIDE.md
+
 # Test/Coverage
 coverage/
 *.lcov
