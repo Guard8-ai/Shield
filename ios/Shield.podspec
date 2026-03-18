@@ -16,7 +16,7 @@ Pod::Spec.new do |s|
 
   s.homepage         = 'https://github.com/Dikestra-ai/Shield'
   s.license          = { :type => 'MIT', :file => 'LICENSE' }
-  s.author           = { 'Dikestra.ai' => 'admin@gibraltarcloud.dev' }
+  s.author           = { 'Eliran Sabag' => 'admin@gibraltarcloud.dev' }
   s.source           = { :git => 'https://github.com/Dikestra-ai/Shield.git', :tag => "v#{s.version}" }
   s.social_media_url = 'https://twitter.com/dikestraai'
 

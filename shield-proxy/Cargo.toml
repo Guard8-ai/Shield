@@ -1,5 +1,5 @@
 # ============================================================================
-# Guard8.ai - Shield Proxy
+# Shield Proxy
 # Transparent, protocol-agnostic proxy with Shield v2.1 encryption
 # ============================================================================
 
@@ -7,7 +7,7 @@
 name = "shield-proxy"
 version = "2.2.0"
 edition = "2021"
-authors = ["Guard8.ai"]
+authors = ["Eliran Sabag"]
 description = "Transparent proxy with Shield encryption, DNS failover, and hot redundancy"
 license = "MIT"
 publish = false

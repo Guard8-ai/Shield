@@ -89,7 +89,8 @@ DerivedData/
 *.pem
 *.key
 
-# TaskGuard (proprietary task tracking — never commit)
+# Proprietary — never commit
+CLAUDE.md
 tasks/
 .taskguard/
 AGENTIC_AI_TASKGUARD_GUIDE.md

@@ -9,7 +9,7 @@ description = "EXPTIME-secure encryption library - symmetric crypto with proven 
 readme = "README.md"
 license = {text = "CC0-1.0"}
 authors = [
-    {name = "Dikestra.ai", email = "admin@gibraltarcloud.dev"}
+    {name = "Eliran Sabag", email = "admin@gibraltarcloud.dev"}
 ]
 keywords = ["cryptography", "encryption", "security", "post-quantum", "symmetric"]
 classifiers = [

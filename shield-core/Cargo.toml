@@ -7,7 +7,7 @@
 name = "shield-core"
 version = "2.2.0"
 edition = "2021"
-authors = ["Dikestra.ai"]
+authors = ["Eliran Sabag"]
 description = "EXPTIME-secure encryption library - Rust core implementation"
 license = "CC0-1.0"
 repository = "https://github.com/Dikestra.ai/Shield"

@@ -77,7 +77,7 @@ publishing {
                 developers {
                     developer {
                         id.set("dikestra")
-                        name.set("Dikestra.ai")
+                        name.set("Eliran Sabag")
                         email.set("admin@gibraltarcloud.dev")
                     }
                 }

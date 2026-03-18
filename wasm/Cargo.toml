@@ -6,7 +6,7 @@
 [package]
 name = "shield-wasm"
 version = "2.2.0"
-authors = ["Dikestra.ai"]
+authors = ["Eliran Sabag"]
 edition = "2021"
 description = "EXPTIME-secure encryption - WebAssembly Module"
 license = "MIT"

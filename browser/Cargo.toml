@@ -5,9 +5,9 @@
 
 [package]
 name = "shield-browser"
-version = "1.0.0"
+version = "2.2.0"
 edition = "2021"
-authors = ["Dikestra.ai"]
+authors = ["Eliran Sabag"]
 description = "Shield Browser SDK - Transparent auto-decryption for web applications"
 license = "MIT"
 repository = "https://github.com/Dikestra-ai/Shield"

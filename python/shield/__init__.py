@@ -23,7 +23,7 @@ Security:
 """
 
 __version__ = "2.2.0"
-__author__ = "Dikestra.ai"
+__author__ = "Eliran Sabag"
 __license__ = "CC0-1.0"
 
 from shield.core import Shield, quick_encrypt, quick_decrypt
