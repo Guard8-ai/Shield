@@ -51,7 +51,7 @@ class StreamCipher private constructor(
         }
 
         private fun deriveKey(password: String, salt: ByteArray): ByteArray {
-            val spec = PBEKeySpec(password.toCharArray(), salt, 100_000, 256)
+            val spec = PBEKeySpec(password.toCharArray(), salt, 600_000, 256)
             val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
             return factory.generateSecret(spec).encoded
         }

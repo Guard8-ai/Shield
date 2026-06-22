@@ -96,7 +96,9 @@ pub struct IdentityProvider {
 }
 
 impl IdentityProvider {
-    const ITERATIONS: u32 = 100_000;
+    // CR-2: 600,000 PBKDF2-HMAC-SHA256 iterations (OWASP 2023 floor).
+    // (Salt is already a per-user random 16 bytes, see register().)
+    const ITERATIONS: u32 = 600_000;
 
     /// Create new identity provider.
     #[must_use]

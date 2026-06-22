@@ -4,7 +4,7 @@
 
 # Shield
 
-**EXPTIME-ready encryption that survives P=NP and quantum computers.**
+**Authenticated symmetric encryption that uses no RSA/ECC, so it is unaffected by attacks that break asymmetric crypto; 256-bit keys give ~128-bit post-quantum security.**
 
 [![CI](https://github.com/Dikestra-ai/Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/Dikestra-ai/Shield/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -14,7 +14,6 @@
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](python/)
 [![JavaScript](https://img.shields.io/badge/JavaScript-ES6+-yellow.svg)](javascript/)
 [![Go](https://img.shields.io/badge/Go-1.19+-00ADD8.svg)](go/)
-[![Security](https://img.shields.io/badge/Security-Audited-green.svg)](SECURITY_AUDIT.md)
 [![Clippy](https://img.shields.io/badge/Clippy-0%20warnings-brightgreen.svg)](shield-core/)
 
 ```bash
@@ -46,12 +45,12 @@ That's it. No keys to manage. No certificates. No configuration.
 
 | Threat | RSA/ECDSA | Shield |
 |--------|-----------|--------|
-| P=NP proven | Broken | Safe |
-| Quantum computer | Broken | Safe |
-| 2^128 brute force | Broken | Safe |
-| 2^256 brute force | Broken | **Still safe** |
+| P=NP proven | Broken | Not directly helped (no asymmetric structure to exploit) |
+| Quantum computer | Broken | ~128-bit post-quantum (Grover halves the key) |
+| 2^128 brute force | Broken | Infeasible |
+| 2^256 brute force | Broken | **Infeasible** |
 
-Shield uses only symmetric cryptography with 256-bit keys. Breaking it requires 2^256 operations - more than atoms in the observable universe - regardless of any mathematical breakthrough.
+Shield uses only symmetric cryptography with 256-bit keys. P=NP would break RSA/ECDSA, but brute-forcing a random 256-bit symmetric key has no structure for a polynomial algorithm to exploit, so a P=NP result would not directly help. Brute force requires 2^256 operations — note this is a claim that rests on standard assumptions about SHA-256/HMAC, not a mathematical proof.
 
 ---
 
@@ -286,25 +285,24 @@ const decrypted = new Shield('pw', 'app').decrypt(encrypted);
 | Parameter | Value | Why |
 |-----------|-------|-----|
 | Key derivation | PBKDF2-SHA256 | Proven, NIST-approved |
-| Iterations | 100,000 | ~200ms on modern hardware |
+| Iterations | 600,000 | ~200ms on modern hardware |
 | Key size | 256 bits | 2^256 brute-force resistance |
 | Nonce | 128 bits random | Unique per encryption |
 | MAC | HMAC-SHA256 (128-bit) | Tamper detection |
-| Stream cipher | SHA256-CTR | Symmetric, EXPTIME-hard |
+| Stream cipher | SHA256-CTR | Symmetric keystream |
 | Key separation | HMAC domain labels | Separate enc/mac subkeys |
-| Replay protection | Timestamp validation | 60-second default window |
+| Freshness window | Timestamp-based | Rejects messages older than the window (60s default); NOT full replay protection — the base API does not track seen nonces, so identical ciphertext can be replayed within the window. Use RatchetSession for per-message counters |
 | Length obfuscation | Random padding (32-128 bytes) | Hides message size |
 
 ---
 
 ## What Shield Protects Against
 
-- **Brute force** - 100,000 PBKDF2 iterations slow attackers
+- **Brute force** - 600,000 PBKDF2 iterations slow attackers
 - **Tampering** - HMAC-SHA256 detects any modification
-- **Replay attacks** - Ratcheting with message counters
-- **Quantum computers** - 256-bit symmetric = 128-bit post-quantum
+- **Replay attacks** - Use RatchetSession (per-message counters); the base API only enforces a timestamp freshness window
+- **Quantum computers** - 256-bit symmetric = ~128-bit post-quantum
 - **P=NP proofs** - No asymmetric crypto to break
-- **Future math** - EXPTIME hardness is unconditional
 
 ## What Shield Does NOT Protect Against
 
@@ -354,7 +352,7 @@ Shield/
 | TOTP generation | <1ms | |
 | Lamport signing | ~10ms | 8KB signature |
 
-For comparison: AES-256-GCM achieves ~3.4 GB/s with hardware acceleration. Shield prioritizes simplicity and EXPTIME security over raw speed.
+For comparison: AES-256-GCM achieves ~3.4 GB/s with hardware acceleration. Shield prioritizes simplicity over raw speed.
 
 ---
 

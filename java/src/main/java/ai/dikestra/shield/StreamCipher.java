@@ -269,7 +269,7 @@ public class StreamCipher {
 
     private static byte[] deriveKey(String password, byte[] salt) {
         try {
-            PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), salt, 100000, 256);
+            PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), salt, 600000, 256);
             SecretKeyFactory skf = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
             return skf.generateSecret(spec).getEncoded();
         } catch (Exception e) {

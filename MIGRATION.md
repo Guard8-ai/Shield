@@ -340,5 +340,5 @@ No. Shield is ~10-20x slower than hardware-accelerated AES-GCM. See [BENCHMARKS.
 
 1. **Password-based**: No key files to manage
 2. **Cross-language**: 13 identical implementations
-3. **EXPTIME security**: Proven 2^256 brute-force resistance
+3. **Symmetric security**: 256-bit keys give 2^256 brute-force resistance (assuming the primitives are secure)
 4. **Simpler API**: `encrypt()`/`decrypt()` handle everything

@@ -72,16 +72,26 @@ class TestShield:
         with pytest.raises(ValueError):
             Shield.with_key(b"short")
 
-    def test_key_derivation_deterministic(self):
-        """Same password/service produces same key."""
-        s1 = Shield("password", "service")
-        s2 = Shield("password", "service")
+    def test_key_derivation_deterministic_with_explicit_salt(self):
+        """Same password/service AND same explicit salt produces same key.
+
+        NOTE: updated for CR-1. Previously this asserted that
+        Shield(password, service) alone is deterministic -- that WAS the
+        high-severity bug (every user of a service shared one key). Keys are
+        now per-instance random by default; determinism only holds when the
+        caller pins the salt explicitly (e.g. the recipient re-deriving from a
+        header salt).
+        """
+        salt = os.urandom(16)
+        s1 = Shield("password", "service", salt=salt)
+        s2 = Shield("password", "service", salt=salt)
         assert s1.key == s2.key
 
     def test_different_services_different_keys(self):
-        """Different services produce different keys."""
-        s1 = Shield("password", "service1")
-        s2 = Shield("password", "service2")
+        """Different services produce different keys (same fixed salt)."""
+        salt = os.urandom(16)
+        s1 = Shield("password", "service1", salt=salt)
+        s2 = Shield("password", "service2", salt=salt)
         assert s1.key != s2.key
 
     def test_v2_roundtrip(self):
@@ -101,45 +111,29 @@ class TestShield:
         decrypted = s.decrypt(encrypted)
         assert decrypted == plaintext
 
-    def test_v2_replay_protection_expired(self):
-        """v2 format: expired message should be rejected."""
-        import time
-        import struct
-        from shield.core import NONCE_SIZE, MAC_SIZE, V2_HEADER_SIZE
+    def _seal_with_timestamp(self, s, plaintext, timestamp_ms, pad_len=32):
+        """Build a v4 password-mode ciphertext with an explicit timestamp.
 
-        s = Shield("password", "service", max_age_ms=1000)  # 1 second max age
-        plaintext = b"Old message"
-
-        # Manually create an old timestamp (2 seconds ago)
-        old_timestamp_ms = int(time.time() * 1000) - 2000
-
-        # Encrypt manually with old timestamp
+        Uses the deterministic AEAD seal so a chosen (old) timestamp can be
+        embedded to exercise the freshness window.
+        """
+        from shield.core import _seal_deterministic, NONCE_SIZE
         nonce = os.urandom(NONCE_SIZE)
-        counter_bytes = struct.pack("<Q", 0)
-        timestamp_bytes = struct.pack("<Q", old_timestamp_ms)
-        pad_len = 32
-        pad_len_byte = struct.pack("B", pad_len)
         padding = os.urandom(pad_len)
+        return _seal_deterministic(
+            s._aead_key, s._suite, s._salt, nonce, timestamp_ms, pad_len, padding, plaintext
+        )
 
-        data = counter_bytes + timestamp_bytes + pad_len_byte + padding + plaintext
-
-        # Use internal encryption
-        from shield.core import _generate_keystream
-        import hmac
-        import hashlib
-        from shield.core import MAC_SIZE as MAC_SIZE_CONST
-
-        keystream = _generate_keystream(s.key, nonce, len(data))
-        ciphertext = bytes(p ^ k for p, k in zip(data, keystream))
-        mac = hmac.new(s.key, nonce + ciphertext, hashlib.sha256).digest()[:MAC_SIZE_CONST]
-        encrypted = nonce + ciphertext + mac
-
-        # Should reject expired message
-        decrypted = s.decrypt(encrypted)
-        assert decrypted is None
+    def test_v4_replay_protection_expired(self):
+        """Freshness window: an expired message is rejected (v4 AEAD)."""
+        import time
+        s = Shield("password", "service", max_age_ms=1000)  # 1 second max age
+        old_timestamp_ms = int(time.time() * 1000) - 2000
+        encrypted = self._seal_with_timestamp(s, b"Old message", old_timestamp_ms)
+        assert s.decrypt(encrypted) is None
 
     def test_v2_length_variation(self):
-        """v2 format: multiple encryptions have different lengths (random padding)."""
+        """Multiple encryptions have different lengths (random padding)."""
         s = Shield("password", "service")
         plaintext = b"Same message"
 
@@ -151,117 +145,34 @@ class TestShield:
         # Should have multiple different lengths due to random padding (32-128)
         assert len(lengths) > 1
 
-    def test_v1_backward_compatibility(self):
-        """Can decrypt v1 ciphertext (auto-detection)."""
-        import struct
-        from shield.core import NONCE_SIZE, MAC_SIZE, _generate_keystream
-        import hmac
-        import hashlib
+    def test_old_format_rejected(self):
+        """Legacy v3 (0x02 / 0x12) and unversioned blobs are rejected by v4.
 
+        v4 uses version bytes 0x03 (password) / 0x13 (key); a leading byte from
+        an older format does not dispatch, so decrypt() refuses it.
+        """
         s = Shield("password", "service")
-        plaintext = b"v1 message"
+        # A well-formed-looking v3 password blob begins with 0x02.
+        legacy_v3 = bytes([0x02]) + os.urandom(16 + 16 + 40 + 16)
+        assert s.decrypt(legacy_v3) is None
+        # An unversioned blob (random leading byte) is also rejected.
+        assert s.decrypt(os.urandom(80)) is None
 
-        # Manually create v1 ciphertext: counter(8) || plaintext
-        nonce = os.urandom(NONCE_SIZE)
-        counter_bytes = struct.pack("<Q", 0)
-        data = counter_bytes + plaintext
-
-        keystream = _generate_keystream(s._enc_key, nonce, len(data))
-        ciphertext = bytes(p ^ k for p, k in zip(data, keystream))
-        mac = hmac.new(s._mac_key, nonce + ciphertext, hashlib.sha256).digest()[:MAC_SIZE]
-        encrypted = nonce + ciphertext + mac
-
-        # Should auto-detect and decrypt as v1
-        decrypted = s.decrypt(encrypted)
-        assert decrypted == plaintext
-
-    def test_decrypt_v1_explicit(self):
-        """Explicit v1 decryption using decrypt_v1()."""
-        import struct
-        from shield.core import NONCE_SIZE, MAC_SIZE, _generate_keystream
-        import hmac
-        import hashlib
-
-        s = Shield("password", "service")
-        plaintext = b"v1 explicit"
-
-        # Create v1 ciphertext
-        nonce = os.urandom(NONCE_SIZE)
-        counter_bytes = struct.pack("<Q", 0)
-        data = counter_bytes + plaintext
-
-        keystream = _generate_keystream(s._enc_key, nonce, len(data))
-        ciphertext = bytes(p ^ k for p, k in zip(data, keystream))
-        mac = hmac.new(s._mac_key, nonce + ciphertext, hashlib.sha256).digest()[:MAC_SIZE]
-        encrypted = nonce + ciphertext + mac
-
-        # Decrypt using explicit v1 method
-        decrypted = s.decrypt_v1(encrypted)
-        assert decrypted == plaintext
-
-    def test_no_fallback_on_expired_v2(self):
-        """Expired v2 message should NOT fallback to v1."""
+    def test_no_replay_on_expired_message(self):
+        """Expired message is rejected by the freshness window (v4 AEAD)."""
         import time
-        import struct
-        from shield.core import NONCE_SIZE, MAC_SIZE, V2_HEADER_SIZE, _generate_keystream
-        import hmac
-        import hashlib
-
         s = Shield("password", "service", max_age_ms=500)
-
-        # Create expired v2 message (2 seconds old)
         old_timestamp_ms = int(time.time() * 1000) - 2000
-        plaintext = b"expired v2"
+        encrypted = self._seal_with_timestamp(s, b"expired", old_timestamp_ms)
+        assert s.decrypt(encrypted) is None
 
-        nonce = os.urandom(NONCE_SIZE)
-        counter_bytes = struct.pack("<Q", 0)
-        timestamp_bytes = struct.pack("<Q", old_timestamp_ms)
-        pad_len = 32
-        pad_len_byte = struct.pack("B", pad_len)
-        padding = os.urandom(pad_len)
-
-        data = counter_bytes + timestamp_bytes + pad_len_byte + padding + plaintext
-
-        keystream = _generate_keystream(s._enc_key, nonce, len(data))
-        ciphertext = bytes(p ^ k for p, k in zip(data, keystream))
-        mac = hmac.new(s._mac_key, nonce + ciphertext, hashlib.sha256).digest()[:MAC_SIZE]
-        encrypted = nonce + ciphertext + mac
-
-        # Should reject (not fallback to v1)
-        decrypted = s.decrypt(encrypted)
-        assert decrypted is None
-
-    def test_v2_disabled_replay_protection(self):
-        """v2 with max_age_ms=None disables replay protection."""
+    def test_disabled_replay_protection(self):
+        """max_age_ms=None disables the freshness window (v4 AEAD)."""
         import time
-        import struct
-        from shield.core import NONCE_SIZE, MAC_SIZE, _generate_keystream
-        import hmac
-        import hashlib
-
         s = Shield("password", "service", max_age_ms=None)
-
-        # Create message with very old timestamp (should still decrypt)
         old_timestamp_ms = int(time.time() * 1000) - 100_000
-        plaintext = b"old but valid"
-
-        nonce = os.urandom(NONCE_SIZE)
-        counter_bytes = struct.pack("<Q", 0)
-        timestamp_bytes = struct.pack("<Q", old_timestamp_ms)
-        pad_len = 32
-        pad_len_byte = struct.pack("B", pad_len)
-        padding = os.urandom(pad_len)
-
-        data = counter_bytes + timestamp_bytes + pad_len_byte + padding + plaintext
-
-        keystream = _generate_keystream(s._enc_key, nonce, len(data))
-        ciphertext = bytes(p ^ k for p, k in zip(data, keystream))
-        mac = hmac.new(s._mac_key, nonce + ciphertext, hashlib.sha256).digest()[:MAC_SIZE]
-        encrypted = nonce + ciphertext + mac
-
-        # Should decrypt successfully (no age check)
-        decrypted = s.decrypt(encrypted)
-        assert decrypted == plaintext
+        encrypted = self._seal_with_timestamp(s, b"old but valid", old_timestamp_ms)
+        assert s.decrypt(encrypted) == b"old but valid"
 
 
 class TestQuickEncrypt:

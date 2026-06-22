@@ -171,7 +171,7 @@ impl OpenAPISchemas {
     info(
         title = "Shield Confidential Computing API",
         version = "1.0.0",
-        description = "EXPTIME-secure encryption with hardware attestation verification",
+        description = "Authenticated symmetric encryption with hardware attestation verification",
         license(name = "CC0-1.0")
     ),
     paths(

@@ -42,8 +42,10 @@ func NewPAKEExchange(password, identity string) (*PAKEExchange, error) {
 	}
 
 	// Derive password verifier
+	// PAKE verifier must be reproducible from the shared password+identity by
+	// both parties. CR-2: 600,000 iterations (OWASP 2023 floor).
 	salt := sha256.Sum256([]byte("pake:" + identity))
-	verifier := pbkdf2.Key([]byte(password), salt[:], 100000, KeySize, sha256.New)
+	verifier := pbkdf2.Key([]byte(password), salt[:], 600000, KeySize, sha256.New)
 
 	// Public value = H(verifier || privateValue)
 	h := sha256.New()
@@ -58,7 +60,7 @@ func NewPAKEExchange(password, identity string) (*PAKEExchange, error) {
 func (pe *PAKEExchange) DeriveKey(peerPublic []byte) []byte {
 	// Derive password verifier
 	salt := sha256.Sum256([]byte("pake:" + pe.identity))
-	verifier := pbkdf2.Key([]byte(pe.password), salt[:], 100000, KeySize, sha256.New)
+	verifier := pbkdf2.Key([]byte(pe.password), salt[:], 600000, KeySize, sha256.New)
 
 	// Shared secret = H(verifier || sorted(myPublic, peerPublic))
 	// Sorting ensures both parties derive the same key

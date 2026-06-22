@@ -23,7 +23,7 @@ import javax.crypto.spec.PBEKeySpec
  * Uses role binding to prevent reflection attacks.
  */
 object PAKEExchange {
-    const val DEFAULT_ITERATIONS = 200000
+    const val DEFAULT_ITERATIONS = 600000 // CR-2: OWASP 2023 floor
     private val random = SecureRandom()
 
     /**
@@ -32,7 +32,7 @@ object PAKEExchange {
      * @param password Shared password between parties
      * @param salt Public salt (can be exchanged openly)
      * @param role Role identifier ('alice', 'bob', 'initiator', etc.)
-     * @param iterations PBKDF2 iterations (default: 200000)
+     * @param iterations PBKDF2 iterations (default: 600000)
      * @return 32-byte key contribution
      */
     fun derive(password: String, salt: ByteArray, role: String, iterations: Int = DEFAULT_ITERATIONS): ByteArray {

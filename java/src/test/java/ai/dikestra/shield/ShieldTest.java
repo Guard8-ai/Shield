@@ -50,6 +50,129 @@ public class ShieldTest {
         assertArrayEquals(plaintext, decrypted);
     }
 
+    // ============== Security-fix Tests (CR-1 / CR-2 / CR-3) ==============
+
+    @Test
+    void testSamePasswordServiceDifferentKeys() {
+        // CR-1: two instances with same password+service get DIFFERENT keys
+        // because each generates a fresh random salt.
+        Shield a = new Shield("hunter2", "github.com");
+        Shield b = new Shield("hunter2", "github.com");
+
+        byte[] msg = "identical plaintext".getBytes();
+        byte[] ca = a.encrypt(msg);
+        byte[] cb = b.encrypt(msg);
+
+        // Salt lives at bytes [2..18) of a v4 password-mode ciphertext (after version + suite).
+        byte[] saltA = Arrays.copyOfRange(ca, 2, 2 + Shield.SALT_SIZE);
+        byte[] saltB = Arrays.copyOfRange(cb, 2, 2 + Shield.SALT_SIZE);
+        assertFalse(Arrays.equals(saltA, saltB));
+        assertFalse(Arrays.equals(a.getKey(), b.getKey()));
+    }
+
+    @Test
+    void testCrossInstanceRoundtrip() {
+        // CR-1: an independent instance with the same password+service decrypts,
+        // because the random salt travels in the header and the key is re-derived.
+        Shield alice = new Shield("correct horse battery staple", "service.example");
+        Shield bob = new Shield("correct horse battery staple", "service.example");
+        byte[] msg = "hello from alice".getBytes();
+        assertArrayEquals(msg, bob.decrypt(alice.encrypt(msg)));
+    }
+
+    @Test
+    void testWrongPasswordFails() {
+        Shield sender = new Shield("right-password", "example.com");
+        Shield wrong = new Shield("wrong-password", "example.com");
+        byte[] encrypted = sender.encrypt("secret".getBytes());
+        assertThrows(RuntimeException.class, () -> wrong.decrypt(encrypted));
+    }
+
+    @Test
+    void testIterations600k() {
+        // CR-2: PBKDF2 iteration count is 600,000.
+        assertEquals(600000, Shield.ITERATIONS);
+    }
+
+    @Test
+    void testVersionBytes() {
+        // v4: password ciphertext starts with 0x03; key/quick with 0x13.
+        byte[] pwCt = new Shield("pw", "svc").encrypt("x".getBytes());
+        assertEquals(Shield.VERSION_PASSWORD, pwCt[0]);
+        assertEquals((byte) 0x03, pwCt[0]);
+
+        byte[] key = new byte[Shield.KEY_SIZE];
+        byte[] keyCt = new Shield(key).encrypt("x".getBytes());
+        assertEquals(Shield.VERSION_KEY, keyCt[0]);
+        assertEquals((byte) 0x13, keyCt[0]);
+
+        byte[] quickCt = Shield.quickEncrypt(key, "x".getBytes());
+        assertEquals(Shield.VERSION_KEY, quickCt[0]);
+    }
+
+    @Test
+    void testTamperSaltDetected() {
+        // CR-3: the salt is authenticated; flipping a salt byte fails auth.
+        Shield s = new Shield("pw", "svc");
+        byte[] ct = s.encrypt("authenticated salt".getBytes());
+        ct[2] ^= 0xFF;  // first salt byte (after version + suite)
+        assertThrows(SecurityException.class, () -> s.decrypt(ct));
+    }
+
+    @Test
+    void testTamperVersionDetected() {
+        // CR-3: the version byte is authenticated.
+        Shield s = new Shield("pw", "svc");
+        byte[] ct = s.encrypt("authenticated version".getBytes());
+        ct[0] ^= 0xFF;
+        assertThrows(RuntimeException.class, () -> s.decrypt(ct));
+    }
+
+    @Test
+    void testUnknownVersionRejected() {
+        // CR-3: dispatch is on the version byte; an unknown version is rejected.
+        Shield s = new Shield("pw", "svc");
+        byte[] ct = s.encrypt("x".getBytes());
+        ct[0] = 0x7F;
+        assertThrows(SecurityException.class, () -> s.decrypt(ct));
+    }
+
+    @Test
+    void testFullTamperDetection() {
+        // Flipping ANY byte (version, salt, nonce, ct, mac) fails authentication.
+        Shield s = new Shield("pw", "svc");
+        byte[] ct = s.encrypt("secret payload".getBytes());
+        assertArrayEquals("secret payload".getBytes(), s.decrypt(ct));
+
+        for (int i = 0; i < ct.length; i++) {
+            byte[] tampered = ct.clone();
+            tampered[i] ^= 0xFF;
+            final int idx = i;
+            assertThrows(RuntimeException.class, () -> s.decrypt(tampered),
+                    "tamper at byte " + idx + " not detected");
+        }
+    }
+
+    @Test
+    void testKeyModeRejectsPasswordCiphertext() {
+        Shield pw = new Shield("password", "service");
+        byte[] ct = pw.encrypt("pw secret".getBytes());
+        Shield ks = new Shield(new byte[Shield.KEY_SIZE]);
+        assertThrows(RuntimeException.class, () -> ks.decrypt(ct));
+    }
+
+    @Test
+    void testExplicitSaltIsHonoredAndStored() {
+        byte[] salt = Shield.randomBytes(Shield.SALT_SIZE);
+        Shield a = new Shield("pw", "svc", salt, Shield.ITERATIONS, Shield.DEFAULT_MAX_AGE_MS);
+        Shield b = new Shield("pw", "svc", salt, Shield.ITERATIONS, Shield.DEFAULT_MAX_AGE_MS);
+        assertArrayEquals(a.getKey(), b.getKey());
+
+        byte[] ct = a.encrypt("data".getBytes());
+        assertArrayEquals(salt, Arrays.copyOfRange(ct, 2, 2 + Shield.SALT_SIZE));
+        assertArrayEquals("data".getBytes(), b.decrypt(ct));
+    }
+
     @Test
     void testInvalidKeySize() {
         assertThrows(IllegalArgumentException.class, () -> {
@@ -128,34 +251,13 @@ public class ShieldTest {
     }
 
     @Test
-    void testV1BackwardCompatibility() {
+    void testNoLegacyFallback() {
+        // Clean break: legacy v1 decode has been removed. A headerless ciphertext
+        // (version+salt stripped) must be rejected outright, no heuristic fallback.
         Shield shield = new Shield("password", "service", 60000L);
-        byte[] plaintext = "v1 message".getBytes();
-
-        // For this test to work properly, we'd need actual v1 ciphertext
-        // For now, verify v2 decrypts correctly
-        byte[] encrypted = shield.encrypt(plaintext);
-        byte[] decrypted = shield.decrypt(encrypted);
-
-        assertArrayEquals(plaintext, decrypted);
-        shield.wipe();
-    }
-
-    @Test
-    void testDecryptV1Explicit() {
-        byte[] key = new byte[Shield.KEY_SIZE];
-        Shield shield = new Shield(key);
-
-        // For this test to work properly, we'd need actual v1 ciphertext
-        byte[] encrypted = shield.encrypt("test".getBytes());
-        // May fail since encrypted is v2, but method exists
-        assertDoesNotThrow(() -> {
-            try {
-                shield.decryptV1(encrypted);
-            } catch (Exception e) {
-                // Expected to fail with v2 ciphertext
-            }
-        });
+        byte[] encrypted = shield.encrypt("modern message".getBytes());
+        byte[] legacy = Arrays.copyOfRange(encrypted, 2 + Shield.SALT_SIZE, encrypted.length);
+        assertThrows(RuntimeException.class, () -> shield.decrypt(legacy));
         shield.wipe();
     }
 

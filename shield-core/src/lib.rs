@@ -1,11 +1,11 @@
 //! # Shield Core
 //!
-//! EXPTIME-secure encryption library - Rust implementation.
+//! Authenticated symmetric encryption library - Rust implementation.
 //!
 //! ## Security Model
 //!
-//! Shield uses only symmetric primitives with proven exponential-time security.
-//! Breaking requires 2^256 operations - no shortcut exists.
+//! Shield uses only symmetric primitives — 256-bit keys give ~128-bit post-quantum security.
+//! Brute-forcing a full 256-bit key requires 2^256 operations; this relies on the standard assumption that SHA-256/HMAC have no exploitable structure (an assumption, not a mathematical proof).
 //! - PBKDF2-SHA256 for key derivation
 //! - AES-256-CTR-like stream cipher (SHA256-based keystream)
 //! - HMAC-SHA256 for authentication
@@ -52,6 +52,8 @@ mod identity;
 pub mod password;
 #[cfg(feature = "pgvector")]
 pub mod pgvector;
+#[cfg(feature = "pq")]
+pub mod pqhybrid;
 mod random;
 mod ratchet;
 mod rotation;
@@ -70,6 +72,8 @@ pub use exchange::{KeySplitter, PAKEExchange, QRExchange};
 pub use fingerprint::FingerprintMode;
 pub use group::{BroadcastEncryption, EncryptedBroadcast, EncryptedGroupMessage, GroupEncryption};
 pub use identity::{Identity, IdentityProvider, SecureSession, Session};
+#[cfg(feature = "pq")]
+pub use pqhybrid::{HybridPrivateKey, HybridPublicKey};
 pub use ratchet::RatchetSession;
 pub use rotation::KeyRotationManager;
 pub use shield::Shield;
@@ -97,7 +101,7 @@ mod tests {
     #[test]
     fn test_roundtrip() {
         let shield = Shield::new("test_password", "test.service");
-        let plaintext = b"Hello, EXPTIME-secure world!";
+        let plaintext = b"Hello, Shield world!";
 
         let encrypted = shield.encrypt(plaintext).unwrap();
         let decrypted = shield.decrypt(&encrypted).unwrap();

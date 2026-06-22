@@ -132,6 +132,320 @@ void test_authentication_failed(void) {
     PASS();
 }
 
+/* ============== Security-Fix Tests (CR-1 / CR-2 / CR-3) ============== */
+
+/* CR-1: two instances with the same password+service must derive DIFFERENT
+ * keys (each gets a fresh random salt), and produce different ciphertexts. */
+void test_same_password_service_different_keys(void) {
+    TEST("same_password_service_different_keys");
+
+    shield_t a, b;
+    shield_init(&a, "hunter2", "github.com", SHIELD_DEFAULT_MAX_AGE_MS);
+    shield_init(&b, "hunter2", "github.com", SHIELD_DEFAULT_MAX_AGE_MS);
+
+    /* Salts live at bytes [1 .. 1+16) of a password-mode ciphertext. */
+    size_t la, lb;
+    uint8_t *ca = shield_encrypt(&a, (const uint8_t *)"identical plaintext", 19, &la);
+    uint8_t *cb = shield_encrypt(&b, (const uint8_t *)"identical plaintext", 19, &lb);
+    assert(ca && cb);
+
+    assert(ca[0] == SHIELD_VERSION_PASSWORD);
+    assert(cb[0] == SHIELD_VERSION_PASSWORD);
+
+    /* Salts differ. */
+    assert(memcmp(ca + 2, cb + 2, SHIELD_SALT_SIZE) != 0);
+    /* Derived master keys differ (the deterministic-key bug is gone). */
+    assert(memcmp(a.key, b.key, SHIELD_KEY_SIZE) != 0);
+
+    free(ca);
+    free(cb);
+    shield_wipe(&a);
+    shield_wipe(&b);
+    PASS();
+}
+
+/* CR-1: a recipient created independently with the same password+service must
+ * decrypt the sender, because the salt travels in the header. */
+void test_cross_instance_roundtrip(void) {
+    TEST("cross_instance_roundtrip");
+
+    shield_t alice, bob;
+    shield_init(&alice, "correct horse battery staple", "service.example", SHIELD_DEFAULT_MAX_AGE_MS);
+    shield_init(&bob, "correct horse battery staple", "service.example", SHIELD_DEFAULT_MAX_AGE_MS);
+
+    const char *msg = "hello from alice";
+    size_t mlen = strlen(msg);
+
+    size_t clen;
+    uint8_t *ct = shield_encrypt(&alice, (const uint8_t *)msg, mlen, &clen);
+    assert(ct != NULL);
+
+    size_t plen;
+    shield_error_t err;
+    uint8_t *pt = shield_decrypt(&bob, ct, clen, &plen, &err);
+    assert(pt != NULL);
+    assert(err == SHIELD_OK);
+    assert(plen == mlen && memcmp(pt, msg, mlen) == 0);
+
+    free(ct);
+    free(pt);
+    shield_wipe(&alice);
+    shield_wipe(&bob);
+    PASS();
+}
+
+/* CR-1: a different password (same service) must NOT decrypt. */
+void test_wrong_password_fails(void) {
+    TEST("wrong_password_fails");
+
+    shield_t sender, wrong;
+    shield_init(&sender, "right-password", "example.com", SHIELD_DEFAULT_MAX_AGE_MS);
+    shield_init(&wrong, "wrong-password", "example.com", SHIELD_DEFAULT_MAX_AGE_MS);
+
+    size_t clen;
+    uint8_t *ct = shield_encrypt(&sender, (const uint8_t *)"secret", 6, &clen);
+    assert(ct != NULL);
+
+    size_t plen;
+    shield_error_t err;
+    uint8_t *pt = shield_decrypt(&wrong, ct, clen, &plen, &err);
+    assert(pt == NULL);
+
+    free(ct);
+    shield_wipe(&sender);
+    shield_wipe(&wrong);
+    PASS();
+}
+
+/* CR-2: PBKDF2 iteration count must be 600,000. */
+void test_iterations_600k(void) {
+    TEST("iterations_600k");
+    assert(SHIELD_ITERATIONS == 600000);
+    PASS();
+}
+
+/* CR-3: password-mode ciphertext starts with 0x03; key-mode with 0x13. */
+void test_version_bytes(void) {
+    TEST("version_bytes");
+
+    shield_t pw;
+    shield_init(&pw, "pw", "svc", SHIELD_DEFAULT_MAX_AGE_MS);
+    size_t l1;
+    uint8_t *c1 = shield_encrypt(&pw, (const uint8_t *)"x", 1, &l1);
+    assert(c1 && c1[0] == SHIELD_VERSION_PASSWORD && c1[0] == 0x03);
+    assert(l1 >= 1 + SHIELD_SALT_SIZE + SHIELD_NONCE_SIZE + SHIELD_MAC_SIZE);
+    free(c1);
+    shield_wipe(&pw);
+
+    uint8_t key[SHIELD_KEY_SIZE];
+    shield_random_bytes(key, SHIELD_KEY_SIZE);
+
+    size_t l2;
+    shield_error_t err;
+    uint8_t *c2 = shield_quick_encrypt(key, SHIELD_KEY_SIZE, (const uint8_t *)"x", 1, &l2, &err);
+    assert(c2 && c2[0] == SHIELD_VERSION_KEY && c2[0] == 0x13);
+    free(c2);
+
+    shield_t ks;
+    shield_init_with_key(&ks, key, SHIELD_KEY_SIZE, SHIELD_DEFAULT_MAX_AGE_MS);
+    size_t l3;
+    uint8_t *c3 = shield_encrypt(&ks, (const uint8_t *)"x", 1, &l3);
+    assert(c3 && c3[0] == SHIELD_VERSION_KEY && c3[0] == 0x13);
+    free(c3);
+    shield_wipe(&ks);
+
+    PASS();
+}
+
+/* CR-3: tampering with ANY byte (version, salt, nonce, ct, mac) fails auth. */
+void test_tamper_detection_all_bytes(void) {
+    TEST("tamper_detection_all_bytes");
+
+    shield_t s;
+    shield_init(&s, "pw", "svc", SHIELD_DEFAULT_MAX_AGE_MS);
+
+    size_t clen;
+    uint8_t *ct = shield_encrypt(&s, (const uint8_t *)"secret payload", 14, &clen);
+    assert(ct != NULL);
+
+    /* Sanity: untampered decrypts. */
+    size_t plen;
+    shield_error_t err;
+    uint8_t *pt = shield_decrypt(&s, ct, clen, &plen, &err);
+    assert(pt != NULL && plen == 14 && memcmp(pt, "secret payload", 14) == 0);
+    free(pt);
+
+    for (size_t i = 0; i < clen; i++) {
+        uint8_t *tampered = (uint8_t *)malloc(clen);
+        memcpy(tampered, ct, clen);
+        tampered[i] ^= 0xFF;
+        size_t tplen;
+        shield_error_t terr;
+        uint8_t *tpt = shield_decrypt(&s, tampered, clen, &tplen, &terr);
+        assert(tpt == NULL);  /* every byte is authenticated or routes to rejection */
+        free(tampered);
+    }
+
+    free(ct);
+    shield_wipe(&s);
+    PASS();
+}
+
+/* CR-3: tampering with the authenticated salt must fail authentication. */
+void test_tamper_salt_detected(void) {
+    TEST("tamper_salt_detected");
+
+    shield_t s;
+    shield_init(&s, "password", "service", SHIELD_DEFAULT_MAX_AGE_MS);
+
+    size_t clen;
+    uint8_t *ct = shield_encrypt(&s, (const uint8_t *)"authenticated salt", 18, &clen);
+    assert(ct != NULL);
+
+    ct[1] ^= 0xFF;  /* flip a salt byte (region [1 .. 1+16)) */
+
+    size_t plen;
+    shield_error_t err;
+    uint8_t *pt = shield_decrypt(&s, ct, clen, &plen, &err);
+    assert(pt == NULL);
+    assert(err == SHIELD_ERR_AUTHENTICATION_FAILED);
+
+    free(ct);
+    shield_wipe(&s);
+    PASS();
+}
+
+/* CR-3: tampering with the version byte (0x03 -> 0x13) must be rejected. */
+void test_tamper_version_detected(void) {
+    TEST("tamper_version_detected");
+
+    shield_t s;
+    shield_init(&s, "password", "service", SHIELD_DEFAULT_MAX_AGE_MS);
+
+    size_t clen;
+    uint8_t *ct = shield_encrypt(&s, (const uint8_t *)"authenticated version", 21, &clen);
+    assert(ct != NULL);
+
+    ct[0] = SHIELD_VERSION_KEY;  /* flip dispatch; MAC over version must reject */
+
+    size_t plen;
+    shield_error_t err;
+    uint8_t *pt = shield_decrypt(&s, ct, clen, &plen, &err);
+    assert(pt == NULL);
+
+    free(ct);
+    shield_wipe(&s);
+    PASS();
+}
+
+/* CR-3: an unknown version byte is hard-rejected (no legacy fallback). */
+void test_unknown_version_rejected(void) {
+    TEST("unknown_version_rejected");
+
+    shield_t s;
+    shield_init(&s, "password", "service", SHIELD_DEFAULT_MAX_AGE_MS);
+
+    size_t clen;
+    uint8_t *ct = shield_encrypt(&s, (const uint8_t *)"x", 1, &clen);
+    assert(ct != NULL);
+
+    ct[0] = 0x7F;
+
+    size_t plen;
+    shield_error_t err;
+    uint8_t *pt = shield_decrypt(&s, ct, clen, &plen, &err);
+    assert(pt == NULL);
+    assert(err == SHIELD_ERR_INVALID_VERSION);
+
+    free(ct);
+    shield_wipe(&s);
+    PASS();
+}
+
+/* A pre-shared-key instance must not accept a password-mode (0x03) ciphertext. */
+void test_key_mode_rejects_password_ciphertext(void) {
+    TEST("key_mode_rejects_password_ciphertext");
+
+    shield_t pw;
+    shield_init(&pw, "password", "service", SHIELD_DEFAULT_MAX_AGE_MS);
+    size_t clen;
+    uint8_t *ct = shield_encrypt(&pw, (const uint8_t *)"pw secret", 9, &clen);
+    assert(ct != NULL);
+
+    uint8_t key[SHIELD_KEY_SIZE] = {0};
+    shield_t ks;
+    shield_init_with_key(&ks, key, SHIELD_KEY_SIZE, SHIELD_DEFAULT_MAX_AGE_MS);
+
+    size_t plen;
+    shield_error_t err;
+    uint8_t *pt = shield_decrypt(&ks, ct, clen, &plen, &err);
+    assert(pt == NULL);
+    assert(err == SHIELD_ERR_NO_PASSWORD);
+
+    free(ct);
+    shield_wipe(&pw);
+    shield_wipe(&ks);
+    PASS();
+}
+
+/* Key-mode (0x13) roundtrip via shield_init_with_key. */
+void test_key_mode_roundtrip(void) {
+    TEST("key_mode_roundtrip");
+
+    uint8_t key[SHIELD_KEY_SIZE];
+    for (int i = 0; i < SHIELD_KEY_SIZE; i++) key[i] = (uint8_t)i;
+
+    shield_t s;
+    shield_init_with_key(&s, key, SHIELD_KEY_SIZE, SHIELD_DEFAULT_MAX_AGE_MS);
+
+    size_t clen;
+    uint8_t *ct = shield_encrypt(&s, (const uint8_t *)"key mode roundtrip", 18, &clen);
+    assert(ct != NULL && ct[0] == SHIELD_VERSION_KEY);
+
+    size_t plen;
+    shield_error_t err;
+    uint8_t *pt = shield_decrypt(&s, ct, clen, &plen, &err);
+    assert(pt != NULL && err == SHIELD_OK);
+    assert(plen == 18 && memcmp(pt, "key mode roundtrip", 18) == 0);
+
+    free(ct);
+    free(pt);
+    shield_wipe(&s);
+    PASS();
+}
+
+/* Explicit salt is honored, stored in the header, and shared keys match. */
+void test_explicit_salt_honored_and_stored(void) {
+    TEST("explicit_salt_honored_and_stored");
+
+    uint8_t salt[SHIELD_SALT_SIZE];
+    shield_random_bytes(salt, SHIELD_SALT_SIZE);
+
+    shield_t a, b;
+    shield_init_with_salt(&a, "pw", "svc", salt, SHIELD_DEFAULT_MAX_AGE_MS);
+    shield_init_with_salt(&b, "pw", "svc", salt, SHIELD_DEFAULT_MAX_AGE_MS);
+
+    /* Same salt -> same key. */
+    assert(memcmp(a.key, b.key, SHIELD_KEY_SIZE) == 0);
+
+    size_t clen;
+    uint8_t *ct = shield_encrypt(&a, (const uint8_t *)"data", 4, &clen);
+    assert(ct != NULL);
+    /* Salt is stored verbatim in the header. */
+    assert(memcmp(ct + 2, salt, SHIELD_SALT_SIZE) == 0);
+
+    size_t plen;
+    shield_error_t err;
+    uint8_t *pt = shield_decrypt(&b, ct, clen, &plen, &err);
+    assert(pt != NULL && plen == 4 && memcmp(pt, "data", 4) == 0);
+
+    free(ct);
+    free(pt);
+    shield_wipe(&a);
+    shield_wipe(&b);
+    PASS();
+}
+
 /* ============== V2 Format Tests ============== */
 
 void test_v2_roundtrip(void) {
@@ -514,6 +828,194 @@ void test_random_bytes(void) {
     PASS();
 }
 
+/* ============== v4 Conformance Vectors ============== */
+
+/* Reproduce the Rust-generated v4 vectors byte-for-byte. The C binding uses the
+ * Windows CNG AEAD which supports AES-256-GCM only, so we verify the AES
+ * "deterministic_vectors" array (suite 0x01) and skip the ChaCha array. */
+
+static int hex_val(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static size_t hex2bin(const char *hex, uint8_t *out, size_t out_max) {
+    size_t n = strlen(hex) / 2, i;
+    if (n > out_max) n = out_max;
+    for (i = 0; i < n; i++) {
+        out[i] = (uint8_t)((hex_val(hex[i * 2]) << 4) | hex_val(hex[i * 2 + 1]));
+    }
+    return n;
+}
+
+static void bin2hex(const uint8_t *bin, size_t len, char *out) {
+    static const char *d = "0123456789abcdef";
+    size_t i;
+    for (i = 0; i < len; i++) { out[i * 2] = d[bin[i] >> 4]; out[i * 2 + 1] = d[bin[i] & 0xF]; }
+    out[len * 2] = '\0';
+}
+
+/* Find "field":"value" within [start,end); copy value into out. Returns 1 on success. */
+/* Anchor on the KEY (`"field":`), not just `"field"` — otherwise a string value
+ * equal to the field name (e.g. "mode": "password") would mis-match. */
+static int find_str(const char *start, const char *end, const char *field, char *out, size_t outsz) {
+    char key[64];
+    snprintf(key, sizeof(key), "\"%s\":", field);
+    const char *p = strstr(start, key);
+    if (!p || p >= end) return 0;
+    p += strlen(key);
+    while (p < end && (*p == ' ' || *p == '\t')) p++;
+    if (p >= end || *p != '"') return 0;
+    p++;
+    size_t i = 0;
+    while (p < end && *p != '"' && i + 1 < outsz) out[i++] = *p++;
+    out[i] = '\0';
+    return 1;
+}
+
+static long long find_num(const char *start, const char *end, const char *field) {
+    char key[64];
+    snprintf(key, sizeof(key), "\"%s\":", field);
+    const char *p = strstr(start, key);
+    if (!p || p >= end) return -1;
+    p += strlen(key);
+    return atoll(p);
+}
+
+static void test_v4_vectors(void) {
+    TEST("v4_vectors_byte_for_byte (AES-256-GCM)");
+
+    const char *paths[] = {
+        "../tests/v4_test_vectors.json",
+        "tests/v4_test_vectors.json",
+        "../../tests/v4_test_vectors.json"
+    };
+    FILE *f = NULL;
+    size_t pi;
+    for (pi = 0; pi < sizeof(paths) / sizeof(paths[0]); pi++) {
+        f = fopen(paths[pi], "rb");
+        if (f) break;
+    }
+    if (!f) { FAIL("cannot open v4_test_vectors.json"); return; }
+
+    fseek(f, 0, SEEK_END);
+    long fsz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *json = (char *)malloc((size_t)fsz + 1);
+    if (!json) { fclose(f); FAIL("alloc"); return; }
+    size_t rd = fread(json, 1, (size_t)fsz, f);
+    json[rd] = '\0';
+    fclose(f);
+
+    /* Bound to the AES "deterministic_vectors" array (skip the ChaCha array). */
+    char *arr = strstr(json, "\"deterministic_vectors\"");
+    if (!arr) { free(json); FAIL("no deterministic_vectors"); return; }
+    char *arr_start = strchr(arr, '[');
+    int depth = 0; char *arr_end = NULL;
+    for (char *p = arr_start; *p; p++) {
+        if (*p == '[') depth++;
+        else if (*p == ']') { depth--; if (depth == 0) { arr_end = p; break; } }
+    }
+    if (!arr_end) { free(json); FAIL("array end"); return; }
+
+    int count = 0, ok = 1;
+    char *p = arr_start;
+    while (p < arr_end) {
+        char *obj = strchr(p, '{');
+        if (!obj || obj >= arr_end) break;
+        int d = 0; char *obj_end = NULL;
+        for (char *q = obj; q < arr_end + 1; q++) {
+            if (*q == '{') d++;
+            else if (*q == '}') { d--; if (d == 0) { obj_end = q; break; } }
+        }
+        if (!obj_end) break;
+
+        char mode[16], suite_s[8], name[64];
+        char pw[128], svc[128], salt_hex[64], key_hex[128], nonce_hex[64];
+        char pad_hex[512], pt_hex[512], master_hex[128], aead_hex[128], exp_hex[1024];
+        find_str(obj, obj_end, "name", name, sizeof(name));
+        find_str(obj, obj_end, "mode", mode, sizeof(mode));
+        find_str(obj, obj_end, "suite", suite_s, sizeof(suite_s));
+        find_str(obj, obj_end, "nonce_hex", nonce_hex, sizeof(nonce_hex));
+        find_str(obj, obj_end, "padding_hex", pad_hex, sizeof(pad_hex));
+        find_str(obj, obj_end, "plaintext_hex", pt_hex, sizeof(pt_hex));
+        find_str(obj, obj_end, "master_key_hex", master_hex, sizeof(master_hex));
+        find_str(obj, obj_end, "aead_key_hex", aead_hex, sizeof(aead_hex));
+        find_str(obj, obj_end, "expected_output_hex", exp_hex, sizeof(exp_hex));
+        long long ts = find_num(obj, obj_end, "timestamp_ms");
+        long long pad_len = find_num(obj, obj_end, "pad_len");
+
+        uint8_t suite = (uint8_t)strtol(suite_s, NULL, 16);
+
+        uint8_t master[32], aead_key[32], nonce[12], salt[16];
+        uint8_t padding[128], plaintext[256], expected[1024];
+        size_t pt_len = hex2bin(pt_hex, plaintext, sizeof(plaintext));
+        size_t exp_len = hex2bin(exp_hex, expected, sizeof(expected));
+        hex2bin(nonce_hex, nonce, sizeof(nonce));
+        hex2bin(pad_hex, padding, sizeof(padding));
+
+        const uint8_t *salt_ptr = NULL;
+        size_t aad_len;
+        if (strcmp(mode, "password") == 0) {
+            find_str(obj, obj_end, "password", pw, sizeof(pw));
+            find_str(obj, obj_end, "service", svc, sizeof(svc));
+            find_str(obj, obj_end, "salt_hex", salt_hex, sizeof(salt_hex));
+            long long iters = find_num(obj, obj_end, "iterations");
+            hex2bin(salt_hex, salt, sizeof(salt));
+            uint8_t salt_input[16 + 128];
+            size_t svc_len = strlen(svc);
+            memcpy(salt_input, salt, 16);
+            memcpy(salt_input + 16, svc, svc_len);
+            shield_pbkdf2(pw, salt_input, 16 + svc_len, (int)iters, master, 32);
+            salt_ptr = salt;
+            aad_len = 2 + 16;
+        } else {
+            find_str(obj, obj_end, "key_hex", key_hex, sizeof(key_hex));
+            hex2bin(key_hex, master, 32);
+            aad_len = 2;
+        }
+
+        /* KDF check. */
+        char got[256];
+        bin2hex(master, 32, got);
+        if (strcmp(got, master_hex) != 0) { printf("\n    master drift %s ", name); ok = 0; }
+        shield_derive_aead_key(master, aead_key);
+        bin2hex(aead_key, 32, got);
+        if (strcmp(got, aead_hex) != 0) { printf("\n    aead drift %s ", name); ok = 0; }
+
+        /* Byte-for-byte reproduction. */
+        size_t out_len = 0;
+        uint8_t *produced = shield_seal_deterministic(aead_key, suite, salt_ptr, nonce,
+                                ts, (uint8_t)pad_len, padding, plaintext, pt_len, &out_len);
+        if (!produced) { printf("\n    seal NULL %s ", name); ok = 0; }
+        else {
+            char *produced_hex = (char *)malloc(out_len * 2 + 1);
+            bin2hex(produced, out_len, produced_hex);
+            if (strcmp(produced_hex, exp_hex) != 0) { printf("\n    BYTE DRIFT %s ", name); ok = 0; }
+            free(produced_hex);
+            free(produced);
+        }
+
+        /* Decrypt check. */
+        size_t plen = 0; shield_error_t derr = SHIELD_OK;
+        uint8_t *opened = shield_open_ciphertext(aead_key, suite, expected, exp_len,
+                                                 aad_len, -1, &plen, &derr);
+        if (!opened || plen != pt_len || memcmp(opened, plaintext, pt_len) != 0) {
+            printf("\n    decrypt mismatch %s ", name); ok = 0;
+        }
+        free(opened);
+
+        count++;
+        p = obj_end + 1;
+    }
+
+    free(json);
+    if (ok && count >= 6) PASS();
+    else { printf("(verified %d) ", count); FAIL("vector mismatch"); }
+}
+
 /* ============== Main ============== */
 
 int main(void) {
@@ -526,10 +1028,27 @@ int main(void) {
     test_invalid_key_size();
     test_authentication_failed();
 
+    printf("\nSecurity-Fix Tests (CR-1 / CR-2 / CR-3):\n");
+    test_same_password_service_different_keys();
+    test_cross_instance_roundtrip();
+    test_wrong_password_fails();
+    test_iterations_600k();
+    test_version_bytes();
+    test_tamper_detection_all_bytes();
+    test_tamper_salt_detected();
+    test_tamper_version_detected();
+    test_unknown_version_rejected();
+    test_key_mode_rejects_password_ciphertext();
+    test_key_mode_roundtrip();
+    test_explicit_salt_honored_and_stored();
+
     printf("\nV2 Format Tests:\n");
     test_v2_roundtrip();
     test_v2_length_variation();
     test_v2_disabled_replay_protection();
+
+    printf("\nv4 Conformance Vectors:\n");
+    test_v4_vectors();
 
     printf("\nRatchet Tests:\n");
     test_ratchet_session();

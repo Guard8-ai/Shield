@@ -32,7 +32,7 @@ public class StreamCipher {
 
     /// Create StreamCipher from password.
     public static func fromPassword(_ password: String, salt: [UInt8], chunkSize: Int = defaultChunkSize) throws -> StreamCipher {
-        let key = Shield.pbkdf2(password: password, salt: salt, iterations: 100_000, keyLength: 32)
+        let key = Shield.pbkdf2(password: password, salt: salt, iterations: 600_000, keyLength: 32)
         return try StreamCipher(key: key, chunkSize: chunkSize)
     }
 

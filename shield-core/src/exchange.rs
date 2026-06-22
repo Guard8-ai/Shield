@@ -13,8 +13,8 @@ use crate::error::{Result, ShieldError};
 pub struct PAKEExchange;
 
 impl PAKEExchange {
-    /// Default PBKDF2 iterations.
-    pub const ITERATIONS: u32 = 200_000;
+    /// Default PBKDF2 iterations (CR-2: OWASP 2023 floor).
+    pub const ITERATIONS: u32 = 600_000;
 
     /// Derive key contribution from password.
     #[must_use]

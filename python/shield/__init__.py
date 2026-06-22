@@ -1,8 +1,8 @@
 """
-Shield - EXPTIME-Secure Encryption Library
+Shield - Authenticated Symmetric Encryption Library
 
-Symmetric cryptography with proven exponential-time security.
-Breaking requires 2^256 operations - no shortcut exists.
+Symmetric authenticated encryption with 256-bit keys (~128-bit post-quantum security).
+Brute-forcing a full 256-bit key requires 2^256 operations; this relies on the standard assumption that SHA-256/HMAC have no exploitable structure (an assumption, not a mathematical proof).
 
 Usage:
     from shield import Shield, quick_encrypt, quick_decrypt
@@ -19,7 +19,7 @@ Usage:
 
 Security:
     Shield uses PBKDF2-SHA256 + SHA256-CTR + HMAC-SHA256.
-    All primitives have EXPTIME-hard security guarantees.
+    256-bit keys give 256-bit classical and ~128-bit post-quantum brute-force resistance.
 """
 
 __version__ = "2.2.0"
@@ -37,6 +37,14 @@ from shield.group import GroupEncryption, BroadcastEncryption
 from shield.identity import IdentityProvider, Identity, Session, SecureSession
 from shield.channel import ShieldChannel, ChannelConfig, ShieldListener
 from shield.fingerprint import FingerprintMode, FingerprintError
+
+# Post-quantum hybrid key exchange (optional: requires the `pq` extra / cryptography).
+# Imported lazily so the dependency-free core still works without it installed.
+try:
+    from shield.pqhybrid import HybridPrivateKey, HybridPublicKey, initiate as pq_initiate
+    _HAS_PQ = True
+except ImportError:  # pragma: no cover - exercised only when cryptography is absent
+    _HAS_PQ = False
 
 __all__ = [
     # Core
@@ -75,3 +83,7 @@ __all__ = [
     "FingerprintMode",
     "FingerprintError",
 ]
+
+# Post-quantum hybrid key exchange names (only when the optional extra is installed).
+if _HAS_PQ:
+    __all__ += ["HybridPrivateKey", "HybridPublicKey", "pq_initiate"]

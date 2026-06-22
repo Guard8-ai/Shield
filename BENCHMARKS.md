@@ -23,7 +23,7 @@ Shield uses SHA-256 for keystream generation instead of:
 This is a deliberate trade-off:
 1. **Simplicity**: One primitive (SHA-256) instead of two (AES + GHASH)
 2. **Portability**: SHA-256 is easier to implement correctly
-3. **Philosophy**: Hash-based construction for consistency with EXPTIME model
+3. **Philosophy**: Hash-based construction for consistency across the symmetric design
 
 ### When Shield Speed is Sufficient
 
@@ -39,7 +39,7 @@ This is a deliberate trade-off:
 
 ### Key Derivation Cost
 
-Shield's PBKDF2 with 100,000 iterations takes ~29ms. This is intentional:
+Shield's PBKDF2 with 600,000 iterations takes ~174ms. This is intentional:
 - Prevents brute-force password attacks
 - One-time cost per session
 - Reuse Shield instance for multiple operations
@@ -136,7 +136,7 @@ let encrypted: Vec<_> = messages.iter()
 
 | Priority | Recommendation |
 |----------|----------------|
-| Maximum security | Use Shield (EXPTIME guarantee) |
+| Maximum security | Use Shield (symmetric-only, 256-bit keys) |
 | High throughput + security | Use AES-GCM (hardware accelerated) |
 | No hardware AES + security | Use ChaCha20-Poly1305 |
 | Cross-language interop | Use Shield (13 identical implementations) |

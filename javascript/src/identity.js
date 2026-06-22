@@ -61,7 +61,7 @@ class Session {
  * Identity Provider - manages users and sessions.
  */
 class IdentityProvider {
-    static ITERATIONS = 100000;
+    static ITERATIONS = 600000; // CR-2: OWASP 2023 floor (salt is per-user random)
 
     /**
      * Initialize identity provider.

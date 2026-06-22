@@ -7,7 +7,7 @@ This document outlines the requirements for a third-party security audit of Shie
 ### In Scope
 
 1. **Cryptographic Implementation**
-   - PBKDF2-SHA256 key derivation (100,000 iterations)
+   - PBKDF2-SHA256 key derivation (600,000 iterations)
    - SHA256-CTR stream cipher implementation
    - HMAC-SHA256 authentication
    - Nonce generation and handling

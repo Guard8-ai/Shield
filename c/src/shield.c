@@ -1,5 +1,5 @@
 /**
- * Shield - EXPTIME-Secure Symmetric Encryption Library
+ * Shield - Authenticated Symmetric Encryption Library
  * Pure C implementation with no external dependencies except standard library.
  */
 
@@ -12,9 +12,17 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <wincrypt.h>
+#include <bcrypt.h>   /* Windows CNG: vetted AES-256-GCM AEAD (link -lbcrypt) */
+#ifndef BCRYPT_SUCCESS
+#define BCRYPT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
+#endif
 #else
 #include <fcntl.h>
 #include <unistd.h>
+/* The v4 base cipher needs a vetted AEAD. Windows uses CNG (BCrypt) below; on
+ * other platforms wire OpenSSL EVP (EVP_aes_256_gcm) — not yet implemented here.
+ * We refuse to hand-roll AES-GCM. */
+#error "Shield C v4 requires a vetted AEAD backend on this platform (wire OpenSSL EVP)."
 #endif
 
 /* ============== SHA256 Implementation ============== */
@@ -312,53 +320,322 @@ static void generate_keystream(const uint8_t *key, const uint8_t *nonce, size_t 
     }
 }
 
-/* ============== Subkey Derivation ============== */
+/* ============== AEAD key derivation (HKDF-SHA256-Expand) ============== */
 
-static void derive_subkeys(const uint8_t *master_key, uint8_t *enc_key, uint8_t *mac_key) {
-    shield_hmac_sha256(master_key, SHIELD_KEY_SIZE,
-                       (const uint8_t *)"shield-encrypt", 14, enc_key);
-    shield_hmac_sha256(master_key, SHIELD_KEY_SIZE,
-                       (const uint8_t *)"shield-authenticate", 19, mac_key);
+/* aead_key = HKDF-SHA256-Expand(master_key, info="shield/aead/v4", L=32).
+ * For a 32-byte output this is a single HKDF block:
+ *   T(1) = HMAC-SHA256(master_key, info || 0x01); OKM = T(1)[:32].
+ * This uses the standard HMAC primitive (the kept hardened path), matching the
+ * other bindings byte-for-byte. */
+void shield_derive_aead_key(const uint8_t *master_key, uint8_t *out_aead_key) {
+    uint8_t info[sizeof(SHIELD_HKDF_AEAD_INFO) - 1 + 1];
+    size_t info_len = sizeof(SHIELD_HKDF_AEAD_INFO) - 1; /* exclude NUL */
+    memcpy(info, SHIELD_HKDF_AEAD_INFO, info_len);
+    info[info_len] = 0x01;
+    shield_hmac_sha256(master_key, SHIELD_KEY_SIZE, info, info_len + 1, out_aead_key);
+}
+
+/* ============== Standard AEAD (AES-256-GCM via Windows CNG) ============== */
+
+/* Seal: encrypts pt_len bytes into out_ct and writes the 16-byte tag into out_tag.
+ * Returns 0 on success. Only AES-256-GCM (suite 0x01) is supported by the CNG
+ * backend; ChaCha20-Poly1305 (0x02) is not available in CNG and returns an error. */
+static int aead_seal(uint8_t suite, const uint8_t *key,
+                     const uint8_t *nonce, size_t nonce_len,
+                     const uint8_t *aad, size_t aad_len,
+                     const uint8_t *plaintext, size_t pt_len,
+                     uint8_t *out_ct, uint8_t *out_tag) {
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_KEY_HANDLE hKey = NULL;
+    BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO info;
+    ULONG outLen = 0;
+    int rc = -1;
+
+    if (suite != SHIELD_SUITE_AES_GCM) return -1;
+    if (!BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0))) goto done;
+    if (!BCRYPT_SUCCESS(BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE,
+            (PUCHAR)BCRYPT_CHAIN_MODE_GCM, sizeof(BCRYPT_CHAIN_MODE_GCM), 0))) goto done;
+    if (!BCRYPT_SUCCESS(BCryptGenerateSymmetricKey(hAlg, &hKey, NULL, 0,
+            (PUCHAR)key, SHIELD_KEY_SIZE, 0))) goto done;
+
+    BCRYPT_INIT_AUTH_MODE_INFO(info);
+    info.pbNonce = (PUCHAR)nonce;       info.cbNonce = (ULONG)nonce_len;
+    info.pbAuthData = (PUCHAR)aad;      info.cbAuthData = (ULONG)aad_len;
+    info.pbTag = out_tag;               info.cbTag = SHIELD_TAG_SIZE;
+
+    if (!BCRYPT_SUCCESS(BCryptEncrypt(hKey, (PUCHAR)plaintext, (ULONG)pt_len, &info,
+            NULL, 0, out_ct, (ULONG)pt_len, &outLen, 0))) goto done;
+    rc = 0;
+done:
+    if (hKey) BCryptDestroyKey(hKey);
+    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
+    return rc;
+}
+
+/* Open: verifies the tag over aad and decrypts ct_len bytes into out_pt.
+ * Returns 0 on success, nonzero on authentication failure or error. */
+static int aead_open(uint8_t suite, const uint8_t *key,
+                     const uint8_t *nonce, size_t nonce_len,
+                     const uint8_t *aad, size_t aad_len,
+                     const uint8_t *ct, size_t ct_len, const uint8_t *tag,
+                     uint8_t *out_pt) {
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_KEY_HANDLE hKey = NULL;
+    BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO info;
+    ULONG outLen = 0;
+    int rc = -1;
+
+    if (suite != SHIELD_SUITE_AES_GCM) return -1;
+    if (!BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0))) goto done;
+    if (!BCRYPT_SUCCESS(BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE,
+            (PUCHAR)BCRYPT_CHAIN_MODE_GCM, sizeof(BCRYPT_CHAIN_MODE_GCM), 0))) goto done;
+    if (!BCRYPT_SUCCESS(BCryptGenerateSymmetricKey(hAlg, &hKey, NULL, 0,
+            (PUCHAR)key, SHIELD_KEY_SIZE, 0))) goto done;
+
+    BCRYPT_INIT_AUTH_MODE_INFO(info);
+    info.pbNonce = (PUCHAR)nonce;       info.cbNonce = (ULONG)nonce_len;
+    info.pbAuthData = (PUCHAR)aad;      info.cbAuthData = (ULONG)aad_len;
+    info.pbTag = (PUCHAR)tag;           info.cbTag = SHIELD_TAG_SIZE;
+
+    /* BCryptDecrypt returns STATUS_AUTH_TAG_MISMATCH (negative) if the tag fails. */
+    if (!BCRYPT_SUCCESS(BCryptDecrypt(hKey, (PUCHAR)ct, (ULONG)ct_len, &info,
+            NULL, 0, out_pt, (ULONG)ct_len, &outLen, 0))) goto done;
+    rc = 0;
+done:
+    if (hKey) BCryptDestroyKey(hKey);
+    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
+    return rc;
+}
+
+/* Build the AEAD additional data (= wire prefix before the nonce):
+ * version || suite || [salt]. Writes into aad (>= 2+16) and returns its length. */
+static size_t build_aad(uint8_t suite, const uint8_t *salt, uint8_t *aad) {
+    if (salt) {
+        aad[0] = SHIELD_VERSION_PASSWORD;
+        aad[1] = suite;
+        memcpy(aad + 2, salt, SHIELD_SALT_SIZE);
+        return 2 + SHIELD_SALT_SIZE;
+    }
+    aad[0] = SHIELD_VERSION_KEY;
+    aad[1] = suite;
+    return 2;
+}
+
+/* Deterministic AEAD seal over fully specified inputs (used for conformance
+ * vectors and wrapped by the randomized shield_encrypt). Returns a malloc'd
+ * buffer (caller frees) of length *out_len, or NULL on failure. */
+uint8_t *shield_seal_deterministic(const uint8_t *aead_key, uint8_t suite,
+                                   const uint8_t *salt, const uint8_t *nonce,
+                                   int64_t timestamp_ms, uint8_t pad_len,
+                                   const uint8_t *padding,
+                                   const uint8_t *plaintext, size_t plaintext_len,
+                                   size_t *out_len) {
+    uint8_t aad[2 + SHIELD_SALT_SIZE];
+    size_t aad_len = build_aad(suite, salt, aad);
+    size_t inner_len = SHIELD_INNER_HEADER_SIZE + pad_len + plaintext_len;
+    size_t total = aad_len + SHIELD_AEAD_NONCE_SIZE + inner_len + SHIELD_TAG_SIZE;
+    uint8_t *inner;
+    uint8_t *result;
+
+    inner = (uint8_t *)malloc(inner_len);
+    if (!inner) return NULL;
+    memcpy(inner, &timestamp_ms, 8); /* little-endian host (x64) */
+    inner[8] = pad_len;
+    memcpy(inner + SHIELD_INNER_HEADER_SIZE, padding, pad_len);
+    memcpy(inner + SHIELD_INNER_HEADER_SIZE + pad_len, plaintext, plaintext_len);
+
+    result = (uint8_t *)malloc(total);
+    if (!result) { free(inner); return NULL; }
+    memcpy(result, aad, aad_len);
+    memcpy(result + aad_len, nonce, SHIELD_AEAD_NONCE_SIZE);
+
+    /* ciphertext||tag = AEAD_Seal(aead_key, nonce, inner, aad). */
+    if (aead_seal(suite, aead_key, nonce, SHIELD_AEAD_NONCE_SIZE, aad, aad_len,
+                  inner, inner_len,
+                  result + aad_len + SHIELD_AEAD_NONCE_SIZE,
+                  result + aad_len + SHIELD_AEAD_NONCE_SIZE + inner_len) != 0) {
+        shield_secure_wipe(inner, inner_len);
+        free(inner);
+        free(result);
+        return NULL;
+    }
+    shield_secure_wipe(inner, inner_len);
+    free(inner);
+    *out_len = total;
+    return result;
+}
+
+/* Open an AEAD ciphertext, validate the inner layout and freshness window.
+ * aad_len is the offset of the nonce (= len(version||suite||[salt])). Returns a
+ * malloc'd plaintext buffer (caller frees) of length *out_len, or NULL with *err. */
+uint8_t *shield_open_ciphertext(const uint8_t *aead_key, uint8_t suite,
+                                const uint8_t *encrypted, size_t encrypted_len,
+                                size_t aad_len, int64_t max_age_ms,
+                                size_t *out_len, shield_error_t *err) {
+    const uint8_t *nonce;
+    const uint8_t *ct;
+    const uint8_t *tag;
+    size_t ct_len;
+    uint8_t *inner;
+    int64_t timestamp_ms;
+    size_t pad_len, data_start;
+    uint8_t *result;
+
+    if (encrypted_len < aad_len + SHIELD_AEAD_NONCE_SIZE + SHIELD_TAG_SIZE) {
+        if (err) *err = SHIELD_ERR_CIPHERTEXT_TOO_SHORT;
+        return NULL;
+    }
+    nonce = encrypted + aad_len;
+    ct = encrypted + aad_len + SHIELD_AEAD_NONCE_SIZE;
+    ct_len = encrypted_len - aad_len - SHIELD_AEAD_NONCE_SIZE - SHIELD_TAG_SIZE;
+    tag = encrypted + encrypted_len - SHIELD_TAG_SIZE;
+
+    inner = (uint8_t *)malloc(ct_len ? ct_len : 1);
+    if (!inner) { if (err) *err = SHIELD_ERR_ALLOC_FAILED; return NULL; }
+
+    if (aead_open(suite, aead_key, nonce, SHIELD_AEAD_NONCE_SIZE,
+                  encrypted, aad_len, ct, ct_len, tag, inner) != 0) {
+        shield_secure_wipe(inner, ct_len);
+        free(inner);
+        if (err) *err = SHIELD_ERR_AUTHENTICATION_FAILED;
+        return NULL;
+    }
+
+    /* Inner layout: timestamp_ms(8 LE) || pad_len(1) || padding || message. */
+    if (ct_len < SHIELD_INNER_HEADER_SIZE) {
+        shield_secure_wipe(inner, ct_len); free(inner);
+        if (err) *err = SHIELD_ERR_AUTHENTICATION_FAILED;
+        return NULL;
+    }
+    memcpy(&timestamp_ms, inner, 8);
+    pad_len = inner[8];
+    if (pad_len < SHIELD_MIN_PADDING || pad_len > SHIELD_MAX_PADDING) {
+        shield_secure_wipe(inner, ct_len); free(inner);
+        if (err) *err = SHIELD_ERR_AUTHENTICATION_FAILED;
+        return NULL;
+    }
+    data_start = SHIELD_INNER_HEADER_SIZE + pad_len;
+    if (ct_len < data_start) {
+        shield_secure_wipe(inner, ct_len); free(inner);
+        if (err) *err = SHIELD_ERR_CIPHERTEXT_TOO_SHORT;
+        return NULL;
+    }
+
+    /* Freshness window (NOT full replay protection). */
+    if (max_age_ms >= 0) {
+        int64_t now_ms;
+#ifdef _WIN32
+        {
+            FILETIME ft; ULARGE_INTEGER uli;
+            GetSystemTimeAsFileTime(&ft);
+            uli.LowPart = ft.dwLowDateTime; uli.HighPart = ft.dwHighDateTime;
+            now_ms = (int64_t)((uli.QuadPart - 116444736000000000ULL) / 10000);
+        }
+#else
+        {
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            now_ms = (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
+        }
+#endif
+        if (timestamp_ms > now_ms + 5000 || (now_ms - timestamp_ms) > max_age_ms) {
+            shield_secure_wipe(inner, ct_len); free(inner);
+            if (err) *err = SHIELD_ERR_AUTHENTICATION_FAILED;
+            return NULL;
+        }
+    }
+
+    *out_len = ct_len - data_start;
+    result = (uint8_t *)malloc(*out_len ? *out_len : 1);
+    if (!result) {
+        shield_secure_wipe(inner, ct_len); free(inner);
+        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
+        return NULL;
+    }
+    memcpy(result, inner + data_start, *out_len);
+    shield_secure_wipe(inner, ct_len);
+    free(inner);
+    if (err) *err = SHIELD_OK;
+    return result;
 }
 
 /* ============== Core Shield Functions ============== */
 
-void shield_init(shield_t *ctx, const char *password, const char *service, int64_t max_age_ms) {
-    uint8_t salt[32];
-    shield_sha256((const uint8_t *)service, strlen(service), salt);
-    shield_pbkdf2(password, salt, 32, SHIELD_ITERATIONS, ctx->key, SHIELD_KEY_SIZE);
-    derive_subkeys(ctx->key, ctx->enc_key, ctx->mac_key);
+/* Derive the 32-byte master key from a given salt.
+ * PBKDF2 input salt is salt(16) || service, mirroring the reference. */
+static void shield_derive_key(const shield_t *ctx, const uint8_t *salt, uint8_t *out_key) {
+    uint8_t salt_input[SHIELD_SALT_SIZE + SHIELD_MAX_SECRET_LEN];
+    size_t salt_input_len = SHIELD_SALT_SIZE + ctx->service_len;
+    memcpy(salt_input, salt, SHIELD_SALT_SIZE);
+    memcpy(salt_input + SHIELD_SALT_SIZE, ctx->service, ctx->service_len);
+    shield_pbkdf2(ctx->password, salt_input, salt_input_len, ctx->iterations, out_key, SHIELD_KEY_SIZE);
+    shield_secure_wipe(salt_input, sizeof(salt_input));
+}
+
+void shield_init_with_salt(shield_t *ctx, const char *password, const char *service, const uint8_t *salt, int64_t max_age_ms) {
+    size_t pw_len = strlen(password);
+    size_t svc_len = strlen(service);
+
+    if (pw_len >= SHIELD_MAX_SECRET_LEN) pw_len = SHIELD_MAX_SECRET_LEN - 1;
+    if (svc_len >= SHIELD_MAX_SECRET_LEN) svc_len = SHIELD_MAX_SECRET_LEN - 1;
+
+    ctx->has_password = true;
+    ctx->iterations = SHIELD_ITERATIONS;
     ctx->max_age_ms = max_age_ms;
+
+    memcpy(ctx->password, password, pw_len);
+    ctx->password[pw_len] = '\0';
+    ctx->password_len = pw_len;
+
+    memcpy(ctx->service, service, svc_len);
+    ctx->service[svc_len] = '\0';
+    ctx->service_len = svc_len;
+
+    memcpy(ctx->salt, salt, SHIELD_SALT_SIZE);
+
+    /* Pre-derive this instance's own master key and AEAD key from its salt. */
+    shield_derive_key(ctx, ctx->salt, ctx->key);
+    shield_derive_aead_key(ctx->key, ctx->aead_key);
+    ctx->suite = SHIELD_SUITE_AES_GCM;
+}
+
+void shield_init(shield_t *ctx, const char *password, const char *service, int64_t max_age_ms) {
+    uint8_t salt[SHIELD_SALT_SIZE];
+    /* Per-instance random salt (CSPRNG, same source as nonces). */
+    if (shield_random_bytes(salt, SHIELD_SALT_SIZE) != SHIELD_OK) {
+        /* CSPRNG failure: zero the salt deterministically so the context is in a
+         * defined state. (Mirrors panic-on-failure in the Go reference.) */
+        memset(salt, 0, SHIELD_SALT_SIZE);
+    }
+    shield_init_with_salt(ctx, password, service, salt, max_age_ms);
+    shield_secure_wipe(salt, SHIELD_SALT_SIZE);
 }
 
 shield_error_t shield_init_with_key(shield_t *ctx, const uint8_t *key, size_t key_len, int64_t max_age_ms) {
     if (key_len != SHIELD_KEY_SIZE) {
         return SHIELD_ERR_INVALID_KEY_SIZE;
     }
+    ctx->has_password = false;
+    ctx->iterations = 0;
+    ctx->password_len = 0;
+    ctx->service_len = 0;
+    memset(ctx->salt, 0, SHIELD_SALT_SIZE);
     memcpy(ctx->key, key, SHIELD_KEY_SIZE);
-    derive_subkeys(ctx->key, ctx->enc_key, ctx->mac_key);
+    shield_derive_aead_key(ctx->key, ctx->aead_key);
+    ctx->suite = SHIELD_SUITE_AES_GCM;
     ctx->max_age_ms = max_age_ms;
     return SHIELD_OK;
 }
 
 uint8_t *shield_encrypt(const shield_t *ctx, const uint8_t *plaintext, size_t plaintext_len, size_t *out_len) {
-    uint8_t nonce[SHIELD_NONCE_SIZE];
-    uint8_t counter[8] = {0};
-    uint8_t timestamp[8];
+    uint8_t nonce[SHIELD_AEAD_NONCE_SIZE];
     uint8_t pad_len_byte;
     uint8_t *padding;
-    uint8_t *data_to_encrypt;
-    uint8_t *keystream;
     uint8_t *result;
-    uint8_t mac[32];
     int64_t timestamp_ms;
     size_t pad_len;
-    size_t data_len;
-    size_t ciphertext_len;
-    size_t pos;
-    size_t i;
 
-    if (shield_random_bytes(nonce, SHIELD_NONCE_SIZE) != SHIELD_OK) {
+    if (shield_random_bytes(nonce, SHIELD_AEAD_NONCE_SIZE) != SHIELD_OK) {
         return NULL;
     }
 
@@ -370,7 +647,6 @@ uint8_t *shield_encrypt(const shield_t *ctx, const uint8_t *plaintext, size_t pl
         GetSystemTimeAsFileTime(&ft);
         uli.LowPart = ft.dwLowDateTime;
         uli.HighPart = ft.dwHighDateTime;
-        /* Convert from 100-nanosecond intervals since 1601-01-01 to ms since Unix epoch */
         timestamp_ms = (int64_t)((uli.QuadPart - 116444736000000000ULL) / 10000);
     }
 #else
@@ -380,7 +656,6 @@ uint8_t *shield_encrypt(const shield_t *ctx, const uint8_t *plaintext, size_t pl
         timestamp_ms = (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
     }
 #endif
-    memcpy(timestamp, &timestamp_ms, 8);
 
     /* Random padding: 32-128 bytes (rejection sampling to avoid modulo bias) */
     {
@@ -389,7 +664,7 @@ uint8_t *shield_encrypt(const shield_t *ctx, const uint8_t *plaintext, size_t pl
             if (shield_random_bytes(&pad_len_byte, 1) != SHIELD_OK) {
                 return NULL;
             }
-            if ((int)pad_len_byte < pad_range * (256 / pad_range)) { /* Reject biased values */
+            if ((int)pad_len_byte < pad_range * (256 / pad_range)) {
                 pad_len = ((int)pad_len_byte % pad_range) + SHIELD_MIN_PADDING;
                 break;
             }
@@ -402,290 +677,76 @@ uint8_t *shield_encrypt(const shield_t *ctx, const uint8_t *plaintext, size_t pl
         return NULL;
     }
 
-    /* Data to encrypt: counter || timestamp || pad_len || padding || plaintext */
-    data_len = 8 + 8 + 1 + pad_len + plaintext_len;
-    data_to_encrypt = (uint8_t *)malloc(data_len);
-    if (!data_to_encrypt) {
-        free(padding);
-        return NULL;
-    }
+    /* Seal: password mode carries the salt; key mode does not. */
+    result = shield_seal_deterministic(
+        ctx->aead_key, ctx->suite,
+        ctx->has_password ? ctx->salt : NULL,
+        nonce, timestamp_ms, (uint8_t)pad_len, padding,
+        plaintext, plaintext_len, out_len);
 
-    pos = 0;
-    memcpy(data_to_encrypt + pos, counter, 8);
-    pos += 8;
-    memcpy(data_to_encrypt + pos, timestamp, 8);
-    pos += 8;
-    data_to_encrypt[pos] = (uint8_t)pad_len;
-    pos += 1;
-    memcpy(data_to_encrypt + pos, padding, pad_len);
-    pos += pad_len;
-    memcpy(data_to_encrypt + pos, plaintext, plaintext_len);
+    shield_secure_wipe(padding, pad_len);
     free(padding);
-
-    /* Allocate result */
-    ciphertext_len = SHIELD_NONCE_SIZE + data_len + SHIELD_MAC_SIZE;
-    result = (uint8_t *)malloc(ciphertext_len);
-    if (!result) {
-        free(data_to_encrypt);
-        return NULL;
-    }
-
-    memcpy(result, nonce, SHIELD_NONCE_SIZE);
-
-    /* Generate keystream and XOR */
-    keystream = (uint8_t *)malloc(data_len);
-    if (!keystream) {
-        free(data_to_encrypt);
-        free(result);
-        return NULL;
-    }
-    generate_keystream(ctx->enc_key, nonce, data_len, keystream);
-
-    for (i = 0; i < data_len; i++) {
-        result[SHIELD_NONCE_SIZE + i] = data_to_encrypt[i] ^ keystream[i];
-    }
-
-    free(keystream);
-    free(data_to_encrypt);
-
-    /* Compute HMAC over nonce || ciphertext (using MAC subkey) */
-    uint8_t *mac_data = (uint8_t *)malloc(SHIELD_NONCE_SIZE + data_len);
-    if (!mac_data) {
-        free(result);
-        return NULL;
-    }
-    memcpy(mac_data, nonce, SHIELD_NONCE_SIZE);
-    memcpy(mac_data + SHIELD_NONCE_SIZE, result + SHIELD_NONCE_SIZE, data_len);
-    shield_hmac_sha256(ctx->mac_key, SHIELD_KEY_SIZE, mac_data, SHIELD_NONCE_SIZE + data_len, mac);
-    free(mac_data);
-
-    memcpy(result + SHIELD_NONCE_SIZE + data_len, mac, SHIELD_MAC_SIZE);
-
-    *out_len = ciphertext_len;
     return result;
 }
 
 uint8_t *shield_decrypt(const shield_t *ctx, const uint8_t *ciphertext, size_t ciphertext_len, size_t *out_len, shield_error_t *err) {
-    size_t data_len;
-    uint8_t *nonce;
-    uint8_t *encrypted;
-    uint8_t *received_mac;
-    uint8_t mac[32];
-    uint8_t *keystream;
-    uint8_t *decrypted;
-    uint8_t *result;
-    int64_t timestamp_ms;
-    size_t pad_len;
-    size_t data_start;
-    size_t i;
+    uint8_t version;
 
-    if (ciphertext_len < SHIELD_MIN_CIPHERTEXT_SIZE) {
+    if (ciphertext_len < 1) {
         if (err) *err = SHIELD_ERR_CIPHERTEXT_TOO_SHORT;
         return NULL;
     }
 
-    nonce = (uint8_t *)ciphertext;
-    data_len = ciphertext_len - SHIELD_NONCE_SIZE - SHIELD_MAC_SIZE;
-    encrypted = (uint8_t *)ciphertext + SHIELD_NONCE_SIZE;
-    received_mac = (uint8_t *)ciphertext + ciphertext_len - SHIELD_MAC_SIZE;
+    version = ciphertext[0];
 
-    /* Verify MAC (using MAC subkey) */
-    uint8_t *mac_data = (uint8_t *)malloc(SHIELD_NONCE_SIZE + data_len);
-    if (!mac_data) {
-        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
-        return NULL;
-    }
-    memcpy(mac_data, nonce, SHIELD_NONCE_SIZE);
-    memcpy(mac_data + SHIELD_NONCE_SIZE, encrypted, data_len);
-    shield_hmac_sha256(ctx->mac_key, SHIELD_KEY_SIZE, mac_data, SHIELD_NONCE_SIZE + data_len, mac);
-    free(mac_data);
+    if (version == SHIELD_VERSION_PASSWORD) {
+        /* Password mode: re-derive the key from the salt carried in the header. */
+        uint8_t key[SHIELD_KEY_SIZE];
+        uint8_t aead_key[SHIELD_KEY_SIZE];
+        uint8_t suite;
+        uint8_t *result;
 
-    if (!shield_secure_compare(received_mac, mac, SHIELD_MAC_SIZE)) {
-        if (err) *err = SHIELD_ERR_AUTHENTICATION_FAILED;
-        return NULL;
-    }
-
-    /* Decrypt (using encryption subkey) */
-    keystream = (uint8_t *)malloc(data_len);
-    if (!keystream) {
-        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
-        return NULL;
-    }
-    generate_keystream(ctx->enc_key, nonce, data_len, keystream);
-
-    decrypted = (uint8_t *)malloc(data_len);
-    if (!decrypted) {
-        free(keystream);
-        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
-        return NULL;
-    }
-    for (i = 0; i < data_len; i++) {
-        decrypted[i] = encrypted[i] ^ keystream[i];
-    }
-    free(keystream);
-
-    /* Auto-detect v2 by timestamp range (2020-2100) */
-    if (data_len >= SHIELD_V2_HEADER_SIZE) {
-        memcpy(&timestamp_ms, decrypted + 8, 8);
-
-        if (timestamp_ms >= SHIELD_MIN_TIMESTAMP_MS && timestamp_ms <= SHIELD_MAX_TIMESTAMP_MS) {
-            /* v2 format detected */
-            pad_len = decrypted[16];
-
-            /* Validate padding length is within protocol bounds (SECURITY: CVE-PENDING) */
-            if (pad_len < SHIELD_MIN_PADDING || pad_len > SHIELD_MAX_PADDING) {
-                free(decrypted);
-                if (err) *err = SHIELD_ERR_AUTHENTICATION_FAILED;
-                return NULL;
-            }
-
-            data_start = SHIELD_V2_HEADER_SIZE + pad_len;
-
-            if (data_len < data_start) {
-                free(decrypted);
-                if (err) *err = SHIELD_ERR_CIPHERTEXT_TOO_SHORT;
-                return NULL;
-            }
-
-            /* Replay protection */
-            if (ctx->max_age_ms >= 0) {
-                int64_t now_ms;
-#ifdef _WIN32
-                {
-                    FILETIME ft;
-                    ULARGE_INTEGER uli;
-                    GetSystemTimeAsFileTime(&ft);
-                    uli.LowPart = ft.dwLowDateTime;
-                    uli.HighPart = ft.dwHighDateTime;
-                    now_ms = (int64_t)((uli.QuadPart - 116444736000000000ULL) / 10000);
-                }
-#else
-                {
-                    struct timespec ts;
-                    clock_gettime(CLOCK_REALTIME, &ts);
-                    now_ms = (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
-                }
-#endif
-                int64_t age = now_ms - timestamp_ms;
-
-                /* Reject if too far in future (>5s clock skew) or too old */
-                if (timestamp_ms > now_ms + 5000 || age > ctx->max_age_ms) {
-                    free(decrypted);
-                    if (err) *err = SHIELD_ERR_AUTHENTICATION_FAILED;
-                    return NULL;
-                }
-            }
-
-            *out_len = data_len - data_start;
-            result = (uint8_t *)malloc(*out_len);
-            if (!result) {
-                free(decrypted);
-                if (err) *err = SHIELD_ERR_ALLOC_FAILED;
-                return NULL;
-            }
-            memcpy(result, decrypted + data_start, *out_len);
-            free(decrypted);
-
-            if (err) *err = SHIELD_OK;
-            return result;
+        if (!ctx->has_password) {
+            if (err) *err = SHIELD_ERR_NO_PASSWORD;
+            return NULL;
         }
+        if (ciphertext_len < SHIELD_MIN_CIPHERTEXT_SIZE_PASSWORD) {
+            if (err) *err = SHIELD_ERR_CIPHERTEXT_TOO_SHORT;
+            return NULL;
+        }
+
+        suite = ciphertext[1];
+        shield_derive_key(ctx, ciphertext + 2, key); /* salt at offset 2 */
+        shield_derive_aead_key(key, aead_key);
+
+        result = shield_open_ciphertext(aead_key, suite, ciphertext, ciphertext_len,
+                                        2 + SHIELD_SALT_SIZE, ctx->max_age_ms,
+                                        out_len, err);
+        shield_secure_wipe(key, SHIELD_KEY_SIZE);
+        shield_secure_wipe(aead_key, SHIELD_KEY_SIZE);
+        return result;
+
+    } else if (version == SHIELD_VERSION_KEY) {
+        if (ciphertext_len < SHIELD_MIN_CIPHERTEXT_SIZE_KEY) {
+            if (err) *err = SHIELD_ERR_CIPHERTEXT_TOO_SHORT;
+            return NULL;
+        }
+        return shield_open_ciphertext(ctx->aead_key, ciphertext[1], ciphertext, ciphertext_len,
+                                      2, ctx->max_age_ms, out_len, err);
     }
 
-    /* v1 format: skip counter (8 bytes) */
-    *out_len = data_len - 8;
-    result = (uint8_t *)malloc(*out_len);
-    if (!result) {
-        free(decrypted);
-        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
-        return NULL;
-    }
-    memcpy(result, decrypted + 8, *out_len);
-    free(decrypted);
-
-    if (err) *err = SHIELD_OK;
-    return result;
-}
-
-uint8_t *shield_decrypt_v1(const shield_t *ctx, const uint8_t *ciphertext, size_t ciphertext_len, size_t *out_len, shield_error_t *err) {
-    size_t data_len;
-    uint8_t *nonce;
-    uint8_t *encrypted;
-    uint8_t *received_mac;
-    uint8_t mac[32];
-    uint8_t *keystream;
-    uint8_t *decrypted;
-    uint8_t *result;
-    size_t i;
-
-    if (ciphertext_len < SHIELD_MIN_CIPHERTEXT_SIZE) {
-        if (err) *err = SHIELD_ERR_CIPHERTEXT_TOO_SHORT;
-        return NULL;
-    }
-
-    nonce = (uint8_t *)ciphertext;
-    data_len = ciphertext_len - SHIELD_NONCE_SIZE - SHIELD_MAC_SIZE;
-    encrypted = (uint8_t *)ciphertext + SHIELD_NONCE_SIZE;
-    received_mac = (uint8_t *)ciphertext + ciphertext_len - SHIELD_MAC_SIZE;
-
-    /* Verify MAC (using MAC subkey) */
-    uint8_t *mac_data = (uint8_t *)malloc(SHIELD_NONCE_SIZE + data_len);
-    if (!mac_data) {
-        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
-        return NULL;
-    }
-    memcpy(mac_data, nonce, SHIELD_NONCE_SIZE);
-    memcpy(mac_data + SHIELD_NONCE_SIZE, encrypted, data_len);
-    shield_hmac_sha256(ctx->mac_key, SHIELD_KEY_SIZE, mac_data, SHIELD_NONCE_SIZE + data_len, mac);
-    free(mac_data);
-
-    if (!shield_secure_compare(received_mac, mac, SHIELD_MAC_SIZE)) {
-        if (err) *err = SHIELD_ERR_AUTHENTICATION_FAILED;
-        return NULL;
-    }
-
-    /* Decrypt (using encryption subkey) */
-    keystream = (uint8_t *)malloc(data_len);
-    if (!keystream) {
-        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
-        return NULL;
-    }
-    generate_keystream(ctx->enc_key, nonce, data_len, keystream);
-
-    decrypted = (uint8_t *)malloc(data_len);
-    if (!decrypted) {
-        free(keystream);
-        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
-        return NULL;
-    }
-    for (i = 0; i < data_len; i++) {
-        decrypted[i] = encrypted[i] ^ keystream[i];
-    }
-    free(keystream);
-
-    /* v1 format: skip counter (8 bytes) */
-    *out_len = data_len - 8;
-    result = (uint8_t *)malloc(*out_len);
-    if (!result) {
-        free(decrypted);
-        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
-        return NULL;
-    }
-    memcpy(result, decrypted + 8, *out_len);
-    free(decrypted);
-
-    if (err) *err = SHIELD_OK;
-    return result;
+    /* Clean break: any other version byte is hard-rejected (no legacy path). */
+    if (err) *err = SHIELD_ERR_INVALID_VERSION;
+    return NULL;
 }
 
 uint8_t *shield_quick_encrypt(const uint8_t *key, size_t key_len, const uint8_t *plaintext, size_t plaintext_len, size_t *out_len, shield_error_t *err) {
     shield_t ctx;
-    if (key_len != SHIELD_KEY_SIZE) {
+    /* Pre-shared-key mode: emits the 0x12 key-mode format (no salt). */
+    if (shield_init_with_key(&ctx, key, key_len, -1) != SHIELD_OK) {
         if (err) *err = SHIELD_ERR_INVALID_KEY_SIZE;
         return NULL;
     }
-    memcpy(ctx.key, key, SHIELD_KEY_SIZE);
-    derive_subkeys(ctx.key, ctx.enc_key, ctx.mac_key);
-    ctx.max_age_ms = -1;  /* No replay protection for quick functions */
     uint8_t *result = shield_encrypt(&ctx, plaintext, plaintext_len, out_len);
     shield_wipe(&ctx);
     if (err) *err = result ? SHIELD_OK : SHIELD_ERR_RANDOM_FAILED;
@@ -694,13 +755,10 @@ uint8_t *shield_quick_encrypt(const uint8_t *key, size_t key_len, const uint8_t 
 
 uint8_t *shield_quick_decrypt(const uint8_t *key, size_t key_len, const uint8_t *ciphertext, size_t ciphertext_len, size_t *out_len, shield_error_t *err) {
     shield_t ctx;
-    if (key_len != SHIELD_KEY_SIZE) {
+    if (shield_init_with_key(&ctx, key, key_len, -1) != SHIELD_OK) {
         if (err) *err = SHIELD_ERR_INVALID_KEY_SIZE;
         return NULL;
     }
-    memcpy(ctx.key, key, SHIELD_KEY_SIZE);
-    derive_subkeys(ctx.key, ctx.enc_key, ctx.mac_key);
-    ctx.max_age_ms = -1;  /* No replay protection for quick functions */
     uint8_t *result = shield_decrypt(&ctx, ciphertext, ciphertext_len, out_len, err);
     shield_wipe(&ctx);
     return result;
@@ -712,8 +770,13 @@ uint8_t *shield_quick_decrypt(const uint8_t *key, size_t key_len, const uint8_t 
 
 void shield_wipe(shield_t *ctx) {
     shield_secure_wipe(ctx->key, SHIELD_KEY_SIZE);
-    shield_secure_wipe(ctx->enc_key, SHIELD_KEY_SIZE);
-    shield_secure_wipe(ctx->mac_key, SHIELD_KEY_SIZE);
+    shield_secure_wipe(ctx->aead_key, SHIELD_KEY_SIZE);
+    shield_secure_wipe(ctx->salt, SHIELD_SALT_SIZE);
+    shield_secure_wipe(ctx->password, SHIELD_MAX_SECRET_LEN);
+    shield_secure_wipe(ctx->service, SHIELD_MAX_SECRET_LEN);
+    ctx->password_len = 0;
+    ctx->service_len = 0;
+    ctx->has_password = false;
 }
 
 /* ============== Stream Cipher Functions ============== */

@@ -35,7 +35,7 @@ class PAKEExchange:
     Uses role binding to prevent reflection attacks.
     """
 
-    ITERATIONS = 200000  # Higher than normal for key exchange
+    ITERATIONS = 600000  # CR-2: OWASP 2023 floor for PBKDF2-HMAC-SHA256
 
     @staticmethod
     def derive(
@@ -51,7 +51,7 @@ class PAKEExchange:
             password: Shared password between parties
             salt: Public salt (can be exchanged openly)
             role: Role identifier ('alice', 'bob', 'initiator', etc.)
-            iterations: PBKDF2 iterations (default: 200000)
+            iterations: PBKDF2 iterations (default: 600000)
 
         Returns:
             32-byte key contribution

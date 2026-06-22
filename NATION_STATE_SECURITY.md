@@ -7,7 +7,7 @@
 
 **Can Pentagon/NSA/Unit 8200 break Shield if properly implemented?**
 
-**Answer: NO** - The cryptographic primitives are mathematically unbreakable with current and foreseeable technology.
+**Answer: NO** - The cryptographic primitives are computationally infeasible to brute-force with current and foreseeable technology.
 
 **However:** Nation-state actors will attack everything *around* the cryptography - endpoints, passwords, operational security, and human factors.
 
@@ -17,7 +17,7 @@
 
 ### Mathematical Foundation
 
-Shield uses only symmetric primitives with proven exponential-time security:
+Shield uses only symmetric authenticated encryption with 256-bit keys (~128-bit post-quantum security):
 
 - **SHA-256**: NIST-approved, no known weaknesses after 20+ years of cryptanalysis
 - **HMAC-SHA256**: Provably secure given SHA-256 is secure
@@ -37,7 +37,7 @@ Shield uses only symmetric primitives with proven exponential-time security:
 - **Time to brute force** (using ALL computing power on Earth combined): ~10^58 years
 - **Age of universe:** ~10^10 years
 
-**This is not "computationally hard" - it's physically impossible.**
+**This is computationally infeasible to brute-force with current and foreseeable technology.**
 
 ### Quantum Computer Resistance
 
@@ -102,8 +102,8 @@ Shield uses only symmetric primitives with proven exponential-time security:
 - ✅ `correct horse battery staple` → 44 bits entropy
 - ✅ `Xy9$mK2#vL8@nQ5!Zm3&Pq7` → 128 bits entropy (recommended)
 
-**Shield's PBKDF2-100k Protection:**
-- Makes password cracking 100,000× slower
+**Shield's PBKDF2-600k Protection:**
+- Makes password cracking 600,000× slower
 - Helps, but cannot save fundamentally weak passwords
 - NSA/Unit 8200 have massive GPU/ASIC farms for password cracking
 
@@ -305,7 +305,7 @@ If NSA/Pentagon/Unit 8200 could break SHA-256, the following would all be compro
 - No attacks announced
 - Still using SHA-256 after 16 years
 
-**Strong evidence that SHA-256 is unbreakable by nation-states.**
+**Strong evidence that SHA-256 has no publicly known practical break, even by nation-states.**
 
 ---
 
@@ -371,8 +371,8 @@ If you are a:
 
 **Attack Resources:**
 - **GPU cluster:** 1000 RTX 4090s (realistic for NSA)
-- **Hash rate:** ~100,000 PBKDF2-SHA256 hashes/sec per GPU
-- **Total:** 100M hashes/second
+- **Hash rate:** ~16,700 PBKDF2-SHA256 hashes/sec per GPU (600k iterations)
+- **Total:** ~16.7M hashes/second
 
 **Time to Crack:**
 
@@ -456,7 +456,7 @@ If you are a:
 **Cryptographically: NO**
 - The mathematics are sound
 - Same primitives protecting nuclear secrets
-- 2^256 operations is physically impossible
+- 2^256 operations is computationally infeasible to brute-force with current and foreseeable technology
 - Post-quantum secure (2^128 against quantum)
 
 **Operationally: IT DEPENDS ON YOU**
@@ -466,7 +466,7 @@ If you are a:
 - Physical security? (no evil maid, tamper detection)
 - Human factors? (resist coercion, legal counsel)
 
-### The Mathematics Are Unbreakable. Are You?
+### The Cryptography Is Infeasible to Brute-Force. Are You?
 
 **Shield v2.1 gives you nation-state-resistant cryptography.**
 **Your operational security determines if you're actually protected.**

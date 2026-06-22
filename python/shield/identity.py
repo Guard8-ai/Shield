@@ -23,6 +23,14 @@ import base64
 from typing import Optional, Dict, List
 from dataclasses import dataclass, field, asdict
 
+# Per-user key-derivation parameters.
+# CR-1: each identity gets a cryptographically random 16-byte salt (stored
+#   below), so two users with the same password derive different keys and no
+#   precomputed table built from a public identifier (e.g. the user_id) helps.
+# CR-2: 600,000 PBKDF2-HMAC-SHA256 iterations (OWASP 2023 floor).
+SALT_SIZE = 16
+PBKDF2_ITERATIONS = 600_000
+
 
 @dataclass
 class Identity:
@@ -30,6 +38,7 @@ class Identity:
     user_id: str
     display_name: str
     verification_key: bytes
+    salt: bytes = b""
     created_at: int = field(default_factory=lambda: int(time.time()))
     attributes: Dict = field(default_factory=dict)
 
@@ -39,6 +48,7 @@ class Identity:
             'user_id': self.user_id,
             'display_name': self.display_name,
             'verification_key': base64.b64encode(self.verification_key).decode(),
+            'salt': base64.b64encode(self.salt).decode(),
             'created_at': self.created_at,
             'attributes': self.attributes
         }
@@ -50,6 +60,7 @@ class Identity:
             user_id=data['user_id'],
             display_name=data['display_name'],
             verification_key=base64.b64decode(data['verification_key']),
+            salt=base64.b64decode(data['salt']) if data.get('salt') else b"",
             created_at=data['created_at'],
             attributes=data.get('attributes', {})
         )
@@ -120,15 +131,19 @@ class IdentityProvider:
         if user_id in self._identities:
             raise ValueError(f"User {user_id} already exists")
 
-        # Derive user's verification key from password
-        salt = hashlib.sha256(f"user:{user_id}".encode()).digest()
-        user_key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+        # Derive user's verification key from password.
+        # CR-1: random per-user salt (not a deterministic hash of the public
+        # user_id); CR-2: 600,000 iterations. The salt is stored on the
+        # identity so authenticate() can re-derive.
+        salt = secrets.token_bytes(SALT_SIZE)
+        user_key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, PBKDF2_ITERATIONS)
         verification_key = hashlib.sha256(b'verify:' + user_key).digest()
 
         identity = Identity(
             user_id=user_id,
             display_name=display_name,
             verification_key=verification_key,
+            salt=salt,
             attributes=attributes or {}
         )
 
@@ -159,9 +174,8 @@ class IdentityProvider:
 
         identity = self._identities[user_id]
 
-        # Verify password
-        salt = hashlib.sha256(f"user:{user_id}".encode()).digest()
-        user_key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+        # Verify password using the per-user salt stored at registration (CR-1/CR-2).
+        user_key = hashlib.pbkdf2_hmac('sha256', password.encode(), identity.salt, PBKDF2_ITERATIONS)
         verification_key = hashlib.sha256(b'verify:' + user_key).digest()
 
         if not hmac.compare_digest(verification_key, identity.verification_key):

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "shield-crypto"
 version = "2.2.0"
-description = "EXPTIME-secure encryption library - symmetric crypto with proven exponential-time security"
+description = "Authenticated symmetric encryption library"
 readme = "README.md"
 license = {text = "CC0-1.0"}
 authors = [
@@ -29,9 +29,16 @@ requires-python = ">=3.8"
 dependencies = []
 
 [project.optional-dependencies]
+# Post-quantum hybrid key exchange (shield.pqhybrid). Optional so the core library
+# stays dependency-free; only users who need ML-KEM/X25519 install this extra.
+# ML-KEM requires cryptography >= 46 (OpenSSL 3.5 / AWS-LC / BoringSSL).
+pq = [
+    "cryptography>=46.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "cryptography>=46.0",
 ]
 
 [project.urls]

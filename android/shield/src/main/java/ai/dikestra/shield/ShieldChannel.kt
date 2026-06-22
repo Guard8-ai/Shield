@@ -317,7 +317,7 @@ class ShieldChannel private constructor(
  *
  * @param password Shared password for PAKE
  * @param service Service identifier for domain separation
- * @param iterations PBKDF2 iterations (default: 200000)
+ * @param iterations PBKDF2 iterations (default: 600000)
  * @param handshakeTimeoutMs Handshake timeout in milliseconds (default: 30000)
  */
 data class ChannelConfig(

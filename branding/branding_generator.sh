@@ -121,7 +121,7 @@ generate_svg() {
     cat > "$svg_path" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="2000" height="2000" viewBox="0 0 2000 2000" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-  <title>Shield - EXPTIME-Secure Encryption</title>
+  <title>Shield - Authenticated Symmetric Encryption</title>
   <image width="2000" height="2000" xlink:href="data:image/png;base64,$(base64 -w 0 "$png_source")" />
 </svg>
 EOF

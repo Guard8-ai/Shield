@@ -49,7 +49,7 @@ class ChannelConfig:
     """Channel configuration."""
     password: str
     service: str
-    iterations: int = 200000
+    iterations: int = 600000
     handshake_timeout_ms: int = 30000
 
     def with_iterations(self, iterations: int) -> 'ChannelConfig':

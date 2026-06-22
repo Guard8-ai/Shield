@@ -2,7 +2,7 @@
 FastAPI Integration for Shield Encryption
 
 Provides middleware and decorators for protecting FastAPI applications
-with EXPTIME-secure encryption.
+with authenticated symmetric encryption.
 
 Usage:
     from fastapi import FastAPI, Depends

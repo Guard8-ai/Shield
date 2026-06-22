@@ -1,7 +1,7 @@
 """
 Shield Web Framework Integrations
 
-Protect servers, browsers, and APIs with EXPTIME-secure encryption.
+Protect servers, browsers, and APIs with authenticated symmetric encryption.
 
 Supported frameworks:
 - FastAPI: ShieldMiddleware, shield_protected decorator

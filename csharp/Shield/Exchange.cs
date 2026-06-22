@@ -25,7 +25,7 @@ namespace Dikestra.Shield
         /// </summary>
         public static class PAKE
         {
-            public const int DefaultIterations = 200000;
+            public const int DefaultIterations = 600000; // CR-2: OWASP 2023 floor
 
             /// <summary>
             /// Derive key contribution from password.
@@ -33,9 +33,9 @@ namespace Dikestra.Shield
             /// <param name="password">Shared password between parties</param>
             /// <param name="salt">Public salt (can be exchanged openly)</param>
             /// <param name="role">Role identifier ('alice', 'bob', 'initiator', etc.)</param>
-            /// <param name="iterations">PBKDF2 iterations (default: 200000)</param>
+            /// <param name="iterations">PBKDF2 iterations (default: 600000)</param>
             /// <returns>32-byte key contribution</returns>
-            public static byte[] Derive(string password, byte[] salt, string role, int iterations = 200000)
+            public static byte[] Derive(string password, byte[] salt, string role, int iterations = 600000)
             {
                 using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, iterations, HashAlgorithmName.SHA256);
                 byte[] baseKey = pbkdf2.GetBytes(32);

@@ -13,7 +13,7 @@ const DEFAULT_CHUNK_SIZE = 64 * 1024; // 64KB
 /**
  * Derive key from password using PBKDF2.
  */
-function deriveKey(password, salt, iterations = 100000) {
+function deriveKey(password, salt, iterations = 600000) {
     return crypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256');
 }
 

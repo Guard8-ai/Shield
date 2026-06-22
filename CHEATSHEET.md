@@ -390,7 +390,7 @@ use shield_core::{AsyncShieldChannel, ChannelConfig};
 use tokio::net::TcpStream;
 
 let config = ChannelConfig::new("shared-secret", "my-service")
-    .with_iterations(100_000)
+    .with_iterations(600_000)
     .with_timeout(5_000);
 
 // Client
@@ -652,27 +652,26 @@ if result.level in (StrengthLevel.Critical, StrengthLevel.Weak):
 | Parameter | Value |
 |-----------|-------|
 | Key derivation | PBKDF2-SHA256 |
-| Iterations | 100,000 |
+| Iterations | 600,000 |
 | Key size | 256 bits |
 | Nonce size | 128 bits |
 | MAC size | 128 bits |
 | Stream cipher | SHA256-CTR |
 | Authentication | HMAC-SHA256 |
 
-## Why EXPTIME-Ready?
+## Why Symmetric-Only?
 
-Shield uses only proven symmetric primitives with unconditional security bounds.
+Shield builds on well-established symmetric primitives. Like all practical ciphers, their security is conjectural (it relies on standard assumptions), not unconditional.
 
 **Shield remains secure because:**
-- 256-bit symmetric keys require 2^256 operations to break
-- This is EXPTIME-hard (exponential in key size)
+- 256-bit symmetric keys require 2^256 operations to brute-force
 - Quantum computers only halve this to 2^128 (Grover's)
-- No mathematical shortcut exists or can exist
+- No practical shortcut is known (relies on standard assumptions about SHA-256)
 
-**Shield uses only proven EXPTIME primitives:**
-- SHA-256 (hash) - 2^256 preimage resistance
-- HMAC-SHA256 (MAC) - 2^256 forgery resistance
-- PBKDF2 (KDF) - 2^256 * iterations key space
+**Shield uses only well-established symmetric primitives:**
+- SHA-256 - 256-bit preimage / 128-bit collision resistance
+- HMAC-SHA256 (MAC, truncated to 128 bits) - 128-bit forgery resistance
+- PBKDF2 (KDF) - stretches passwords against brute-force
 - Lamport signatures - hash-based, quantum-safe
 
 ## Browser SDK

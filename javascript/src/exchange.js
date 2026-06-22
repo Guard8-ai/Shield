@@ -8,7 +8,7 @@ const crypto = require('crypto');
  * Password-Authenticated Key Exchange.
  */
 class PAKEExchange {
-    static ITERATIONS = 200000;
+    static ITERATIONS = 600000;
 
     /**
      * Derive key contribution from password.

@@ -40,10 +40,10 @@ class ChannelConfig {
      * Create channel configuration.
      * @param {string} password - Shared password for PAKE
      * @param {string} service - Service identifier for domain separation
-     * @param {number} iterations - PBKDF2 iterations (default: 200000)
+     * @param {number} iterations - PBKDF2 iterations (default: 600000)
      * @param {number} handshakeTimeoutMs - Handshake timeout (default: 30000)
      */
-    constructor(password, service, iterations = 200000, handshakeTimeoutMs = 30000) {
+    constructor(password, service, iterations = 600000, handshakeTimeoutMs = 30000) {
         this.password = password;
         this.service = service;
         this.iterations = iterations;

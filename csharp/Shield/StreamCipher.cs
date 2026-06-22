@@ -219,7 +219,7 @@ namespace Dikestra.Shield
 
         private static byte[] DeriveKey(string password, byte[] salt)
         {
-            using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, 100000, HashAlgorithmName.SHA256);
+            using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, 600000, HashAlgorithmName.SHA256);
             return pbkdf2.GetBytes(32);
         }
 

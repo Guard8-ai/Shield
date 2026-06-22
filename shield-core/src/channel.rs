@@ -724,10 +724,10 @@ mod tests {
     #[test]
     fn test_config_builder() {
         let config = ChannelConfig::new("password", "service")
-            .with_iterations(100_000)
+            .with_iterations(600_000)
             .with_timeout(5_000);
 
-        assert_eq!(config.iterations, 100_000);
+        assert_eq!(config.iterations, 600_000);
         assert_eq!(config.handshake_timeout_ms, 5_000);
     }
 

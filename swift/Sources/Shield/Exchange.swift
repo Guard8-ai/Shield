@@ -13,7 +13,7 @@ import CommonCrypto
 /// Both parties derive a shared key from a common password.
 /// Uses role binding to prevent reflection attacks.
 public enum PAKEExchange {
-    public static let defaultIterations = 200000
+    public static let defaultIterations = 600000 // CR-2: OWASP 2023 floor
 
     /// Derive key contribution from password.
     ///
@@ -21,10 +21,10 @@ public enum PAKEExchange {
     ///   - password: Shared password between parties
     ///   - salt: Public salt (can be exchanged openly)
     ///   - role: Role identifier ('alice', 'bob', 'initiator', etc.)
-    ///   - iterations: PBKDF2 iterations (default: 200000)
+    ///   - iterations: PBKDF2 iterations (default: 600000)
     /// - Returns: 32-byte key contribution
     public static func derive(password: String, salt: [UInt8], role: String,
-                              iterations: Int = 200000) -> [UInt8] {
+                              iterations: Int = 600000) -> [UInt8] {
         let baseKey = pbkdf2(password: password, salt: salt, iterations: iterations, keyLength: 32)
 
         var combined = baseKey

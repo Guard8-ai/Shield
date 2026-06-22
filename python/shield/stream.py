@@ -21,8 +21,8 @@ from typing import Iterator, Optional
 DEFAULT_CHUNK_SIZE = 64 * 1024
 
 
-def _derive_key(password: str, salt: bytes, iterations: int = 100_000) -> bytes:
-    """Derive key from password using PBKDF2."""
+def _derive_key(password: str, salt: bytes, iterations: int = 600_000) -> bytes:
+    """Derive key from password using PBKDF2 (CR-2: OWASP 2023 floor)."""
     return hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
 
 

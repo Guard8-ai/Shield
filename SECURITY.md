@@ -4,24 +4,24 @@ Shield's threat model, guarantees, and limitations.
 
 ---
 
-## The EXPTIME Guarantee
+## Security Model
 
-Shield provides **EXPTIME security**: breaking the encryption requires exponential time in the key size, regardless of any mathematical breakthroughs.
+Shield is authenticated symmetric encryption: with a full-entropy 256-bit key, brute force requires 2^256 operations, assuming the underlying primitives (SHA-256, HMAC, PBKDF2) are secure.
 
 ### What This Means
 
 | Attack | Required Operations | Feasibility |
 |--------|---------------------|-------------|
-| Brute force 256-bit key | 2^256 | Impossible (more than atoms in universe) |
-| Quantum computer (Grover) | 2^128 | Still impossible for foreseeable future |
-| P=NP proven | Still 2^256 | No polynomial shortcut exists |
-| New math discovered | Still 2^256 | Symmetric crypto has unconditional bounds |
+| Brute force 256-bit key | 2^256 | Computationally infeasible with current and foreseeable technology |
+| Quantum computer (Grover) | 2^128 | ~128-bit post-quantum; infeasible for the foreseeable future |
+| P=NP proven | Still ~2^256 | A random symmetric key has no structure for a polynomial algorithm to exploit |
+| New cryptanalysis of SHA-256 | Could reduce cost | Security rests on standard assumptions about SHA-256/HMAC, not a proof |
 
 ### Why Shield Uses Symmetric Cryptography
 
-RSA, ECDSA, and similar schemes rely on computational assumptions that may be broken by future discoveries.
+RSA, ECDSA, and similar schemes rely on number-theoretic assumptions that asymmetric-specific attacks (and large quantum computers) can break.
 
-Shield uses **no computational assumptions**. The 2^256 bound is a mathematical fact, not a belief.
+Shield uses only symmetric primitives, which are not affected by those attacks. Brute-forcing a full 256-bit key is infeasible; note this assumes the primitives are secure and applies to full-entropy keys, not password-derived keys.
 
 ---
 
@@ -33,8 +33,8 @@ Shield uses **no computational assumptions**. The 2^256 bound is a mathematical 
 |--------|------------|-----|
 | Passive eavesdropper | Encryption | Cannot read ciphertext without key |
 | Active attacker | Authentication | HMAC detects any tampering |
-| Replay attacks | Ratcheting | Counter prevents message reuse |
-| Password guessing | PBKDF2 | 100,000 iterations = ~200ms per guess |
+| Replay attacks | RatchetSession | Per-message counters reject reused/out-of-order messages. The base API only enforces a timestamp freshness window (not full replay protection) |
+| Password guessing | PBKDF2 | 600,000 iterations = ~200ms per guess |
 | Quantum computer | 256-bit keys | Grover only halves effective key size |
 | P=NP proof | Symmetric only | No asymmetric assumptions to break |
 | Key compromise (past) | Ratcheting | Forward secrecy protects old messages |
@@ -78,7 +78,7 @@ Shield uses a SHA256-based counter mode instead of AES for philosophical consist
 ### How Passwords Become Keys
 
 ```
-master_key = PBKDF2(password, SHA256(service), 100,000) → 256-bit key
+master_key = PBKDF2(password, random_salt(16) || service, 600,000) → 256-bit key
 
 # v2.1: Key separation via HMAC domain labels
 enc_key = HMAC-SHA256(master_key, "shield-encrypt")
@@ -257,7 +257,7 @@ Test count: 121 tests (106 unit + 7 interop + 8 doc-tests), clippy clean with `-
 | Feature | Shield | libsodium | OpenSSL | GPG |
 |---------|--------|-----------|---------|-----|
 | Post-quantum ready | Yes | Partial | No | No |
-| P=NP safe | Yes | Partial | No | No |
+| Symmetric-only (no RSA/ECC) | Yes | Partial | No | No |
 | Zero dependencies | Yes | No | No | No |
 | Cross-language | 13 platforms | Many | C only | CLI |
 | Forward secrecy | Built-in | External | External | No |

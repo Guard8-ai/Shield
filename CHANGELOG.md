@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Per-instance random salt (CR-1).** Key derivation no longer uses a
+  deterministic `SHA256(service)` salt. Each `Shield` created from a password
+  now generates a cryptographically random 16-byte salt, stored in the
+  ciphertext header, so two users with the same password+service no longer
+  derive the same key. The same fix was applied to the `IdentityProvider`
+  implementations (random per-user salt, stored on the identity) across all
+  bindings.
+- **PBKDF2 iterations raised 100,000 -> 600,000 (CR-2)** across the core and
+  all auxiliary modules (identity, signatures, key exchange, key rotation,
+  streaming, platform keystore helpers) — OWASP 2023 floor.
+- **Explicit authenticated version byte (CR-3).** The ciphertext format starts
+  with a MAC-covered version byte instead of a timestamp-shaped heuristic.
+- **Legacy v1/v2 ciphertexts are hard-rejected** (clean break; no silent
+  fallback) and tests now assert the rejection.
+
+### Changed
+- Overstated marketing claims removed repo-wide (e.g. "EXPTIME-secure",
+  "unconditional / mathematically-unbreakable security", "2^256 forgery
+  resistance") in favour of defensible statements. See `CHANGES-FROM-ORIGINAL.md`.
+
 ## [2.2.0] - 2026-03-15
 
 ### Added
@@ -259,7 +280,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PBKDF2 with 100,000 iterations for key derivation
 - HMAC-SHA256 for tamper detection
 - Random 128-bit nonce per encryption
-- EXPTIME security guarantees
+- 256-bit symmetric security (assuming the primitives are secure)
 
 [Unreleased]: https://github.com/Dikestra-ai/Shield/compare/v2.1.0...HEAD
 [2.1.0]: https://github.com/Dikestra-ai/Shield/compare/v1.1.0...v2.1.0

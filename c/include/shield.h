@@ -1,9 +1,9 @@
 /**
- * Shield - EXPTIME-Secure Symmetric Encryption Library
+ * Shield - Authenticated Symmetric Encryption Library
  *
- * This library uses only symmetric cryptographic primitives with proven
- * exponential-time security: PBKDF2-SHA256, HMAC-SHA256, and SHA256-based
- * stream cipher. Breaking requires 2^256 operations - no shortcut exists.
+ * This library uses only symmetric cryptographic primitives — 256-bit keys
+ * give ~128-bit post-quantum security: PBKDF2-SHA256, HMAC-SHA256, and SHA256-based
+ * stream cipher. Brute-forcing a full 256-bit key requires 2^256 operations; this relies on the standard assumption that SHA-256/HMAC have no exploitable structure (an assumption, not a mathematical proof).
  */
 
 #ifndef SHIELD_H
@@ -19,18 +19,41 @@ extern "C" {
 
 /* Constants */
 #define SHIELD_KEY_SIZE      32
+/* Nonce/MAC size for the auxiliary keystream layers (ratchet/stream). The base
+ * AEAD cipher uses its own 12-byte nonce and 16-byte tag (below). */
 #define SHIELD_NONCE_SIZE    16
 #define SHIELD_MAC_SIZE      16
-#define SHIELD_ITERATIONS    100000
-#define SHIELD_MIN_CIPHERTEXT_SIZE (SHIELD_NONCE_SIZE + 8 + SHIELD_MAC_SIZE)
+#define SHIELD_SALT_SIZE     16
+#define SHIELD_ITERATIONS    600000
 
-/* V2 constants */
-#define SHIELD_V2_HEADER_SIZE  17  /* counter(8) + timestamp(8) + pad_len(1) */
+/* Authenticated version byte (leading byte of every ciphertext) — wire format v4 */
+#define SHIELD_VERSION_PASSWORD 0x03  /* 0x03 || suite(1) || salt(16) || nonce(12) || ct||tag */
+#define SHIELD_VERSION_KEY      0x13  /* 0x13 || suite(1) || nonce(12) || ct||tag */
+
+/* Cipher-suite identifiers */
+#define SHIELD_SUITE_AES_GCM            0x01
+#define SHIELD_SUITE_CHACHA20_POLY1305  0x02
+
+/* Base-AEAD sizes */
+#define SHIELD_AEAD_NONCE_SIZE 12  /* 96-bit AEAD nonce */
+#define SHIELD_TAG_SIZE        16  /* 128-bit AEAD tag */
+#define SHIELD_INNER_HEADER_SIZE 9 /* timestamp_ms(8) + pad_len(1) */
 #define SHIELD_MIN_PADDING     32
 #define SHIELD_MAX_PADDING     128
-#define SHIELD_MIN_TIMESTAMP_MS 1577836800000LL  /* 2020-01-01 in ms */
-#define SHIELD_MAX_TIMESTAMP_MS 4102444800000LL  /* 2100-01-01 in ms */
 #define SHIELD_DEFAULT_MAX_AGE_MS 60000LL
+
+/* HKDF-Expand info string deriving the AEAD key from the master key */
+#define SHIELD_HKDF_AEAD_INFO "shield/aead/v4"
+
+/* Minimum valid ciphertext sizes (version + suite + body + inner header + tag).
+ * Password mode also carries the 16-byte salt in the header. */
+#define SHIELD_MIN_CIPHERTEXT_SIZE_KEY \
+    (2 + SHIELD_AEAD_NONCE_SIZE + SHIELD_TAG_SIZE)
+#define SHIELD_MIN_CIPHERTEXT_SIZE_PASSWORD \
+    (2 + SHIELD_SALT_SIZE + SHIELD_AEAD_NONCE_SIZE + SHIELD_TAG_SIZE)
+
+/* Maximum stored password/service length for password-mode re-derivation. */
+#define SHIELD_MAX_SECRET_LEN 256
 
 /* Error codes */
 typedef enum {
@@ -46,15 +69,33 @@ typedef enum {
     SHIELD_ERR_INVALID_SIGNATURE = -9,
     SHIELD_ERR_TOKEN_EXPIRED = -10,
     SHIELD_ERR_INVALID_TOKEN = -11,
-    SHIELD_ERR_SESSION_EXPIRED = -12
+    SHIELD_ERR_SESSION_EXPIRED = -12,
+    SHIELD_ERR_INVALID_VERSION = -13,  /* unrecognized leading version byte */
+    SHIELD_ERR_NO_PASSWORD = -14       /* password-mode ciphertext given to key-mode instance */
 } shield_error_t;
 
-/* Shield context */
+/* Shield context.
+ *
+ * Password mode (shield_init): has_password is true and password/service/salt
+ * are populated so the key can be re-derived from a salt carried in a received
+ * ciphertext header. The instance's own master + AEAD key are pre-derived.
+ * Pre-shared-key mode (shield_init_with_key): has_password is false, a single
+ * fixed key is used, and ciphertexts carry no salt.
+ */
 typedef struct {
     uint8_t key[SHIELD_KEY_SIZE];
-    uint8_t enc_key[SHIELD_KEY_SIZE];  /* encryption subkey */
-    uint8_t mac_key[SHIELD_KEY_SIZE];  /* authentication subkey */
+    uint8_t aead_key[SHIELD_KEY_SIZE];  /* HKDF-derived AEAD key */
+    uint8_t suite;                      /* cipher suite used on encrypt */
     int64_t max_age_ms;  /* -1 = disabled */
+
+    /* Password-mode fields (unused in pre-shared-key mode) */
+    bool has_password;
+    uint8_t salt[SHIELD_SALT_SIZE];               /* per-instance random salt */
+    char password[SHIELD_MAX_SECRET_LEN];         /* NUL-terminated */
+    size_t password_len;
+    char service[SHIELD_MAX_SECRET_LEN];          /* NUL-terminated */
+    size_t service_len;
+    int iterations;
 } shield_t;
 
 /* Stream cipher context */
@@ -106,15 +147,30 @@ typedef struct {
 /* ============== Core Functions ============== */
 
 /**
- * Initialize Shield from password and service name.
- * Uses PBKDF2-SHA256 with 100,000 iterations.
+ * Initialize Shield from password and service name (password mode).
+ *
+ * Generates a cryptographically random 16-byte salt for this instance and
+ * derives the key as PBKDF2-HMAC-SHA256(password, salt || service, 600000, 32).
+ * The salt is written into the ciphertext header (version 0x03) so a recipient
+ * with the same password+service can re-derive the key. service is retained as
+ * a domain separator. This fixes the original deterministic-salt bug where
+ * every user of a service shared the same key.
+ *
+ * Uses PBKDF2-SHA256 with 600,000 iterations.
  * max_age_ms: -1 to disable replay protection, or milliseconds (default: 60000)
  */
 void shield_init(shield_t *ctx, const char *password, const char *service, int64_t max_age_ms);
 
 /**
- * Initialize Shield with a pre-shared key.
- * Key must be exactly SHIELD_KEY_SIZE bytes.
+ * Initialize Shield from password and service with an explicit 16-byte salt.
+ * Same as shield_init but pins the salt (for testing / deterministic vectors).
+ * The salt is stored in the ciphertext header exactly as in shield_init.
+ */
+void shield_init_with_salt(shield_t *ctx, const char *password, const char *service, const uint8_t *salt, int64_t max_age_ms);
+
+/**
+ * Initialize Shield with a pre-shared key (pre-shared-key mode, version 0x13).
+ * Key must be exactly SHIELD_KEY_SIZE bytes. Ciphertexts carry no salt.
  * max_age_ms: -1 to disable replay protection, or milliseconds (default: 60000)
  */
 shield_error_t shield_init_with_key(shield_t *ctx, const uint8_t *key, size_t key_len, int64_t max_age_ms);
@@ -149,24 +205,52 @@ shield_error_t shield_init_with_fingerprint(
 
 /**
  * Encrypt plaintext.
+ *
+ * Password mode output: 0x03 || suite(1) || salt(16) || nonce(12) || ciphertext||tag(16).
+ * Pre-shared-key mode output: 0x13 || suite(1) || nonce(12) || ciphertext||tag(16).
+ * The MAC covers version || [salt] || nonce || ciphertext.
+ *
  * Returns allocated ciphertext. Caller must free.
  * out_len receives the ciphertext length.
  */
 uint8_t *shield_encrypt(const shield_t *ctx, const uint8_t *plaintext, size_t plaintext_len, size_t *out_len);
 
+/* ===== v4 AEAD building blocks (also used by conformance vectors) ===== */
+
+/* aead_key = HKDF-SHA256-Expand(master_key, "shield/aead/v4", 32). out_aead_key
+ * must be 32 bytes. */
+void shield_derive_aead_key(const uint8_t *master_key, uint8_t *out_aead_key);
+
+/* Deterministic AEAD seal over fully specified inputs. salt is 16 bytes for
+ * password mode (version 0x03) or NULL for key mode (0x13). nonce is 12 bytes,
+ * padding is pad_len bytes (32..128). Returns a malloc'd buffer (caller frees)
+ * of length *out_len, or NULL on failure. Only suite 0x01 (AES-256-GCM) is
+ * supported by the CNG backend. */
+uint8_t *shield_seal_deterministic(const uint8_t *aead_key, uint8_t suite,
+                                   const uint8_t *salt, const uint8_t *nonce,
+                                   int64_t timestamp_ms, uint8_t pad_len,
+                                   const uint8_t *padding,
+                                   const uint8_t *plaintext, size_t plaintext_len,
+                                   size_t *out_len);
+
+/* Open an AEAD ciphertext (verify tag, decrypt, validate inner layout +
+ * freshness). aad_len is the nonce offset (= len(version||suite||[salt])).
+ * max_age_ms < 0 disables the freshness window. Returns a malloc'd plaintext
+ * buffer (caller frees) of length *out_len, or NULL with *err set. */
+uint8_t *shield_open_ciphertext(const uint8_t *aead_key, uint8_t suite,
+                                const uint8_t *encrypted, size_t encrypted_len,
+                                size_t aad_len, int64_t max_age_ms,
+                                size_t *out_len, shield_error_t *err);
+
 /**
- * Decrypt ciphertext (auto-detects v1/v2).
+ * Decrypt and verify ciphertext, dispatching on the leading authenticated
+ * version byte. 0x03 = password mode (re-derives the key from the header salt),
+ * 0x13 = pre-shared-key mode. Any other version is hard-rejected
+ * (SHIELD_ERR_INVALID_VERSION) — there is no legacy v1/v2 heuristic fallback.
  * Returns allocated plaintext. Caller must free.
  * out_len receives the plaintext length.
  */
 uint8_t *shield_decrypt(const shield_t *ctx, const uint8_t *ciphertext, size_t ciphertext_len, size_t *out_len, shield_error_t *err);
-
-/**
- * Decrypt v1 format explicitly (for legacy compatibility).
- * Returns allocated plaintext. Caller must free.
- * out_len receives the plaintext length.
- */
-uint8_t *shield_decrypt_v1(const shield_t *ctx, const uint8_t *ciphertext, size_t ciphertext_len, size_t *out_len, shield_error_t *err);
 
 /**
  * Quick encrypt with explicit key.

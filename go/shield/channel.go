@@ -46,7 +46,7 @@ func NewChannelConfig(password, service string) *ChannelConfig {
 	return &ChannelConfig{
 		Password:           password,
 		Service:            service,
-		Iterations:         200000,
+		Iterations:         600000,
 		HandshakeTimeoutMs: 30000,
 	}
 }

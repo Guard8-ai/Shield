@@ -1,74 +1,99 @@
 using System;
+using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 
 namespace Dikestra.Shield
 {
     /// <summary>
-    /// Shield - EXPTIME-Secure Symmetric Encryption Library
+    /// Shield - Authenticated Symmetric Encryption Library (wire format v4).
     ///
-    /// Uses only symmetric cryptographic primitives with proven exponential-time security:
-    /// PBKDF2-SHA256, HMAC-SHA256, and SHA256-based stream cipher.
-    /// Breaking requires 2^256 operations - no shortcut exists.
+    /// v4 replaces the previous custom SHA-256 keystream + HMAC construction with a
+    /// standard AEAD (AES-256-GCM by default, ChaCha20-Poly1305 optional) from
+    /// System.Security.Cryptography. No cryptography is hand-rolled; key derivation
+    /// uses PBKDF2-HMAC-SHA256 + HKDF-SHA256-Expand. The wire format matches every
+    /// other Shield binding byte-for-byte (see tests/v4_test_vectors.json).
+    ///
+    /// Wire format:
+    ///   Password mode: 0x03 || suite(1) || salt(16) || nonce(12) || ciphertext||tag
+    ///   Key mode:      0x13 || suite(1) ||            nonce(12) || ciphertext||tag
+    /// AAD = version || suite || [salt]; inner plaintext =
+    ///   timestamp_ms(8 LE) || pad_len(1) || padding(32-128) || message.
     /// </summary>
     public class Shield : IDisposable
     {
         public const int KeySize = 32;
+        // NonceSize/MacSize are retained at 16 for the auxiliary keystream layers
+        // (RatchetSession etc.). The base AEAD cipher uses its own 12-byte nonce.
         public const int NonceSize = 16;
         public const int MacSize = 16;
-        public const int Iterations = 100000;
-        public const int MinCiphertextSize = NonceSize + 8 + MacSize;
+        public const int SaltSize = 16;
 
-        // V2 constants
-        public const int V2HeaderSize = 17;  // counter(8) + timestamp(8) + pad_len(1)
+        // PBKDF2 iterations (OWASP 2023 floor for PBKDF2-HMAC-SHA256).
+        public const int Iterations = 600000;
+
+        // Authenticated version bytes (leading byte of the ciphertext).
+        public const byte VersionPassword = 0x03; // 0x03 || suite || salt(16) || nonce(12) || ct||tag
+        public const byte VersionKey = 0x13;       // 0x13 || suite || nonce(12) || ct||tag
+
+        // Cipher-suite identifiers.
+        public const byte SuiteAesGcm = 0x01;          // AES-256-GCM (default)
+        public const byte SuiteChaCha20Poly1305 = 0x02; // ChaCha20-Poly1305
+
         public const int MinPadding = 32;
         public const int MaxPadding = 128;
-        public const long MinTimestampMs = 1577836800000L;  // 2020-01-01
-        public const long MaxTimestampMs = 4102444800000L;  // 2100-01-01
         public const long DefaultMaxAgeMs = 60000L;
 
-        private readonly byte[] _key;
-        private readonly byte[] _encKey;  // encryption subkey
-        private readonly byte[] _macKey;  // authentication subkey
+        // Base-AEAD constants (96-bit nonce, 128-bit tag, inner header = ts(8)+pad_len(1)).
+        private const int AeadNonceSize = 12;
+        private const int TagSize = 16;
+        private const int InnerHeaderSize = 9;
+        private static readonly byte[] HkdfAeadInfo = Encoding.UTF8.GetBytes("shield/aead/v4");
+
+        private readonly byte[] _key;       // master key
+        private readonly byte[] _aeadKey;   // HKDF-derived AEAD key
+        private readonly byte _suite;
         private readonly long? _maxAgeMs;
+
+        // Password-mode state (null in pre-shared-key mode).
+        private readonly byte[] _salt;
+        private readonly byte[] _password;
+        private readonly byte[] _service;
+        private readonly int _iterations;
+        private readonly Dictionary<string, byte[]> _keyCache;
+
         private bool _disposed;
 
-        /// <summary>
-        /// Derive separated encryption and MAC subkeys from master key using HMAC-SHA256.
-        /// </summary>
-        private static (byte[] encKey, byte[] macKey) DeriveSubkeys(byte[] masterKey)
-        {
-            var encKey = HmacSha256(masterKey, Encoding.UTF8.GetBytes("shield-encrypt"));
-            var macKey = HmacSha256(masterKey, Encoding.UTF8.GetBytes("shield-authenticate"));
-            return (encKey, macKey);
-        }
+        /// <summary>Create Shield from password and service name.</summary>
+        public Shield(string password, string service) : this(password, service, DefaultMaxAgeMs, null) { }
 
-        /// <summary>
-        /// Create Shield from password and service name.
-        /// </summary>
-        public Shield(string password, string service) : this(password, service, DefaultMaxAgeMs) { }
+        /// <summary>Create Shield from password and service name with custom max age.</summary>
+        public Shield(string password, string service, long? maxAgeMs) : this(password, service, maxAgeMs, null) { }
 
-        /// <summary>
-        /// Create Shield from password and service name with custom max age.
-        /// </summary>
-        public Shield(string password, string service, long? maxAgeMs)
+        /// <summary>Create Shield from password and service name with an optional explicit salt.</summary>
+        public Shield(string password, string service, long? maxAgeMs, byte[] salt)
         {
-            byte[] salt = Sha256(Encoding.UTF8.GetBytes(service));
-            _key = Pbkdf2(password, salt, Iterations, KeySize);
-            var (encKey, macKey) = DeriveSubkeys(_key);
-            _encKey = encKey;
-            _macKey = macKey;
+            if (salt == null)
+                salt = RandomBytes(SaltSize);
+            else if (salt.Length != SaltSize)
+                throw new ArgumentException("Salt must be 16 bytes", nameof(salt));
+
+            _password = Encoding.UTF8.GetBytes(password);
+            _service = Encoding.UTF8.GetBytes(service);
+            _iterations = Iterations;
+            _salt = (byte[])salt.Clone();
+            _suite = SuiteAesGcm;
+            _keyCache = new Dictionary<string, byte[]>();
+
+            _key = DeriveKey(_salt);
+            _aeadKey = DeriveAeadKey(_key);
             _maxAgeMs = maxAgeMs;
         }
 
-        /// <summary>
-        /// Create Shield with pre-shared key.
-        /// </summary>
+        /// <summary>Create Shield with pre-shared key.</summary>
         public Shield(byte[] key) : this(key, DefaultMaxAgeMs) { }
 
-        /// <summary>
-        /// Create Shield with pre-shared key and custom max age.
-        /// </summary>
+        /// <summary>Create Shield with pre-shared key and custom max age.</summary>
         public Shield(byte[] key, long? maxAgeMs)
         {
             if (key.Length != KeySize)
@@ -76,31 +101,82 @@ namespace Dikestra.Shield
 
             _key = new byte[KeySize];
             Array.Copy(key, _key, KeySize);
-            var (encKey, macKey) = DeriveSubkeys(_key);
-            _encKey = encKey;
-            _macKey = macKey;
+            _aeadKey = DeriveAeadKey(_key);
+            _suite = SuiteAesGcm;
             _maxAgeMs = maxAgeMs;
+
+            // Pre-shared-key mode: no password, no salt.
+            _salt = null;
+            _password = null;
+            _service = null;
+            _iterations = 0;
+            _keyCache = null;
         }
 
         /// <summary>
-        /// Encrypt plaintext (v2 format).
+        /// Derive the 32-byte master key for a given salt (cached by salt).
+        /// key = PBKDF2-HMAC-SHA256(password, salt || service, iterations, 32).
         /// </summary>
-        public byte[] Encrypt(byte[] plaintext)
+        private byte[] DeriveKey(byte[] salt)
         {
-            return EncryptWithSeparatedKeys(_encKey, _macKey, plaintext);
+            string cacheKey = Convert.ToHexString(salt);
+            if (_keyCache != null && _keyCache.TryGetValue(cacheKey, out var cached))
+                return cached;
+
+            byte[] kdfSalt = new byte[salt.Length + _service.Length];
+            Array.Copy(salt, 0, kdfSalt, 0, salt.Length);
+            Array.Copy(_service, 0, kdfSalt, salt.Length, _service.Length);
+
+            byte[] key = Pbkdf2(_password, kdfSalt, _iterations, KeySize);
+            if (_keyCache != null)
+                _keyCache[cacheKey] = key;
+            return key;
         }
 
-        /// <summary>
-        /// Decrypt ciphertext (auto-detects v1/v2).
-        /// </summary>
+        /// <summary>AEAD key = HKDF-SHA256-Expand(master, "shield/aead/v4", 32).</summary>
+        public static byte[] DeriveAeadKey(byte[] masterKey)
+            => HKDF.Expand(HashAlgorithmName.SHA256, masterKey, KeySize, HkdfAeadInfo);
+
+        /// <summary>Encrypt plaintext. Output format depends on mode (password vs key).</summary>
+        public byte[] Encrypt(byte[] plaintext)
+            => Seal(_aeadKey, _suite, _salt, plaintext);
+
+        /// <summary>Decrypt ciphertext. Dispatches on the leading authenticated version byte.</summary>
         public byte[] Decrypt(byte[] ciphertext)
         {
-            return DecryptWithSeparatedKeys(_encKey, _macKey, ciphertext, _maxAgeMs);
+            if (ciphertext == null || ciphertext.Length < 1)
+                throw new ArgumentException("Ciphertext too short");
+
+            byte version = ciphertext[0];
+
+            if (version == VersionPassword)
+            {
+                if (_salt == null)
+                    throw new CryptographicException("Authentication failed");
+                int aadLen = 2 + SaltSize;
+                if (ciphertext.Length < aadLen + AeadNonceSize + TagSize)
+                    throw new ArgumentException("Ciphertext too short");
+
+                byte suite = ciphertext[1];
+                byte[] salt = new byte[SaltSize];
+                Array.Copy(ciphertext, 2, salt, 0, SaltSize);
+
+                byte[] master = DeriveKey(salt);
+                byte[] aeadKey = DeriveAeadKey(master);
+                return OpenCiphertext(aeadKey, suite, ciphertext, aadLen, _maxAgeMs);
+            }
+            else if (version == VersionKey)
+            {
+                if (ciphertext.Length < 2 + AeadNonceSize + TagSize)
+                    throw new ArgumentException("Ciphertext too short");
+                byte suite = ciphertext[1];
+                return OpenCiphertext(_aeadKey, suite, ciphertext, 2, _maxAgeMs);
+            }
+
+            throw new CryptographicException("Authentication failed");
         }
 
-        /// <summary>
-        /// Get the derived key.
-        /// </summary>
+        /// <summary>Get the derived master key.</summary>
         public byte[] GetKey()
         {
             byte[] copy = new byte[KeySize];
@@ -108,180 +184,200 @@ namespace Dikestra.Shield
             return copy;
         }
 
-        /// <summary>
-        /// Quick encrypt with explicit key.
-        /// </summary>
+        /// <summary>Quick encrypt with explicit pre-shared key (AES-256-GCM, 0x13).</summary>
         public static byte[] QuickEncrypt(byte[] key, byte[] plaintext)
         {
             if (key.Length != KeySize)
                 throw new ArgumentException("Invalid key size", nameof(key));
-            var (encKey, macKey) = DeriveSubkeys(key);
-            return EncryptWithSeparatedKeys(encKey, macKey, plaintext);
+            byte[] aeadKey = DeriveAeadKey(key);
+            return Seal(aeadKey, SuiteAesGcm, null, plaintext);
         }
 
-        /// <summary>
-        /// Quick decrypt with explicit key.
-        /// </summary>
+        /// <summary>Quick decrypt with explicit pre-shared key.</summary>
         public static byte[] QuickDecrypt(byte[] key, byte[] ciphertext)
         {
             if (key.Length != KeySize)
                 throw new ArgumentException("Invalid key size", nameof(key));
-            var (encKey, macKey) = DeriveSubkeys(key);
-            return DecryptWithSeparatedKeys(encKey, macKey, ciphertext, null);
-        }
-
-        private static byte[] EncryptWithSeparatedKeys(byte[] encKey, byte[] macKey, byte[] plaintext)
-        {
-            // Generate random nonce
-            byte[] nonce = RandomBytes(NonceSize);
-
-            // Counter prefix (8 bytes of zeros)
-            byte[] counter = new byte[8];
-
-            // Timestamp in milliseconds
-            long timestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            byte[] timestamp = BitConverter.GetBytes(timestampMs);
-            if (!BitConverter.IsLittleEndian) Array.Reverse(timestamp);
-
-            // Random padding: 32-128 bytes (rejection sampling to avoid modulo bias)
-            int padRange = MaxPadding - MinPadding + 1; // 97
-            int padLen;
-            using (var rng = RandomNumberGenerator.Create())
-            {
-                byte[] buf = new byte[1];
-                while (true)
-                {
-                    rng.GetBytes(buf);
-                    int v = buf[0];
-                    if (v < padRange * (256 / padRange))
-                    {
-                        padLen = (v % padRange) + MinPadding;
-                        break;
-                    }
-                }
-            }
-            byte[] padding = RandomBytes(padLen);
-
-            // Data to encrypt: counter || timestamp || pad_len || padding || plaintext
-            byte[] dataToEncrypt = new byte[8 + 8 + 1 + padLen + plaintext.Length];
-            int pos = 0;
-            Array.Copy(counter, 0, dataToEncrypt, pos, 8); pos += 8;
-            Array.Copy(timestamp, 0, dataToEncrypt, pos, 8); pos += 8;
-            dataToEncrypt[pos] = (byte)padLen; pos += 1;
-            Array.Copy(padding, 0, dataToEncrypt, pos, padLen); pos += padLen;
-            Array.Copy(plaintext, 0, dataToEncrypt, pos, plaintext.Length);
-
-            // Generate keystream and XOR (using encryption subkey)
-            byte[] keystream = GenerateKeystream(encKey, nonce, dataToEncrypt.Length);
-            byte[] ciphertext = new byte[dataToEncrypt.Length];
-            for (int i = 0; i < dataToEncrypt.Length; i++)
-                ciphertext[i] = (byte)(dataToEncrypt[i] ^ keystream[i]);
-
-            // Compute HMAC over nonce || ciphertext (using MAC subkey)
-            byte[] macData = new byte[NonceSize + ciphertext.Length];
-            Array.Copy(nonce, 0, macData, 0, NonceSize);
-            Array.Copy(ciphertext, 0, macData, NonceSize, ciphertext.Length);
-            byte[] mac = HmacSha256(macKey, macData);
-
-            // Format: nonce || ciphertext || mac
-            byte[] result = new byte[NonceSize + ciphertext.Length + MacSize];
-            Array.Copy(nonce, 0, result, 0, NonceSize);
-            Array.Copy(ciphertext, 0, result, NonceSize, ciphertext.Length);
-            Array.Copy(mac, 0, result, NonceSize + ciphertext.Length, MacSize);
-
-            return result;
-        }
-
-        private static byte[] DecryptWithSeparatedKeys(byte[] encKey, byte[] macKey, byte[] encrypted, long? maxAgeMs)
-        {
-            if (encrypted.Length < MinCiphertextSize)
+            if (ciphertext == null || ciphertext.Length < 1)
+                throw new ArgumentException("Ciphertext too short");
+            if (ciphertext[0] != VersionKey)
+                throw new CryptographicException("Authentication failed");
+            if (ciphertext.Length < 2 + AeadNonceSize + TagSize)
                 throw new ArgumentException("Ciphertext too short");
 
-            // Parse components
-            byte[] nonce = new byte[NonceSize];
-            Array.Copy(encrypted, 0, nonce, 0, NonceSize);
-
-            int ciphertextLen = encrypted.Length - NonceSize - MacSize;
-            byte[] ciphertext = new byte[ciphertextLen];
-            Array.Copy(encrypted, NonceSize, ciphertext, 0, ciphertextLen);
-
-            byte[] receivedMac = new byte[MacSize];
-            Array.Copy(encrypted, encrypted.Length - MacSize, receivedMac, 0, MacSize);
-
-            // Verify MAC (using MAC subkey)
-            byte[] macData = new byte[NonceSize + ciphertextLen];
-            Array.Copy(nonce, 0, macData, 0, NonceSize);
-            Array.Copy(ciphertext, 0, macData, NonceSize, ciphertextLen);
-            byte[] expectedMac = HmacSha256(macKey, macData);
-
-            if (!ConstantTimeEquals(receivedMac, expectedMac, MacSize))
-                throw new CryptographicException("Authentication failed");
-
-            // Decrypt (using encryption subkey)
-            byte[] keystream = GenerateKeystream(encKey, nonce, ciphertextLen);
-            byte[] decrypted = new byte[ciphertextLen];
-            for (int i = 0; i < ciphertextLen; i++)
-                decrypted[i] = (byte)(ciphertext[i] ^ keystream[i]);
-
-            // Auto-detect v2 by timestamp range
-            if (decrypted.Length >= V2HeaderSize)
-            {
-                byte[] timestampBytes = new byte[8];
-                Array.Copy(decrypted, 8, timestampBytes, 0, 8);
-                if (!BitConverter.IsLittleEndian) Array.Reverse(timestampBytes);
-                long timestampMs = BitConverter.ToInt64(timestampBytes, 0);
-
-                if (timestampMs >= MinTimestampMs && timestampMs <= MaxTimestampMs)
-                {
-                    // v2 format detected
-                    int padLen = decrypted[16] & 0xFF;
-
-                    if (padLen < MinPadding || padLen > MaxPadding)
-                        throw new CryptographicException("Authentication failed");
-
-                    int dataStart = V2HeaderSize + padLen;
-                    if (decrypted.Length < dataStart)
-                        throw new ArgumentException("Ciphertext too short");
-
-                    if (maxAgeMs.HasValue)
-                    {
-                        long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                        long age = nowMs - timestampMs;
-                        if (timestampMs > nowMs + 5000 || age > maxAgeMs.Value)
-                            throw new CryptographicException("Authentication failed");
-                    }
-
-                    byte[] result = new byte[decrypted.Length - dataStart];
-                    Array.Copy(decrypted, dataStart, result, 0, result.Length);
-                    return result;
-                }
-            }
-
-            // v1 format: skip counter (8 bytes)
-            byte[] v1Result = new byte[ciphertextLen - 8];
-            Array.Copy(decrypted, 8, v1Result, 0, ciphertextLen - 8);
-            return v1Result;
+            byte[] aeadKey = DeriveAeadKey(key);
+            return OpenCiphertext(aeadKey, ciphertext[1], ciphertext, 2, null);
         }
 
-        private static byte[] GenerateKeystream(byte[] key, byte[] nonce, int length)
+        /// <summary>Build the AEAD additional data (= wire prefix before the nonce).</summary>
+        private static byte[] BuildAad(byte suite, byte[] salt)
         {
-            int numBlocks = (length + 31) / 32;
-            byte[] keystream = new byte[numBlocks * 32];
-
-            for (int i = 0; i < numBlocks; i++)
+            if (salt != null)
             {
-                byte[] block = new byte[KeySize + NonceSize + 4];
-                Array.Copy(key, 0, block, 0, KeySize);
-                Array.Copy(nonce, 0, block, KeySize, NonceSize);
-                BitConverter.GetBytes(i).CopyTo(block, KeySize + NonceSize);
+                byte[] aad = new byte[2 + SaltSize];
+                aad[0] = VersionPassword;
+                aad[1] = suite;
+                Array.Copy(salt, 0, aad, 2, SaltSize);
+                return aad;
+            }
+            return new byte[] { VersionKey, suite };
+        }
 
-                byte[] hash = Sha256(block);
-                Array.Copy(hash, 0, keystream, i * 32, 32);
+        private static int SamplePadLen()
+        {
+            int padRange = MaxPadding - MinPadding + 1; // 97
+            using var rng = RandomNumberGenerator.Create();
+            byte[] buf = new byte[1];
+            while (true)
+            {
+                rng.GetBytes(buf);
+                int v = buf[0];
+                if (v < padRange * (256 / padRange))
+                    return (v % padRange) + MinPadding;
+            }
+        }
+
+        /// <summary>Seal with a fresh random nonce, timestamp and padding.</summary>
+        private static byte[] Seal(byte[] aeadKey, byte suite, byte[] salt, byte[] plaintext)
+        {
+            byte[] nonce = RandomBytes(AeadNonceSize);
+            int padLen = SamplePadLen();
+            byte[] padding = RandomBytes(padLen);
+            long ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            return SealDeterministic(aeadKey, suite, salt, nonce, ts, padLen, padding, plaintext);
+        }
+
+        /// <summary>
+        /// Deterministic AEAD seal over fully specified inputs (used for conformance
+        /// vectors and wrapped by the randomized Seal).
+        /// </summary>
+        public static byte[] SealDeterministic(byte[] aeadKey, byte suite, byte[] salt, byte[] nonce,
+            long timestampMs, int padLen, byte[] padding, byte[] plaintext)
+        {
+            byte[] aad = BuildAad(suite, salt);
+
+            byte[] ts = BitConverter.GetBytes(timestampMs);
+            if (!BitConverter.IsLittleEndian) Array.Reverse(ts);
+
+            byte[] inner = new byte[InnerHeaderSize + padding.Length + plaintext.Length];
+            Array.Copy(ts, 0, inner, 0, 8);
+            inner[8] = (byte)padLen;
+            Array.Copy(padding, 0, inner, InnerHeaderSize, padding.Length);
+            Array.Copy(plaintext, 0, inner, InnerHeaderSize + padding.Length, plaintext.Length);
+
+            byte[] ctTag = AeadSeal(suite, aeadKey, nonce, aad, inner);
+
+            byte[] result = new byte[aad.Length + nonce.Length + ctTag.Length];
+            Array.Copy(aad, 0, result, 0, aad.Length);
+            Array.Copy(nonce, 0, result, aad.Length, nonce.Length);
+            Array.Copy(ctTag, 0, result, aad.Length + nonce.Length, ctTag.Length);
+            return result;
+        }
+
+        /// <summary>
+        /// Open an AEAD ciphertext, validate the inner layout and freshness window.
+        /// aadLen is the offset of the nonce (= len(version||suite||[salt])).
+        /// </summary>
+        public static byte[] OpenCiphertext(byte[] aeadKey, byte suite, byte[] encrypted, int aadLen, long? maxAgeMs)
+        {
+            if (encrypted.Length < aadLen + AeadNonceSize + TagSize)
+                throw new ArgumentException("Ciphertext too short");
+
+            byte[] aad = new byte[aadLen];
+            Array.Copy(encrypted, 0, aad, 0, aadLen);
+            byte[] nonce = new byte[AeadNonceSize];
+            Array.Copy(encrypted, aadLen, nonce, 0, AeadNonceSize);
+            int ctTagLen = encrypted.Length - aadLen - AeadNonceSize;
+            byte[] ctTag = new byte[ctTagLen];
+            Array.Copy(encrypted, aadLen + AeadNonceSize, ctTag, 0, ctTagLen);
+
+            byte[] inner = AeadOpen(suite, aeadKey, nonce, aad, ctTag);
+
+            if (inner.Length < InnerHeaderSize)
+                throw new CryptographicException("Authentication failed");
+            byte[] tsBytes = new byte[8];
+            Array.Copy(inner, 0, tsBytes, 0, 8);
+            if (!BitConverter.IsLittleEndian) Array.Reverse(tsBytes);
+            long timestampMs = BitConverter.ToInt64(tsBytes, 0);
+
+            int padLen = inner[8] & 0xFF;
+            if (padLen < MinPadding || padLen > MaxPadding)
+                throw new CryptographicException("Authentication failed");
+            int dataStart = InnerHeaderSize + padLen;
+            if (inner.Length < dataStart)
+                throw new ArgumentException("Ciphertext too short");
+
+            if (maxAgeMs.HasValue)
+            {
+                long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                long age = nowMs - timestampMs;
+                if (timestampMs > nowMs + 5000 || age > maxAgeMs.Value)
+                    throw new CryptographicException("Authentication failed");
             }
 
-            byte[] result = new byte[length];
-            Array.Copy(keystream, result, length);
+            byte[] result = new byte[inner.Length - dataStart];
+            Array.Copy(inner, dataStart, result, 0, result.Length);
             return result;
+        }
+
+        /// <summary>AEAD seal: returns ciphertext||tag.</summary>
+        private static byte[] AeadSeal(byte suite, byte[] key, byte[] nonce, byte[] aad, byte[] plaintext)
+        {
+            byte[] ct = new byte[plaintext.Length];
+            byte[] tag = new byte[TagSize];
+            if (suite == SuiteAesGcm)
+            {
+                using var aead = new AesGcm(key, TagSize);
+                aead.Encrypt(nonce, plaintext, ct, tag, aad);
+            }
+            else if (suite == SuiteChaCha20Poly1305)
+            {
+                using var aead = new ChaCha20Poly1305(key);
+                aead.Encrypt(nonce, plaintext, ct, tag, aad);
+            }
+            else
+            {
+                throw new CryptographicException("Unknown cipher suite");
+            }
+            byte[] result = new byte[ct.Length + TagSize];
+            Array.Copy(ct, 0, result, 0, ct.Length);
+            Array.Copy(tag, 0, result, ct.Length, TagSize);
+            return result;
+        }
+
+        /// <summary>AEAD open: returns plaintext, throws CryptographicException on failure.</summary>
+        private static byte[] AeadOpen(byte suite, byte[] key, byte[] nonce, byte[] aad, byte[] ctTag)
+        {
+            if (ctTag.Length < TagSize)
+                throw new CryptographicException("Authentication failed");
+            int ctLen = ctTag.Length - TagSize;
+            byte[] ct = new byte[ctLen];
+            Array.Copy(ctTag, 0, ct, 0, ctLen);
+            byte[] tag = new byte[TagSize];
+            Array.Copy(ctTag, ctLen, tag, 0, TagSize);
+            byte[] pt = new byte[ctLen];
+            try
+            {
+                if (suite == SuiteAesGcm)
+                {
+                    using var aead = new AesGcm(key, TagSize);
+                    aead.Decrypt(nonce, ct, tag, pt, aad);
+                }
+                else if (suite == SuiteChaCha20Poly1305)
+                {
+                    using var aead = new ChaCha20Poly1305(key);
+                    aead.Decrypt(nonce, ct, tag, pt, aad);
+                }
+                else
+                {
+                    throw new CryptographicException("Unknown cipher suite");
+                }
+            }
+            catch (CryptographicException)
+            {
+                throw new CryptographicException("Authentication failed");
+            }
+            return pt;
         }
 
         // ============== Crypto Utilities ==============
@@ -302,6 +398,11 @@ namespace Dikestra.Shield
         {
             using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, iterations, HashAlgorithmName.SHA256);
             return pbkdf2.GetBytes(keyLength);
+        }
+
+        public static byte[] Pbkdf2(byte[] password, byte[] salt, int iterations, int keyLength)
+        {
+            return Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, keyLength);
         }
 
         public static bool ConstantTimeEquals(byte[] a, byte[] b, int length)
@@ -326,7 +427,8 @@ namespace Dikestra.Shield
 
         public static void SecureWipe(byte[] data)
         {
-            Array.Clear(data, 0, data.Length);
+            if (data != null)
+                Array.Clear(data, 0, data.Length);
         }
 
         public void Dispose()
@@ -334,8 +436,9 @@ namespace Dikestra.Shield
             if (!_disposed)
             {
                 SecureWipe(_key);
-                SecureWipe(_encKey);
-                SecureWipe(_macKey);
+                SecureWipe(_aeadKey);
+                SecureWipe(_salt);
+                SecureWipe(_password);
                 _disposed = true;
             }
         }

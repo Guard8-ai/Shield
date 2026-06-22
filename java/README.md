@@ -1,17 +1,31 @@
-# Shield - EXPTIME-Secure Encryption (Java)
+# Shield - Authenticated Symmetric Encryption (Java)
 
 [![Maven Central](https://img.shields.io/maven-central/v/ai.dikestra/shield.svg)](https://search.maven.org/artifact/ai.dikestra/shield)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Symmetric cryptography with proven exponential-time security.
+Symmetric authenticated encryption with 256-bit keys (~128-bit post-quantum security).
 
 ## Why Shield?
 
-Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Breaking requires 2^256 operations - no shortcut exists:
+Shield builds on well-established symmetric primitives (SHA-256, HMAC-SHA256, PBKDF2). A 256-bit key gives 256-bit classical and ~128-bit post-quantum brute-force resistance, assuming these primitives are secure:
 
-- **PBKDF2-SHA256** for key derivation (100,000 iterations)
+- **PBKDF2-SHA256** for key derivation (600,000 iterations, OWASP 2023 floor)
+- **Per-instance random 16-byte salt** stored in the ciphertext header (no shared keys across users)
 - **SHA256-based stream cipher** (AES-256-CTR equivalent)
-- **HMAC-SHA256** for authentication
+- **HMAC-SHA256** for authentication (the version byte and salt are authenticated)
+
+### Wire format
+
+The leading version byte and the salt are authenticated by the MAC.
+
+```
+Password mode:       version(0x02) || salt(16) || nonce(16) || ciphertext || mac(16)
+Pre-shared-key mode: version(0x12) ||           nonce(16) || ciphertext || mac(16)
+```
+
+`ciphertext` = keystream-XOR of `counter(8) || timestamp(8) || pad_len(1) || padding(32-128) || plaintext`.
+The MAC covers `version || [salt] || nonce || ciphertext`. Overhead is 66 + padding (password mode)
+or 50 + padding (key mode) bytes over the plaintext.
 
 ## Installation
 
@@ -195,14 +209,14 @@ Shield Java classes are **thread-safe**. A single `Shield` instance can be share
 
 ## Security Model
 
-Shield uses only symmetric primitives with unconditional security:
+Shield builds on well-established symmetric primitives. Like all practical ciphers, their security is conjectural (it relies on standard assumptions), not unconditional:
 
 - **Symmetric encryption** (AES-256 equivalent)
 - **Hash functions** (SHA-256)
 - **HMAC authentication**
 - **Key derivation** (PBKDF2)
 
-Breaking requires 2^256 operations - no shortcut exists.
+Brute-forcing a full 256-bit key requires 2^256 operations; this relies on the standard assumption that SHA-256/HMAC have no exploitable structure (an assumption, not a mathematical proof).
 
 ## Cross-Language Compatibility
 

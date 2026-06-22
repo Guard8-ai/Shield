@@ -1,7 +1,7 @@
 {
   "name": "@dikestra/shield",
   "version": "2.2.0",
-  "description": "EXPTIME-secure encryption library - symmetric cryptography with proven exponential-time security",
+  "description": "Authenticated symmetric encryption library",
   "main": "src/index.js",
   "types": "src/index.d.ts",
   "exports": {
@@ -13,10 +13,13 @@
     "./browser": {
       "import": "./src/browser.mjs",
       "types": "./src/browser.d.ts"
+    },
+    "./pqhybrid": {
+      "import": "./src/pqhybrid.mjs"
     }
   },
   "scripts": {
-    "test": "node --test test/*.test.js",
+    "test": "node --test test/",
     "lint": "eslint src/",
     "prepublishOnly": "npm test"
   },
@@ -50,5 +53,8 @@
     "src/",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "dependencies": {
+    "@noble/post-quantum": "^0.6.1"
+  }
 }

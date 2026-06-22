@@ -24,7 +24,7 @@ public class Exchange {
      * Uses role binding to prevent reflection attacks.
      */
     public static class PAKE {
-        public static final int DEFAULT_ITERATIONS = 200000;
+        public static final int DEFAULT_ITERATIONS = 600000; // CR-2: OWASP 2023 floor
 
         /**
          * Derive key contribution from password.
@@ -32,7 +32,7 @@ public class Exchange {
          * @param password Shared password between parties
          * @param salt Public salt (can be exchanged openly)
          * @param role Role identifier ('alice', 'bob', 'initiator', etc.)
-         * @param iterations PBKDF2 iterations (default: 200000)
+         * @param iterations PBKDF2 iterations (default: 600000)
          * @return 32-byte key contribution
          */
         public static byte[] derive(String password, byte[] salt, String role, int iterations) {

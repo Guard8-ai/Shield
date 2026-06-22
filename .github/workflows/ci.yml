@@ -45,10 +45,13 @@ jobs:
         run: cd shield-core && cargo clippy --all-features -- -D warnings
 
       - name: Run tests
-        run: cd shield-core && cargo test --features async --verbose
+        run: cd shield-core && cargo test --features "async pq" --verbose
 
       - name: Run tests (no default features)
         run: cd shield-core && cargo test --no-default-features --verbose
+
+      - name: Post-quantum hybrid KEX conformance vectors
+        run: cd shield-core && cargo test --features pq pqhybrid --verbose
 
   # Device Fingerprint CLI
   fingerprint:
@@ -203,16 +206,22 @@ jobs:
 
   # C Tests
   c:
-    name: C (GCC)
-    runs-on: ubuntu-latest
+    # v4 C uses the Windows CNG (BCrypt) AES-256-GCM backend; the POSIX/OpenSSL
+    # EVP backend is not yet implemented (src/shield.c #errors on non-Windows),
+    # so C is exercised on Windows until the OpenSSL backend lands.
+    name: C (Windows CNG)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential
-
       - name: Build and test
-        run: cd c && make test
+        shell: bash
+        run: |
+          cd c
+          clang -O2 -Wall -Wextra -I./include \
+            src/shield.c tests/test_shield.c \
+            -lbcrypt -ladvapi32 -o test_shield.exe
+          ./test_shield.exe
 
   # Android Tests
   android:
