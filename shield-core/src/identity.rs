@@ -792,8 +792,8 @@ mod tests {
         assert_eq!(&encrypted[..4], &1u32.to_le_bytes()); // initial key version
         assert_eq!(encrypted[4], 0x13); // VERSION_KEY (pre-shared-key AEAD)
         assert_eq!(encrypted[5], 0x01); // SUITE_AES_256_GCM
-        // Length obfuscation: two encryptions of the same input differ and are
-        // not trivially the plaintext length.
+                                        // Length obfuscation: two encryptions of the same input differ and are
+                                        // not trivially the plaintext length.
         let again = session.encrypt(b"session data").unwrap();
         assert_ne!(encrypted, again);
     }
