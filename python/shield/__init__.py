@@ -25,7 +25,7 @@ Security:
 
 __version__ = "2.2.0"
 __author__ = "Eliran Sabag"
-__license__ = "CC0-1.0"
+__license__ = "MIT"
 
 from shield.core import Shield, quick_encrypt, quick_decrypt
 from shield.stream import StreamCipher

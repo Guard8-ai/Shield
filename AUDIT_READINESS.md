@@ -6,7 +6,7 @@
 
 **Version under review:** `2.2.0` across all bindings.
 **Source of truth:** `shield-core` (Rust). All other bindings are required to match it byte-for-byte.
-**License:** CC0-1.0.
+**License:** MIT.
 
 ---
 
@@ -93,7 +93,7 @@ From `THREAT_MODEL.md`:
 - **No forward secrecy in the base API** (static keys). Use `RatchetSession`. The PQ-hybrid KEX is recipient-static and likewise provides no FS by itself.
 - **AEAD is not key-committing.** Relevant if a use case depends on key-commitment.
 - **Ratchet/stream/group keystream** uses HMAC-SHA256 as a keyed PRF stream (encrypt-then-MAC), not an AEAD. Standard construction, but non-AEAD — flagged for explicit review.
-- **C binding is AES-256-GCM only** (Windows CNG lacks ChaCha20) and **has no PQ** yet.
+- **C base cipher is AES-256-GCM only** (Windows CNG lacks ChaCha20); C post-quantum is now implemented (liboqs + OpenSSL, POSIX).
 - **`SecureSession`** disables the freshness window (at-rest payloads) — intended; tag still provides integrity.
 
 ---

@@ -7,7 +7,7 @@ name = "shield-crypto"
 version = "2.2.0"
 description = "Authenticated symmetric encryption library"
 readme = "README.md"
-license = {text = "CC0-1.0"}
+license = {text = "MIT"}
 authors = [
     {name = "Eliran Sabag", email = "admin@gibraltarcloud.dev"}
 ]
@@ -15,7 +15,7 @@ keywords = ["cryptography", "encryption", "security", "post-quantum", "symmetric
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication",
+    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",

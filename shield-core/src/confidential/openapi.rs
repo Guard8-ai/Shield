@@ -172,7 +172,7 @@ impl OpenAPISchemas {
         title = "Shield Confidential Computing API",
         version = "1.0.0",
         description = "Authenticated symmetric encryption with hardware attestation verification",
-        license(name = "CC0-1.0")
+        license(name = "MIT")
     ),
     paths(
         verify_attestation,
