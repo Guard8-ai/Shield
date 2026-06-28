@@ -651,13 +651,13 @@ if result.level in (StrengthLevel.Critical, StrengthLevel.Weak):
 
 | Parameter | Value |
 |-----------|-------|
-| Key derivation | PBKDF2-SHA256 |
+| Key derivation | PBKDF2-HMAC-SHA256 |
 | Iterations | 600,000 |
 | Key size | 256 bits |
-| Nonce size | 128 bits |
-| MAC size | 128 bits |
-| Stream cipher | SHA256-CTR |
-| Authentication | HMAC-SHA256 |
+| Nonce size | 96 bits |
+| Auth tag size | 128 bits |
+| AEAD cipher | AES-256-GCM (default) / ChaCha20-Poly1305 |
+| AEAD-key derivation | HKDF-SHA256-Expand |
 
 ## Why Symmetric-Only?
 

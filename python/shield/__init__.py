@@ -18,7 +18,8 @@ Usage:
     decrypted = quick_decrypt(key, encrypted)
 
 Security:
-    Shield uses PBKDF2-SHA256 + SHA256-CTR + HMAC-SHA256.
+    Shield uses PBKDF2-HMAC-SHA256 (600k) + HKDF-SHA256 + a standard AEAD
+    (AES-256-GCM by default, ChaCha20-Poly1305 optional) — wire format v4.
     256-bit keys give 256-bit classical and ~128-bit post-quantum brute-force resistance.
 """
 

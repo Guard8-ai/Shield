@@ -284,13 +284,13 @@ const decrypted = new Shield('pw', 'app').decrypt(encrypted);
 
 | Parameter | Value | Why |
 |-----------|-------|-----|
-| Key derivation | PBKDF2-SHA256 | Proven, NIST-approved |
-| Iterations | 600,000 | ~200ms on modern hardware |
+| Key derivation | PBKDF2-HMAC-SHA256 | Proven, NIST-approved |
+| Iterations | 600,000 | OWASP 2023 floor (~107–290ms depending on language) |
 | Key size | 256 bits | 2^256 brute-force resistance |
-| Nonce | 128 bits random | Unique per encryption |
-| MAC | HMAC-SHA256 (128-bit) | Tamper detection |
-| Stream cipher | SHA256-CTR | Symmetric keystream |
-| Key separation | HMAC domain labels | Separate enc/mac subkeys |
+| AEAD cipher | AES-256-GCM (default) or ChaCha20-Poly1305 | Standard, audited, hardware-accelerated (wire format v4) |
+| Nonce | 96 bits random | Per-message, standard AEAD nonce size |
+| Auth tag | 128-bit AEAD tag | Tamper detection (built into the AEAD) |
+| Key separation | HKDF-SHA256-Expand | Derives the AEAD key from the master key (domain separation) |
 | Freshness window | Timestamp-based | Rejects messages older than the window (60s default); NOT full replay protection — the base API does not track seen nonces, so identical ciphertext can be replayed within the window. Use RatchetSession for per-message counters |
 | Length obfuscation | Random padding (32-128 bytes) | Hides message size |
 
@@ -347,12 +347,16 @@ Shield/
 
 | Operation | Speed | Notes |
 |-----------|-------|-------|
-| Key derivation | ~29ms | Intentional (anti-brute-force) |
-| Encryption | ~160 MB/s | SHA256-CTR (see [BENCHMARKS.md](BENCHMARKS.md)) |
+| Key derivation | ~107ms (Rust) | PBKDF2 600k, intentional (anti-brute-force); one-time per instance |
+| Encryption | ~1.2 GB/s (1MB, Rust) | AES-256-GCM (see [BENCHMARKS.md](BENCHMARKS.md)) |
+| Decryption | ~1.6 GB/s (1MB, Rust) | AES-256-GCM |
 | TOTP generation | <1ms | |
 | Lamport signing | ~10ms | 8KB signature |
 
-For comparison: AES-256-GCM achieves ~3.4 GB/s with hardware acceleration. Shield prioritizes simplicity over raw speed.
+Shield v4 encrypts with a standard, hardware-accelerated AEAD (AES-256-GCM by
+default, ChaCha20-Poly1305 optional), so throughput tracks the underlying AEAD
+plus a small constant framing overhead. See [BENCHMARKS.md](BENCHMARKS.md) for
+the full per-language tables and methodology.
 
 ---
 

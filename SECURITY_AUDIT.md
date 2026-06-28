@@ -1,5 +1,12 @@
 # Security Audit Requirements
 
+> **Status: PLAN, not a completed audit.** This document describes the *scope* for
+> a future third-party audit — it is **not** evidence that one has occurred. No
+> independent third-party cryptographic audit of Shield has been performed to
+> date. Some items below reference the ≤ v3 SHA-256 keystream design; the current
+> core (wire format **v4**) uses a standard AEAD (AES-256-GCM / ChaCha20-Poly1305)
+> — see `PROTOCOL.md` and `THREAT_MODEL.md`.
+
 This document outlines the requirements for a third-party security audit of Shield.
 
 ## Audit Scope

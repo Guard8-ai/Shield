@@ -1,8 +1,17 @@
 # Shield V2 Security Audit Report
 
+> **HISTORICAL / SUPERSEDED — internal self-review, not a third-party audit.**
+> This report was produced by an automated LLM analysis ("Claude Code"), **not**
+> an independent third-party auditor, and it describes the **superseded v2/v3**
+> design (custom SHA-256 keystream + HMAC, and at the time 100k PBKDF2
+> iterations). The current core is wire format **v4** (standard AEAD; 600k PBKDF2)
+> — see `PROTOCOL.md`, `CHANGES-FROM-ORIGINAL.md` (Part 10), and `THREAT_MODEL.md`.
+> No independent third-party cryptographic audit has been performed; treat this
+> document as an internal engineering review only.
+
 **Date**: 2026-02-20 (updated 2026-03-02)
 **Scope**: Shield v2 implementations across all SDKs (Python, JavaScript, Go, Java, C, C#, Swift, Kotlin, Android, iOS)
-**Auditor**: Claude Code Security Analysis
+**Auditor**: Claude Code Security Analysis (automated self-review — NOT a third party)
 
 ## Executive Summary
 

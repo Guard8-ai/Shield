@@ -9,7 +9,9 @@
 
 use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey};
 use ring::{hkdf, pbkdf2};
+use std::collections::HashMap;
 use std::num::NonZeroU32;
+use std::sync::Mutex;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{Result, ShieldError};
@@ -134,6 +136,8 @@ pub struct Shield {
     /// Maximum message age in milliseconds (None = no freshness check).
     #[zeroize(skip)]
     max_age_ms: Option<u64>,
+    /// Salt-keyed PBKDF2 master-key cache (password mode). See `MasterKeyCache`.
+    key_cache: MasterKeyCache,
 }
 
 /// Derive the 32-byte master key as
@@ -167,6 +171,32 @@ fn derive_aead_key(master_key: &[u8; 32]) -> [u8; 32] {
         .expect("HKDF fill of a 32-byte buffer never fails");
     out
 }
+
+/// Salt-keyed cache of PBKDF2 master keys.
+///
+/// Password-mode decryption derives the key from the *sender's* header salt;
+/// without a cache, every inbound message from a peer (whose random salt differs
+/// from this instance's) would re-run the 600k-iteration PBKDF2. This mirrors the
+/// caches in the Python/Go/JS bindings — the output is identical with or without
+/// it, so it is purely a performance optimization and does not affect the wire
+/// format or interop. Cached keys are zeroized when the owning `Shield` is
+/// dropped. Each new entry costs a full PBKDF2 to populate, so the cache is
+/// self-rate-limiting against salt-flooding.
+#[derive(Default)]
+struct MasterKeyCache(Mutex<HashMap<[u8; SALT_SIZE], [u8; 32]>>);
+
+impl Zeroize for MasterKeyCache {
+    fn zeroize(&mut self) {
+        if let Ok(mut map) = self.0.lock() {
+            for value in map.values_mut() {
+                value.zeroize();
+            }
+            map.clear();
+        }
+    }
+}
+
+impl ZeroizeOnDrop for MasterKeyCache {}
 
 impl Shield {
     /// Create a new Shield instance from password and service name.
@@ -208,6 +238,7 @@ impl Shield {
             iterations,
             suite: SUITE_AES_256_GCM,
             max_age_ms: Some(60_000), // Default: 60 seconds
+            key_cache: MasterKeyCache::default(),
         }
     }
 
@@ -227,6 +258,7 @@ impl Shield {
             iterations: PBKDF2_ITERATIONS,
             suite: SUITE_AES_256_GCM,
             max_age_ms: Some(60_000),
+            key_cache: MasterKeyCache::default(),
         }
     }
 
@@ -452,8 +484,9 @@ impl Shield {
                 let mut salt = [0u8; SALT_SIZE];
                 salt.copy_from_slice(&encrypted[2..2 + SALT_SIZE]);
 
-                // Re-derive the key from the sender's header salt + service.
-                let key = derive_master_key(&self.password, &salt, &self.service, self.iterations);
+                // Re-derive the key from the sender's header salt + service
+                // (cached, so repeat messages from the same sender are cheap).
+                let key = self.master_key_for_salt(&salt);
                 let aead_key = derive_aead_key(&key);
 
                 Self::open(&aead_key, suite, encrypted, aad_len, self.max_age_ms)
@@ -466,6 +499,27 @@ impl Shield {
             }
             _ => Err(ShieldError::InvalidFormat),
         }
+    }
+
+    /// Return the PBKDF2 master key for `salt`, using a cache to avoid re-running
+    /// the 600k-iteration KDF for salts already seen (notably this instance's own
+    /// salt, and repeat messages from the same peer). Output is identical to a
+    /// direct `derive_master_key`; only the cost differs.
+    fn master_key_for_salt(&self, salt: &[u8; SALT_SIZE]) -> [u8; 32] {
+        // Fast path: this instance's own salt key was derived at construction.
+        if self.salt.as_ref() == Some(salt) {
+            return self.key;
+        }
+        if let Ok(cache) = self.key_cache.0.lock() {
+            if let Some(key) = cache.get(salt) {
+                return *key;
+            }
+        }
+        let key = derive_master_key(&self.password, salt, &self.service, self.iterations);
+        if let Ok(mut cache) = self.key_cache.0.lock() {
+            cache.insert(*salt, key);
+        }
+        key
     }
 
     /// Decrypt a pre-shared-key (`0x13`) ciphertext with an explicit key.
@@ -697,6 +751,32 @@ mod tests {
         let b = Shield::new("password-b", "service").with_max_age(None);
         let encrypted = a.encrypt(b"secret").unwrap();
         assert!(b.decrypt(&encrypted).is_err());
+    }
+
+    #[test]
+    fn test_decrypt_key_cache_cross_instance() {
+        // Two instances share a password+service but have different random salts
+        // (the real two-party case). Bob must decrypt Alice's message correctly on
+        // the first call (cache miss → derive from her header salt) and on repeat
+        // calls (cache hit). The salt-keyed cache must never return a wrong key.
+        let alice = Shield::new("shared-pw", "service").with_max_age(None);
+        let bob = Shield::new("shared-pw", "service").with_max_age(None);
+        // Distinct random salts is what makes this exercise the cache, not the
+        // self-salt fast path.
+        assert_ne!(alice.salt, bob.salt);
+
+        let ct = alice.encrypt(b"hello from alice").unwrap();
+        assert_eq!(bob.decrypt(&ct).unwrap(), b"hello from alice");
+        // Repeat: served from cache, must still be correct.
+        assert_eq!(bob.decrypt(&ct).unwrap(), b"hello from alice");
+
+        // Self-decrypt fast path (header salt == instance salt).
+        let own = bob.encrypt(b"note to self").unwrap();
+        assert_eq!(bob.decrypt(&own).unwrap(), b"note to self");
+
+        // A wrong password still fails even after the cache is populated.
+        let mallory = Shield::new("other-pw", "service").with_max_age(None);
+        assert!(mallory.decrypt(&ct).is_err());
     }
 
     #[test]

@@ -43,9 +43,9 @@ plaintext = s.decrypt(encrypted)
 |---------|--------|--------|
 | Key derivation | Manual (generate + store) | Built-in PBKDF2 |
 | Key storage | You manage key file | Password-based |
-| Algorithm | AES-128-CBC + HMAC-SHA256 | SHA256-CTR + HMAC-SHA256 |
+| Algorithm | AES-128-CBC + HMAC-SHA256 | AES-256-GCM (or ChaCha20-Poly1305) |
 | Key size | 128-bit | 256-bit |
-| Format | Base64 token | Binary (nonce + ciphertext + MAC) |
+| Format | Base64 token | Binary (version + suite + [salt] + nonce + ciphertext + tag) |
 
 ### Migration Steps
 
@@ -168,10 +168,10 @@ plaintext = s.decrypt(encrypted)
 
 | Feature | NaCl secretbox | Shield |
 |---------|----------------|--------|
-| Algorithm | XSalsa20 + Poly1305 | SHA256-CTR + HMAC-SHA256 |
-| Nonce size | 24 bytes | 16 bytes |
-| Key derivation | Manual | Built-in PBKDF2 |
-| MAC | Poly1305 (faster) | HMAC-SHA256 (more standard) |
+| Algorithm | XSalsa20 + Poly1305 | AES-256-GCM (or ChaCha20-Poly1305) |
+| Nonce size | 24 bytes | 12 bytes |
+| Key derivation | Manual | Built-in PBKDF2 (600k) |
+| Authentication | Poly1305 | AEAD tag (GCM or Poly1305) |
 
 ### Migration with Existing Keys
 

@@ -1,55 +1,71 @@
 # Shield Wire Protocol Specification
 
-**Version**: 3.0
+**Version**: 4.0
 **Status**: Draft
-**Last Updated**: 2026-06-12
+**Last Updated**: 2026-06-23
 
 ## Overview
 
 This document specifies the wire format and protocol for Shield encrypted messages and the ShieldChannel secure transport.
 
-The canonical reference for the wire format is the Python implementation at `python/shield/core.py`; all other language bindings are byte-for-byte compatible with it.
+Wire format **v4** encrypts with a **standard AEAD** — AES-256-GCM (default) or
+ChaCha20-Poly1305 — replacing the custom SHA-256 keystream + HMAC construction
+used by formats ≤ v3. No cryptography is hand-rolled in the base format: every
+binding uses its platform's audited AEAD and KDF.
+
+The canonical reference for the wire format is the Rust implementation at
+`shield-core/src/shield.rs`; all other language bindings are byte-for-byte
+compatible with it, gated by `tests/v4_test_vectors.json`.
+
+> **Scope note.** The base `Shield` encrypt/decrypt API (§1) uses a standard
+> AEAD. The internal `StreamCipher` (§4) and `RatchetSession` (§3) layers retain
+> a SHA-256 / HMAC-SHA256 keystream construction (§2); those are separate modules
+> and are *not* the base format.
 
 ## 1. Basic Encryption Format
 
-The current format carries an explicit, authenticated version byte at the front of every message. Two modes are defined:
+Every message carries two explicit, authenticated leading bytes — a **version**
+and a **cipher suite** — followed by the AEAD nonce and the AEAD output
+(ciphertext with appended tag). Two modes are defined:
 
-- **Password mode** (`0x02`) — keys derived from a password via PBKDF2; carries a per-instance random salt in the header.
-- **Pre-shared-key mode** (`0x12`) — keys supplied directly (`with_key` / `quick_encrypt`); no password, no salt.
+- **Password mode** (`0x03`) — keys derived from a password via PBKDF2; carries a per-instance random salt in the header.
+- **Pre-shared-key mode** (`0x13`) — keys supplied directly (`with_key` / `quick_encrypt`); no password, no salt.
 
-The leading version byte is authenticated by the MAC, so there is no format guessing on decryption: decryption dispatches on the version byte and hard-rejects any unknown value.
+The version and suite bytes (and, in password mode, the salt) are authenticated
+as the AEAD's associated data (AAD), so there is no format guessing: decryption
+dispatches on the version byte and hard-rejects any unknown value.
 
 ### 1.1 Message Structure
 
-**Password mode** (version `0x02`):
+**Password mode** (version `0x03`):
 
 ```
-+---------+----------+----------+------------------+----------+
-| Version |   Salt   |  Nonce   |    Ciphertext    |   MAC    |
-| 1 byte  | 16 bytes | 16 bytes |    (variable)    | 16 bytes |
-+---------+----------+----------+------------------+----------+
++---------+-------+----------+----------+--------------------------+
+| Version | Suite |   Salt   |  Nonce   |  Ciphertext || AEAD tag  |
+| 1 byte  | 1 byte| 16 bytes | 12 bytes |   N + 16 bytes           |
++---------+-------+----------+----------+--------------------------+
 ```
 
-**Pre-shared-key mode** (version `0x12`):
+**Pre-shared-key mode** (version `0x13`):
 
 ```
-+---------+----------+------------------+----------+
-| Version |  Nonce   |    Ciphertext    |   MAC    |
-| 1 byte  | 16 bytes |    (variable)    | 16 bytes |
-+---------+----------+------------------+----------+
++---------+-------+----------+--------------------------+
+| Version | Suite |  Nonce   |  Ciphertext || AEAD tag  |
+| 1 byte  | 1 byte| 12 bytes |   N + 16 bytes           |
++---------+-------+----------+--------------------------+
 ```
 
 | Field | Size | Description |
 |-------|------|-------------|
-| Version | 1 byte | `0x02` = password mode, `0x12` = pre-shared-key mode. Authenticated by the MAC. |
-| Salt | 16 bytes | Per-instance random PBKDF2 salt. **Password mode only.** Authenticated by the MAC. |
-| Nonce | 16 bytes | Random value, unique per message |
-| Ciphertext | Variable | Encrypted inner plaintext (see §1.6) |
-| MAC | 16 bytes | HMAC-SHA256 truncated to 128 bits |
+| Version | 1 byte | `0x03` = password mode, `0x13` = pre-shared-key mode. Authenticated (AAD). |
+| Suite | 1 byte | `0x01` = AES-256-GCM, `0x02` = ChaCha20-Poly1305. Authenticated (AAD). |
+| Salt | 16 bytes | Per-instance random PBKDF2 salt. **Password mode only.** Authenticated (AAD). |
+| Nonce | 12 bytes | Random value, unique per message (standard 96-bit AEAD nonce) |
+| Ciphertext \|\| tag | N + 16 bytes | `AEAD_Seal(aead_key, nonce, inner, aad)`; the 128-bit tag is appended |
 
 **Header overhead** (excluding the inner plaintext metadata in §1.6):
-- Password mode: 1 + 16 + 16 + 16 = **49 bytes**
-- Pre-shared-key mode: 1 + 16 + 16 = **33 bytes**
+- Password mode: 1 + 1 + 16 + 12 + 16 (tag) = **46 bytes**
+- Pre-shared-key mode: 1 + 1 + 12 + 16 (tag) = **30 bytes**
 
 ### 1.2 Key Derivation
 
@@ -67,30 +83,39 @@ master_key = PBKDF2-HMAC-SHA256(
 )
 ```
 
-`service` is folded into the PBKDF2 salt input as a domain separator (concatenated *after* the random salt: `salt || service`). Different services therefore still yield different keys, while the per-instance random salt removes the old precomputation / shared-key weakness.
+`service` is folded into the PBKDF2 salt input as a domain separator (concatenated *after* the random salt: `salt || service`). Different services therefore yield different keys, and the per-instance random salt removes precomputation / shared-key weaknesses.
 
-Subkey separation is identical in both modes and applied to the 32-byte master key:
+The AEAD key is then derived from the master key in **both** modes via
+HKDF-Expand (the master key is the PRK; this is Expand only, not Extract):
 
 ```
-enc_key = HMAC-SHA256(master_key, "shield-encrypt")        # 32 bytes
-mac_key = HMAC-SHA256(master_key, "shield-authenticate")   # 32 bytes
+aead_key = HKDF-SHA256-Expand(master_key, info = "shield/aead/v4", L = 32)
 ```
+
+This gives domain separation and avoids using the master key directly as a
+cipher key. There is no separate MAC key — the AEAD provides integrity.
+
+> **Decrypt-side key cache.** Password-mode decryption derives the key from the
+> *sender's* header salt; since peers sharing a password pick independent random
+> salts, every binding keeps a salt-keyed cache of derived master keys so repeat
+> messages from a sender avoid re-running PBKDF2. This is an implementation
+> optimization and does not affect the wire format.
 
 ### 1.3 Encryption Process
 
 ```
-1. Build inner = counter || timestamp || pad_len || padding || plaintext  (see §1.6)
-2. Generate random nonce (16 bytes)
-3. keystream = SHA256-CTR(enc_key, nonce, len(inner))
-4. ciphertext = inner XOR keystream
-5. Build header:
-     password mode:        header = version(0x02) || salt(16)
-     pre-shared-key mode:  header = version(0x12)
-6. mac = HMAC-SHA256(mac_key, header || nonce || ciphertext)[0:16]
-7. output = header || nonce || ciphertext || mac
+1. Build inner = timestamp || pad_len || padding || plaintext  (see §1.6)
+2. Generate random nonce (12 bytes)
+3. Build aad:
+     password mode:        aad = version(0x03) || suite || salt(16)
+     pre-shared-key mode:  aad = version(0x13) || suite
+4. ct_and_tag = AEAD_Seal(aead_key, nonce, inner, aad)
+5. output = aad || nonce || ct_and_tag
 ```
 
-The MAC authenticates `version || [salt] || nonce || ciphertext` — i.e. the version byte and (in password mode) the salt are covered.
+The AEAD authenticates both the `aad` (version, suite, and in password mode the
+salt) and the encrypted `inner`. Any modification to the header or ciphertext
+fails tag verification.
 
 ### 1.4 Decryption Process
 
@@ -98,57 +123,59 @@ The MAC authenticates `version || [salt] || nonce || ciphertext` — i.e. the ve
 1. IF len(input) < 1: reject
 2. version = input[0]
 
-3. IF version == 0x02 (password mode):
-     salt    = input[1:17]
-     header  = input[0:17]
-     body    = input[17:]
-     # Re-derive key from the header salt (sender's salt may differ from ours)
-     master_key      = PBKDF2-HMAC-SHA256(password, salt || service, 600000, 32)
-     enc_key, mac_key = subkeys(master_key)
-   ELIF version == 0x12 (pre-shared-key mode):
-     header  = input[0:1]
-     body    = input[1:]
-     enc_key, mac_key = this instance's subkeys
+3. IF version == 0x03 (password mode):
+     suite   = input[1]
+     salt    = input[2:18]
+     aad     = input[0:18]
+     nonce   = input[18:30]
+     ct_tag  = input[30:]
+     master_key = PBKDF2-HMAC-SHA256(password, salt || service, 600000, 32)   # cached by salt
+     aead_key   = HKDF-SHA256-Expand(master_key, "shield/aead/v4", 32)
+   ELIF version == 0x13 (pre-shared-key mode):
+     suite   = input[1]
+     aad     = input[0:2]
+     nonce   = input[2:14]
+     ct_tag  = input[14:]
+     aead_key = HKDF-SHA256-Expand(this instance's master key, "shield/aead/v4", 32)
    ELSE:
      reject   # unknown / legacy version — no fallback decrypt path
 
-4. nonce      = body[0:16]
-5. ciphertext = body[16:-16]
-6. mac        = body[-16:]
-
-7. expected_mac = HMAC-SHA256(mac_key, header || nonce || ciphertext)[0:16]
-8. Verify: constant_time_compare(mac, expected_mac) -> reject on mismatch
-
-9. keystream = SHA256-CTR(enc_key, nonce, len(ciphertext))
-10. inner    = ciphertext XOR keystream
-11. Parse and validate inner (see §1.6), apply freshness check (see §1.7)
-12. return plaintext
+4. inner = AEAD_Open(aead_key, nonce, ct_tag, aad)   # reject on tag failure
+5. Parse and validate inner (see §1.6), apply freshness check (see §1.7)
+6. return plaintext
 ```
 
-> **No legacy decrypt path.** This is a clean break from the older formats. The main `decrypt()` routine dispatches solely on the authenticated version byte and rejects anything that is not `0x02` or `0x12`. Older heuristic (timestamp-range) formats are not accepted. Ciphertexts written by pre-`3.0` Shield must be re-encrypted; they cannot be read by the current code.
+> **No legacy decrypt path.** This is a clean break. `decrypt()` dispatches solely
+> on the authenticated version byte and rejects anything that is not `0x03` or
+> `0x13`. Ciphertexts written by ≤ v3 Shield (`0x02` / `0x12`) cannot be read by
+> the current code and must be re-encrypted.
 
 ### 1.5 Mode Selection
 
 | Constructor | Mode | Version byte | Salt in header |
 |-------------|------|--------------|----------------|
-| `Shield(password, service)` | Password | `0x02` | Yes (16 random bytes) |
-| `Shield.with_key(key)` | Pre-shared-key | `0x12` | No |
-| `quick_encrypt(key, data)` | Pre-shared-key | `0x12` | No |
+| `Shield::new(password, service)` | Password | `0x03` | Yes (16 random bytes) |
+| `Shield::with_key(key)` | Pre-shared-key | `0x13` | No |
+| `quick_encrypt(key, data)` | Pre-shared-key | `0x13` | No |
+
+The cipher suite defaults to `0x01` (AES-256-GCM); `with_suite(0x02)` selects
+ChaCha20-Poly1305.
 
 ### 1.6 Inner Plaintext Structure
 
-Before encryption, the plaintext is wrapped with metadata. This inner layout is XOR-encrypted under the keystream and is identical in both modes:
+Before sealing, the plaintext is wrapped with metadata. This inner buffer is the
+AEAD plaintext and is identical in both modes. Note there is **no counter** field
+(v4 dropped it):
 
 ```
-+----------+------------+----------+---------+-------------+
-| Counter  | Timestamp  | Pad Len  | Padding |  Plaintext  |
-| 8 bytes  |  8 bytes   | 1 byte   | 32-128B |  variable   |
-+----------+------------+----------+---------+-------------+
++------------+----------+---------+-------------+
+| Timestamp  | Pad Len  | Padding |  Plaintext  |
+|  8 bytes   | 1 byte   | 32-128B |  variable   |
++------------+----------+---------+-------------+
 ```
 
 | Field | Size | Description |
 |-------|------|-------------|
-| Counter | 8 bytes | Message counter (little-endian uint64), increments per encrypt within a Shield instance |
 | Timestamp | 8 bytes | Unix timestamp in milliseconds (little-endian uint64) |
 | Pad Len | 1 byte | Length of random padding (32-128) |
 | Padding | 32-128 bytes | Random padding for length obfuscation |
@@ -159,19 +186,22 @@ The padding length is drawn uniformly from [32, 128] using rejection sampling to
 #### 1.6.1 Constants
 
 ```
-INNER_HEADER_SIZE = 17    # counter(8) + timestamp(8) + pad_len(1)
+INNER_HEADER_SIZE = 9     # timestamp(8) + pad_len(1)
 MIN_PADDING       = 32    # Minimum padding bytes
 MAX_PADDING       = 128   # Maximum padding bytes
 PBKDF2_ITERATIONS = 600000
-NONCE_SIZE        = 16
+NONCE_SIZE        = 12
 SALT_SIZE         = 16
-MAC_SIZE          = 16
+TAG_SIZE          = 16
+HKDF_AEAD_INFO    = "shield/aead/v4"
+SUITE_AES_256_GCM         = 0x01
+SUITE_CHACHA20_POLY1305   = 0x02
 DEFAULT_MAX_AGE_MS = 60000  # Default freshness window (see §1.7)
 ```
 
 ### 1.7 Freshness Window (timestamp-based)
 
-After the MAC is verified and the inner layout parsed, an optional timestamp check is applied. It is a freshness window, **not** full replay protection: the base API does not track seen nonces, so an identical ciphertext can be replayed within the window. Use RatchetSession for per-message counters.
+After the AEAD tag is verified and the inner layout parsed, an optional timestamp check is applied. It is a freshness window, **not** full replay protection: the base API does not track seen nonces, so an identical ciphertext can be replayed within the window. Use RatchetSession for per-message counters.
 
 ```
 IF max_age_ms is not None:
@@ -188,7 +218,11 @@ Properties:
 - Set `max_age_ms = None` to disable the check.
 - `pad_len` is validated to be within [32, 128]; out-of-range values reject the message.
 
-## 2. SHA256-CTR Stream Cipher
+## 2. Internal Keystream (StreamCipher and Ratchet only)
+
+> **This section does NOT describe the base `Shield` format**, which uses a
+> standard AEAD (§1). It describes the keystream still used by the internal
+> `StreamCipher` (§4) and `RatchetSession` (§3) modules.
 
 ### 2.1 Keystream Generation
 
@@ -198,12 +232,15 @@ position = 0
 
 while need_more_bytes:
     block_input = nonce || counter.to_bytes(4, little_endian)
-    block = SHA256(encryption_key || block_input)
+    block = SHA256(encryption_key || block_input)     # StreamCipher
+    # or HMAC-SHA256(message_key, nonce || counter)   # Ratchet (§3.8)
     output block bytes
     counter += 1
 ```
 
-**Counter overflow guard (v2.1):** Keystream generators assert that `counter` fits in `u32` (max 2^32 blocks = 137GB). Exceeding this limit causes a hard failure rather than silent wraparound.
+**Counter overflow guard:** keystream generators assert that `counter` fits in
+`u32` (max 2^32 blocks = 137 GB); exceeding this is a hard failure, not silent
+wraparound.
 
 ### 2.2 Block Structure
 
@@ -214,13 +251,16 @@ while need_more_bytes:
 +----------------+----------------+
          |
          v
-    SHA256(key || input)
+    SHA256(key || input)   (StreamCipher)  /  HMAC-SHA256(key, input)  (Ratchet)
          |
          v
     32-byte keystream block
 ```
 
-> **Note (cross-language wire format):** The core `Shield` and `StreamCipher` keystream use raw SHA256 for cross-language interoperability. Internal-only modules (ratchet, rotation, group, identity, exchange, signatures) use HMAC-SHA256 as keyed PRF — see Section 3.8.
+> **Note (cross-language wire format):** The `StreamCipher` keystream uses raw
+> SHA256 for cross-language interoperability. Internal modules (ratchet,
+> rotation, group, identity, exchange, signatures) use HMAC-SHA256 as a keyed PRF
+> — see §3.8.
 
 ## 3. ShieldChannel Protocol
 
@@ -332,13 +372,19 @@ Keystream generation in ratchet messages also uses HMAC-SHA256:
 keystream_block[i] = HMAC-SHA256(message_key, nonce || counter_i)
 ```
 
-> **v2.1 upgrade (Rust):** All internal modules (ratchet, rotation, group, identity, exchange, signatures) replaced raw `SHA256(key||data)` patterns with `HMAC-SHA256(key, data)` for formal PRF security (Bellare 2006), length-extension resistance, and NIST SP 800-108 compliance.
+> All internal modules (ratchet, rotation, group, identity, exchange,
+> signatures) use `HMAC-SHA256(key, data)` rather than raw `SHA256(key||data)`
+> for formal PRF security (Bellare 2006), length-extension resistance, and NIST
+> SP 800-108 alignment.
 
-### 3.9 Sync Channel Timeout (v2.1)
+### 3.9 Sync Channel Timeout
 
 `ShieldChannel<TcpStream>` provides `connect_tcp()` and `accept_tcp()` methods that enforce `handshake_timeout_ms` via socket read/write timeouts during the handshake phase. Timeouts are cleared after successful handshake to avoid interfering with application-level I/O.
 
 ## 4. StreamCipher Format
+
+Uses the SHA-256 keystream + HMAC-SHA256 construction described in §2 (not the
+base AEAD), chunked for large-file processing.
 
 ### 4.1 Chunk Structure
 
@@ -386,17 +432,20 @@ code = (hmac[offset:offset+4] & 0x7FFFFFFF) % 1000000
 |---------|--------------|----------------|------------------|
 | 1.0 | 2026-01-11 | Initial specification (historical) | N/A |
 | 2.0 | 2026-02-20 | Inner timestamp + length-obfuscation padding (historical) | Could not be read by 1.0 |
-| 2.1 | 2026-03-01 | Key separation (enc_key/mac_key via HMAC domain labels), HMAC-SHA256 in all internal modules, counter overflow guards, sync channel timeout (historical) | Wire format unchanged from 2.0 |
-| 3.0 | 2026-06-12 | Explicit authenticated version byte; per-instance random PBKDF2 salt carried in header (password mode); PBKDF2 iterations 100k → 600k; `service` folded into salt as a domain separator; salt + version authenticated by the MAC | **Clean break.** Pre-3.0 ciphertexts are not readable by 3.0; no legacy decrypt path. |
+| 2.1 | 2026-03-01 | Key separation (enc_key/mac_key via HMAC domain labels), HMAC-SHA256 in all internal modules, counter overflow guards (historical) | Wire format unchanged from 2.0 |
+| 3.0 | 2026-06-12 | Explicit authenticated version byte (`0x02`/`0x12`); per-instance random PBKDF2 salt in header; iterations 100k → 600k (historical) | Clean break from ≤ 2.1 |
+| 4.0 | 2026-06-22 | **Standard AEAD core** (AES-256-GCM default / ChaCha20-Poly1305) replaces the SHA-256 keystream + HMAC; added suite byte; version bytes `0x03`/`0x13`; nonce 16 → 12 bytes; AEAD tag replaces the separate HMAC; inner counter removed; `aead_key = HKDF-Expand(master_key)` | **Clean break.** ≤ 3.0 ciphertexts (`0x02`/`0x12`) are not readable by 4.0; no legacy decrypt path. |
 
-> **Note on historical versions.** The 1.0 / 2.0 / 2.1 formats listed above are documented here only for history. They are **not** accepted by the current code. The fragile timestamp-range "auto-detection" that older versions relied on to tell v1 from v2 has been removed entirely and replaced by the explicit, MAC-authenticated version byte in §1.1.
+> **Note on historical versions.** The 1.0–3.0 formats are documented for history
+> only. They are **not** accepted by the current code; decryption dispatches on
+> the explicit, AEAD-authenticated version byte (§1.1).
 
 ### 6.1 Version Detection
 
-Each message begins with an explicit version byte (§1.1) that is authenticated by the MAC:
+Each message begins with an explicit version byte (§1.1) authenticated as AEAD AAD:
 
-- `0x02` — password mode (`version || salt(16) || nonce || ciphertext || mac`)
-- `0x12` — pre-shared-key mode (`version || nonce || ciphertext || mac`)
+- `0x03` — password mode (`version || suite || salt(16) || nonce(12) || ct||tag`)
+- `0x13` — pre-shared-key mode (`version || suite || nonce(12) || ct||tag`)
 
 Decryption dispatches on this byte before any cryptographic work and hard-rejects any other value. There is no plaintext-heuristic detection and no fallback to older formats.
 
@@ -404,129 +453,117 @@ Decryption dispatches on this byte before any cryptographic work and hard-reject
 
 | Producer | Consumer | Result |
 |----------|----------|--------|
-| Pre-3.0 | 3.0 | ❌ Rejected (unknown/absent version byte) |
-| 3.0 | Pre-3.0 | ❌ Fails (older code cannot parse the version byte / salt) |
-| 3.0 password (`0x02`) | 3.0 password | ✅ Works |
-| 3.0 PSK (`0x12`) | 3.0 PSK | ✅ Works |
+| ≤ 3.0 (`0x02`/`0x12`) | 4.0 | ❌ Rejected (unknown version byte) |
+| 4.0 | ≤ 3.0 | ❌ Fails (older code cannot parse the suite byte / AEAD) |
+| 4.0 password (`0x03`) | 4.0 password | ✅ Works |
+| 4.0 PSK (`0x13`) | 4.0 PSK | ✅ Works |
 
 ### 6.3 Migration Guidance
 
-3.0 is a deliberate clean break. There is no in-place upgrade path and no dual-read window:
+4.0 is a deliberate clean break. There is no in-place upgrade path and no dual-read window:
 
-1. Data encrypted with pre-3.0 Shield must be **re-encrypted** with 3.0 to remain readable.
-2. All producers and consumers should be upgraded to 3.0 together.
+1. Data encrypted with ≤ 3.0 Shield must be **re-encrypted** with 4.0 to remain readable.
+2. All producers and consumers should be upgraded to 4.0 together.
 3. Mixed-version deployments will see cross-version messages rejected (see the matrix above), not silently mis-decrypted.
 
 ## 7. Security Considerations
 
 ### 7.1 Nonce Uniqueness
 
-- Nonces MUST be random and unique per message
-- Nonce reuse breaks confidentiality
-- Use cryptographically secure RNG
+- The 96-bit nonce MUST be random and unique per message under a given key.
+- For AES-GCM, the safe limit is ~2^32 messages per key with random nonces
+  (birthday bound on the 96-bit nonce); rotate keys for very high message volumes.
+- Use a cryptographically secure RNG.
 
 ### 7.2 Timing Attacks
 
-- All comparisons MUST be constant-time
-- Use `subtle` crate (Rust) or equivalent
+- AEAD tag verification is constant-time within the underlying provider.
+- Any application-level comparisons MUST also be constant-time (`subtle` in Rust).
 
 ### 7.3 Key Material
 
-- Keys MUST be zeroized after use
-- Never log or serialize keys
-- Use secure memory where available
+- Keys MUST be zeroized after use (the Rust `Shield`, including its derived-key
+  cache, zeroizes on drop).
+- Never log or serialize keys.
+- Use secure memory where available.
+
+### 7.4 Key Commitment
+
+- AES-GCM and ChaCha20-Poly1305 are not key-committing: a ciphertext can, in
+  principle, be made to decrypt under two different keys. Shield's threat model
+  does not currently rely on key commitment; see `THREAT_MODEL.md`.
 
 ## 8. Test Vectors
 
-### 8.1 Password Mode (version `0x02`, deterministic test values)
+Deterministic, byte-exact vectors live in `tests/v4_test_vectors.json` (6
+AES-256-GCM + 2 ChaCha20-Poly1305 vectors), each carrying `master_key_hex`,
+`aead_key_hex`, and `expected_output_hex`. Every binding reproduces them
+byte-for-byte. The structure below documents the layout; consult the JSON for
+exact bytes.
+
+### 8.1 Password Mode (version `0x03`)
 
 ```
 Password:  "test-password"
 Service:   "test.example.com"
 Plaintext: "Hello, World!" (hex: 48656c6c6f2c20576f726c6421)
-Salt:      00000000000000000000000000000000 (for testing only; normally random)
-Nonce:     00000000000000000000000000000000 (for testing only)
-Timestamp: 1672531200000 (2023-01-01 00:00:00 UTC)
-Padding:   32 bytes of 0x00 (for testing only)
+Suite:     0x01 (AES-256-GCM)
+Salt:      16 bytes (fixed per vector)
+Nonce:     12 bytes (fixed per vector)
+Timestamp / padding: fixed per vector
 
 Key derivation:
-  master_key = PBKDF2-HMAC-SHA256("test-password",
-                                  salt || "test.example.com",
-                                  600000, 32)
-  enc_key = HMAC-SHA256(master_key, "shield-encrypt")
-  mac_key = HMAC-SHA256(master_key, "shield-authenticate")
+  master_key = PBKDF2-HMAC-SHA256("test-password", salt || "test.example.com", 600000, 32)
+  aead_key   = HKDF-SHA256-Expand(master_key, "shield/aead/v4", 32)
 
-Inner data (XOR-encrypted under the keystream):
-- Counter:   0000000000000000 (8 bytes)
-- Timestamp: 00e057ac85010000 (8 bytes, little-endian: 1672531200000)
-- Pad Len:   20               (1 byte, hex: 0x20 = 32)
-- Padding:   32 bytes of 0x00
-- Plaintext: "Hello, World!"   (13 bytes)
-Inner length: 8 + 8 + 1 + 32 + 13 = 62 bytes
-
-Output format: version(1) || salt(16) || nonce(16) || ciphertext(62) || mac(16)
-Output length: 1 + 16 + 16 + 62 + 16 = 111 bytes
-MAC input:     version(0x02) || salt(16) || nonce(16) || ciphertext(62)
+Inner (AEAD plaintext): timestamp(8) || pad_len(1) || padding(32-128) || "Hello, World!"
+AAD:    version(0x03) || suite(0x01) || salt(16)
+Output: version(1) || suite(1) || salt(16) || nonce(12) || ciphertext || tag(16)
 ```
 
-### 8.2 Pre-Shared-Key Mode (version `0x12`, deterministic test values)
+### 8.2 Pre-Shared-Key Mode (version `0x13`)
 
 ```
 Key:       32 bytes (caller-supplied; no PBKDF2)
-Plaintext: "Hello, World!" (hex: 48656c6c6f2c20576f726c6421)
-Nonce:     00000000000000000000000000000000 (for testing only)
-Timestamp: 1672531200000
-Padding:   32 bytes of 0x00 (for testing only)
+aead_key = HKDF-SHA256-Expand(key, "shield/aead/v4", 32)
 
-Inner data: identical layout to §8.1 (62 bytes for this example)
-
-Output format: version(1) || nonce(16) || ciphertext(62) || mac(16)
-Output length: 1 + 16 + 62 + 16 = 95 bytes
-MAC input:     version(0x12) || nonce(16) || ciphertext(62)
+Inner:  identical layout to §8.1
+AAD:    version(0x13) || suite
+Output: version(1) || suite(1) || nonce(12) || ciphertext || tag(16)
 ```
 
 ### 8.3 Freshness / Rejection Test Cases
 
 ```
-Test Case 1: Valid message (within window)
-- Timestamp within [now - max_age_ms, now + 5000]
-- Result: Decrypts successfully
-
-Test Case 2: Expired message (max_age_ms = 60000)
-- Timestamp: now - 120000 (2 minutes ago)
-- Result: Rejected (age > max_age_ms)
-
-Test Case 3: Future message (>5s clock skew)
-- Timestamp: now + 10000 (10 seconds in the future)
-- Result: Rejected (timestamp > now + 5000)
-
-Test Case 4: Unknown version byte
-- First byte is not 0x02 or 0x12 (e.g. a pre-3.0 ciphertext)
-- Result: Rejected before any key derivation or MAC check
-
-Test Case 5: Tampered version or salt
-- Any change to the version byte or (password mode) the salt
-- Result: MAC verification fails -> rejected
+Test Case 1: Valid message (within window) -> decrypts
+Test Case 2: Expired (timestamp = now - 120000, window 60000) -> rejected
+Test Case 3: Future-dated (timestamp = now + 10000, skew 5000) -> rejected
+Test Case 4: Unknown version byte (not 0x03/0x13, e.g. a ≤3.0 ciphertext) -> rejected before any crypto
+Test Case 5: Tampered version/suite/salt/ciphertext -> AEAD tag fails -> rejected
 ```
 
 ### 8.4 Cross-Language Verification
 
-All implementations MUST produce byte-identical output for:
-- Same password and service (password mode) or same key (PSK mode)
-- Same salt (password mode, test mode only)
-- Same nonce (test mode only)
-- Same timestamp and padding (test mode only)
+All implementations MUST produce byte-identical output for the same inputs
+(password+service or key; salt, nonce, timestamp, padding in test mode). Every
+binding (Python, JavaScript, Go, Java, Kotlin, Android, C#, C, Swift/iOS, WASM):
 
-Byte-for-byte compatibility requires that every language binding (Python, JavaScript, Go, Java, C, etc.):
-1. Emits the correct version byte (`0x02` / `0x12`) and, in password mode, the 16-byte salt.
-2. Derives keys with PBKDF2-HMAC-SHA256 over `salt || service`, 600000 iterations.
-3. Computes the MAC over `version || [salt] || nonce || ciphertext`.
-4. Rejects unknown version bytes and expired messages consistently.
-5. Produces identical length variation (32-128 byte random padding).
+1. Emits the correct version + suite bytes and, in password mode, the 16-byte salt.
+2. Derives `master_key` via PBKDF2-HMAC-SHA256 over `salt || service`, 600000 iterations.
+3. Derives `aead_key` via HKDF-SHA256-Expand with `info = "shield/aead/v4"`.
+4. Seals with the selected AEAD over `aad = version || suite || [salt]`.
+5. Rejects unknown version bytes and expired messages consistently.
+6. Produces identical length variation (32-128 byte random padding).
+
+> **C binding:** AES-256-GCM only (Windows CNG provides no ChaCha20-Poly1305);
+> suite `0x02` is unavailable there. All other bindings support both suites.
 
 ## References
 
+- NIST SP 800-38D: AES-GCM
+- RFC 8439: ChaCha20-Poly1305
+- RFC 5869: HKDF
+- RFC 8018 / NIST SP 800-132: PBKDF2
 - RFC 2104: HMAC
 - RFC 6238: TOTP
 - RFC 4648: Base Encodings
-- NIST SP 800-132: PBKDF2
