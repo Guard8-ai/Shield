@@ -67,7 +67,7 @@ Hybrid **X25519 + ML-KEM-768** (FIPS 203 / RFC 7748), HPKE/PGP-style (bound to a
 - No hand-rolled lattice math: Rust `ml-kem` + `x25519-dalek`; JS `@noble/post-quantum`; C#/Java/Kotlin/Android Bouncy Castle; Python `cryptography`; Go stdlib.
 - Conformance oracle: `tests/pq_kex_vectors.json`.
 
-Coverage today: **8 of 12 execution-verified** (Python, Go, Rust, JS, C#, Java, Kotlin, Android); Swift/iOS written + parse-clean (Mac to execute); **C not yet** (needs liboqs / OpenSSL ≥3.5).
+Coverage today: **9 of 12 execution-verified** (Python, Go, Rust, JS, C#, Java, Kotlin, Android, **C** — ML-KEM-768 via liboqs + X25519/HKDF via OpenSSL, vectors byte-identical); Swift/iOS written + parse-clean (Mac to execute).
 
 ---
 
@@ -100,7 +100,7 @@ From `THREAT_MODEL.md`:
 
 ## 7. Out of scope for this engagement
 
-Swift/iOS *execution* (pending Apple hardware — code is parse-clean and byte-identical by construction); C post-quantum (pending liboqs); packaging/distribution; business/GTM claims.
+Swift/iOS *execution* (pending Apple hardware — code is parse-clean and byte-identical by construction); packaging/distribution; business/GTM claims.
 
 ---
 
@@ -116,6 +116,7 @@ Swift/iOS *execution* (pending Apple hardware — code is parse-clean and byte-i
 | C# | `cd csharp && dotnet test` | green |
 | Java/Kotlin/Android | `gradle test` / `gradle :shield:testDebugUnitTest` | green |
 | C | `clang -O2 -I./c/include c/src/shield.c c/tests/test_shield.c -lbcrypt -ladvapi32` | 34/34 |
+| C post-quantum | `c/scripts/build_and_test_pq.sh` (Linux/macOS; builds liboqs + OpenSSL) | 3/3 vectors byte-identical |
 | Cross-language | `python -X utf8 tests/test_cross_language_v2.py` | 8/8 byte-for-byte |
 | WASM | `wasm-pack build` | builds clean |
 

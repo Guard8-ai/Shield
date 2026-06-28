@@ -223,6 +223,25 @@ jobs:
             -lbcrypt -ladvapi32 -o test_shield.exe
           ./test_shield.exe
 
+  c-pq:
+    # The C post-quantum hybrid KEX (X25519 + ML-KEM-768) targets POSIX hosts:
+    # ML-KEM-768 via liboqs, X25519 + HKDF via OpenSSL >= 3.0. Verified
+    # byte-identical against the shared tests/pq_kex_vectors.json.
+    name: C post-quantum (Linux, liboqs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential cmake ninja-build pkg-config libssl-dev git
+
+      - name: Build C PQ and run conformance vectors
+        run: |
+          chmod +x c/scripts/build_and_test_pq.sh
+          SUDO=sudo c/scripts/build_and_test_pq.sh
+
   # Android Tests
   android:
     name: Android

@@ -335,3 +335,14 @@ Added the hybrid KEX to **Swift** (`swift/Sources/Shield/PqHybrid.swift`) and **
 | Cross-language | `tests/test_cross_language_v2.py` — 8/8 byte-for-byte (core unaffected) |
 
 C#, Java, Kotlin, Android, C, Swift, iOS were not touched by this change (their `SecureSession`/session helpers were already AEAD-based or absent).
+
+---
+
+## Part 13 — Post-quantum hybrid KEX added to C; PQ now execution-verified in 9 of 12 (2026-06-28) ✅ DONE
+
+- **What was done:** C was previously the only binding with no post-quantum support (it needs liboqs, which would not build on the Windows dev host). Using a local **WSL2 Ubuntu** environment, the hybrid X25519 + ML-KEM-768 KEX was implemented in C: **ML-KEM-768 via liboqs** (deterministic keygen-from-seed + decapsulation) and **X25519 + HKDF-SHA256 via OpenSSL ≥ 3.0**. No hand-rolled lattice or curve math. New files: `c/include/pqhybrid.h`, `c/src/pqhybrid.c`, `c/tests/test_pqhybrid.c`, `c/scripts/build_and_test_pq.sh`.
+- **Construction (identical to every other binding):** private key `mlkem_seed(64, d‖z) ‖ x25519_scalar(32)` = 96 B; public bundle `mlkem_pub(1184) ‖ x_pub(32)` = 1216 B; handshake `eph_xpub(32) ‖ mlkem_ct(1088)` = 1120 B; shared key = `HKDF-SHA256(salt="shield/pq-hybrid/v1", ikm = x25519_ss ‖ mlkem_ss, info = bundle ‖ eph_xpub ‖ mlkem_ct, L=32)`. The vectors only exercise the Accept (recipient) path, so that is what C implements; the public bundle is also reconstructed from the seed and checked.
+- **Verification (executed in WSL2 Ubuntu, liboqs 0.16.0-rc1, OpenSSL 3.0.13):** `c/scripts/build_and_test_pq.sh` compiles `-Wall -Wextra` clean and reproduces **all 3 `tests/pq_kex_vectors.json` vectors byte-for-byte** — both the reconstructed public bundle and the derived shared key — `3 passed, 0 failed`.
+- **CI:** added a `c-pq` job (ubuntu-latest) to `.github/workflows/ci.yml` that apt-installs the toolchain, builds liboqs (minimal ML-KEM-768), and runs the conformance test.
+- **Result:** **PQ is now execution-verified in 9 of 12 bindings** (Python, Go, Rust, JS, C#, Java, Kotlin, Android, **C**). The only bindings without executed PQ are **Swift and iOS** (code written + `swiftc -parse` clean; need a Mac to run). C is no longer the holdout.
+- **Dependency licensing note:** liboqs is MIT; OpenSSL 3.0 is Apache-2.0 — both permissive. (Separately: the repo's `LICENSE` file is MIT while the package manifests declare CC0-1.0 — a pre-existing inconsistency for the maintainer to reconcile.)

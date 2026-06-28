@@ -49,6 +49,7 @@ yarn-error.log*
 *.o
 *.a
 c/test_shield
+c/test_pqhybrid
 
 # Java
 *.class
