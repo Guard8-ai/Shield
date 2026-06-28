@@ -208,3 +208,15 @@ class TestSecureSession:
 
         result = session.decrypt(bytes(encrypted))
         assert result is None
+
+    def test_uses_standard_aead_format(self):
+        """Session payloads are the standard v4 key-mode AEAD, not a bespoke
+        keystream: 4-byte LE version, then AEAD version byte 0x13 and the
+        AES-256-GCM suite byte 0x01. Two encryptions of the same input differ
+        (random nonce + length obfuscation)."""
+        session = SecureSession(b"\x07" * 32)
+        encrypted = session.encrypt(b"session data")
+        assert encrypted[:4] == (0).to_bytes(4, "little")  # initial version
+        assert encrypted[4] == 0x13  # VERSION_KEY
+        assert encrypted[5] == 0x01  # SUITE_AES_256_GCM
+        assert session.encrypt(b"session data") != encrypted

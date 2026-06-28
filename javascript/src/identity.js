@@ -6,6 +6,7 @@
  */
 
 const crypto = require('crypto');
+const { Shield } = require('./shield');
 
 /**
  * Generate keystream using SHA256.
@@ -421,6 +422,13 @@ class SecureSession {
 
     /**
      * Encrypt session data.
+     *
+     * The payload is sealed with the standard AEAD core (AES-256-GCM via the v4
+     * wire format) under the current per-version session key. The 4-byte key
+     * version is prepended so decrypt() can select the right key after a
+     * rotation. The freshness window is disabled because session payloads may be
+     * read back at any point within the rotation interval; the AEAD tag still
+     * provides integrity and authenticity.
      * @param {Buffer} data - Data to encrypt
      * @returns {Buffer}
      */
@@ -428,23 +436,12 @@ class SecureSession {
         this._maybeRotate();
 
         const key = this._keys.get(this._keyVersion);
-        const nonce = crypto.randomBytes(16);
-
-        const keystream = generateKeystream(key, nonce, data.length);
-        const ciphertext = Buffer.alloc(data.length);
-        for (let i = 0; i < data.length; i++) {
-            ciphertext[i] = data[i] ^ keystream[i];
-        }
+        const blob = Shield.withKey(key, { maxAgeMs: null }).encrypt(data);
 
         const versionBuf = Buffer.alloc(4);
         versionBuf.writeUInt32LE(this._keyVersion);
 
-        const mac = crypto.createHmac('sha256', key)
-            .update(Buffer.concat([versionBuf, nonce, ciphertext]))
-            .digest()
-            .slice(0, 16);
-
-        return Buffer.concat([versionBuf, nonce, ciphertext, mac]);
+        return Buffer.concat([versionBuf, blob]);
     }
 
     /**
@@ -455,31 +452,13 @@ class SecureSession {
     decrypt(encrypted) {
         this._maybeRotate();
 
-        if (encrypted.length < 36) return null;
+        if (encrypted.length < 4) return null;
 
         const version = encrypted.readUInt32LE(0);
-        const nonce = encrypted.slice(4, 20);
-        const ciphertext = encrypted.slice(20, -16);
-        const mac = encrypted.slice(-16);
-
         const key = this._keys.get(version);
         if (!key) return null;
 
-        // Verify MAC
-        const expectedMac = crypto.createHmac('sha256', key)
-            .update(encrypted.slice(0, -16))
-            .digest()
-            .slice(0, 16);
-
-        if (!crypto.timingSafeEqual(mac, expectedMac)) return null;
-
-        const keystream = generateKeystream(key, nonce, ciphertext.length);
-        const plaintext = Buffer.alloc(ciphertext.length);
-        for (let i = 0; i < ciphertext.length; i++) {
-            plaintext[i] = ciphertext[i] ^ keystream[i];
-        }
-
-        return plaintext;
+        return Shield.withKey(key, { maxAgeMs: null }).decrypt(encrypted.slice(4));
     }
 }
 

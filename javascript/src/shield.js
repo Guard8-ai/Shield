@@ -205,7 +205,7 @@ class Shield {
         instance._key = key;
         instance._aeadKey = deriveAeadKey(key);
         instance._suite = options.suite !== undefined ? options.suite : SUITE_AES_256_GCM;
-        instance._maxAgeMs = 60000;
+        instance._maxAgeMs = options.maxAgeMs !== undefined ? options.maxAgeMs : 60000;
         // Pre-shared-key mode: no password, no salt.
         instance._password = null;
         instance._service = null;

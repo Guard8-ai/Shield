@@ -954,6 +954,16 @@ describe('SecureSession', () => {
         assert.equal(result, null);
     });
 
+    test('uses standard AEAD format', () => {
+        // 4-byte LE version, then AEAD version byte 0x13 + AES-256-GCM suite 0x01.
+        const session = new SecureSession(Buffer.alloc(32, 7));
+        const encrypted = session.encrypt(Buffer.from('session data'));
+        assert.equal(encrypted.readUInt32LE(0), 1); // initial version
+        assert.equal(encrypted[4], 0x13);           // VERSION_KEY
+        assert.equal(encrypted[5], 0x01);           // SUITE_AES_256_GCM
+        assert.ok(!encrypted.equals(session.encrypt(Buffer.from('session data'))));
+    });
+
     test('auto rotation', async () => {
         const session = new SecureSession(crypto.randomBytes(32), 1, 2);
 

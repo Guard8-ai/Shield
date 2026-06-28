@@ -314,3 +314,24 @@ Per-instance random salt (CR-1), PBKDF2-HMAC-SHA256 at 600 000 iterations (CR-2)
 Added the hybrid KEX to **Swift** (`swift/Sources/Shield/PqHybrid.swift`) and **iOS** (`ios/Sources/Shield/PqHybrid.swift`) using **CryptoKit `MLKEM768` + `Curve25519`** + `HKDF<SHA256>`, plus a Mac-runnable vector test (`PqHybridTests.swift`) in each. Both are **`swiftc -parse` clean** on the Windows toolchain — the same verification standard as the rest of the Swift/iOS v4 code, which is Apple-only (CryptoKit) and needs a Mac to execute. Confirmed the cross-platform `swift-crypto` package (3.15.1) builds on Windows but exposes ML-KEM only in its vendored BoringSSL C layer, with **no Swift-level API**, so CryptoKit is the correct path and the Mac gate is real.
 
 **PQ now present in 10 of 12 bindings** (8 execution-verified + Swift/iOS parse-clean). **C is the only binding without PQ:** it needs liboqs, and this host has no cmake/ninja/vcpkg (choco install is admin-denied) and only OpenSSL 3.1.2 (ML-KEM EVP needs 3.5+) — a confirmed tooling block, not a skipped step.
+
+---
+
+## Part 12 — Session helper routed through the standard AEAD (2026-06-28) ✅ DONE
+
+- **What was wrong:** `SecureSession` (the auto-rotating-key session helper) sealed its payloads with a *bespoke* construction — a SHA-256 keystream XOR plus an HMAC-SHA256 tag — instead of the standard AEAD adopted for the core in Part 10. In the **Python and JavaScript** ports it was additionally weak: the *same* per-version key was used for both the keystream and the MAC (no key separation). **Rust** used separated subkeys + an HMAC-keyed PRF keystream (sound, but still non-standard). **Go** already routed session encryption through the standard AEAD (`Session.Encrypt → EncryptWithKey`).
+- **What was done:** `SecureSession.encrypt`/`decrypt` in **Rust, Python, and JavaScript** now seal/open with the standard AEAD core (`Shield.with_key`, v4 key-mode: `0x13 ‖ suite ‖ nonce(12) ‖ AEAD_seal`). The 4-byte little-endian key version is prepended so `decrypt` selects the right key after a rotation; the **freshness window is disabled** because session payloads are at-rest and may be read back at any point within the rotation interval (the AEAD tag still provides integrity/authenticity). Key-management (per-version derivation, old-key retention, rotation) is unchanged. The now-dead `derive_session_subkeys` helper was removed from Rust; the keystream helpers remain only where the SSO token paths still use them.
+- **Result:** **no hand-rolled data-encryption path remains in the core or session layers.** Every bulk-data path now uses AES-256-GCM (or ChaCha20-Poly1305) from the platform's vetted crypto library. The forward-secret ratchet/streaming/group layers keep their documented HMAC-keyed-stream construction by design (`THREAT_MODEL.md`).
+- **API/behavior:** public API unchanged. Wire format of `SecureSession` payloads changed (longer: AEAD adds length-obfuscation padding + a 16-byte tag); `SecureSession` is a single-language, in-process helper with **no cross-language interop**, so this is not a conformance-vector change.
+- A small consistency fix: JS `Shield.withKey(key, { maxAgeMs })` now honors the `maxAgeMs` option (it previously hard-coded 60 s), matching the Python `with_key(max_age_ms=…)` API.
+
+### Verification (executed on this machine, 2026-06-28)
+| Binding | Result |
+|---|---|
+| Rust | `cargo test --lib` — 97 passed (incl. 2 new `SecureSession` regression tests: standard-AEAD format + rotation/old-key decrypt); `cargo clippy --lib --all-targets` 0 warnings |
+| Python | `pytest -q` — 209 passed (incl. new `test_uses_standard_aead_format`) |
+| JavaScript | `node --test` — 119 passed (incl. new `uses standard AEAD format`) |
+| Go | `go test -count=1 ./...` ok + `go vet` clean (already on AEAD; unchanged) |
+| Cross-language | `tests/test_cross_language_v2.py` — 8/8 byte-for-byte (core unaffected) |
+
+C#, Java, Kotlin, Android, C, Swift, iOS were not touched by this change (their `SecureSession`/session helpers were already AEAD-based or absent).
