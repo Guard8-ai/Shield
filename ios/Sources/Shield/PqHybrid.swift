@@ -1,3 +1,7 @@
+// CryptoKit MLKEM768 ships in the macOS 26 / iOS 26 SDK (Xcode 26 = Swift 6.2+).
+// On older toolchains the type does not exist, so the base Shield module must
+// still compile without it. Re-enable by building with Xcode 26 or newer.
+#if compiler(>=6.2)
 import Foundation
 import CryptoKit
 
@@ -209,3 +213,5 @@ func SecRandomCopyBytesCompat(_ buffer: UnsafeMutableRawBufferPointer) -> Int32 
     }
     return 0
 }
+
+#endif

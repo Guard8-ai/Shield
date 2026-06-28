@@ -27,6 +27,7 @@
 // key. For full forward secrecy use an interactive ratchet, not this one-shot
 // exchange. Rotate the recipient keypair periodically to bound exposure.
 
+import './webcrypto_polyfill.mjs'; // must precede @noble imports (needs globalThis.crypto)
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { hkdf } from '@noble/hashes/hkdf.js';

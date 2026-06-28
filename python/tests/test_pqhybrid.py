@@ -12,6 +12,23 @@ from shield.pqhybrid import (
 )
 
 
+def _mlkem_available() -> bool:
+    """ML-KEM-768 needs a cryptography/OpenSSL backend that supports it
+    (OpenSSL >= 3.5). On older backends (e.g. Python 3.8 wheels) it raises
+    UnsupportedAlgorithm; skip the post-quantum suite there rather than fail."""
+    try:
+        HybridPrivateKey.generate()
+        return True
+    except Exception:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _mlkem_available(),
+    reason="ML-KEM-768 not supported by this cryptography/OpenSSL backend",
+)
+
+
 def test_both_sides_derive_the_same_key():
     bob = HybridPrivateKey.generate()
     handshake, alice_key = initiate(bob.public_key())

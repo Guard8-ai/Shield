@@ -12,6 +12,22 @@ import pytest
 
 from shield.pqhybrid import HybridPrivateKey
 
+
+def _mlkem_available() -> bool:
+    """Skip the PQ conformance vectors when the backend lacks ML-KEM-768
+    (OpenSSL < 3.5, e.g. older Python wheels) instead of hard-failing."""
+    try:
+        HybridPrivateKey.generate()
+        return True
+    except Exception:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _mlkem_available(),
+    reason="ML-KEM-768 not supported by this cryptography/OpenSSL backend",
+)
+
 VECTORS_PATH = Path(__file__).resolve().parents[2] / "tests" / "pq_kex_vectors.json"
 
 
