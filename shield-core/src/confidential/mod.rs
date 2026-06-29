@@ -36,6 +36,7 @@
 //! ```
 
 mod base;
+mod jwt;
 mod maa;
 mod nitro;
 #[cfg(feature = "openapi")]

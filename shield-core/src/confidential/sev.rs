@@ -710,10 +710,13 @@ mod tests {
     const ATTACKER_PRIV_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgbRLd/V+YqjPGnvEH\nUxCamysl/Lav5RWDE1gmkLC18wGhRANCAAQpa2+d/YGGyn/LGNQRxSenCJNhdqo4\n7QUzoeY4qqUDj8FmcU8VbiXyS2RzsD2ld7B5cIjNrxr9lktbDIGcH+Mv\n-----END PRIVATE KEY-----\n";
 
     fn now_secs() -> i64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64
+        i64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
+        .unwrap()
     }
 
     /// Mint a SEV attestation JWT signed with the given private key.
