@@ -129,9 +129,10 @@ Swift/iOS *execution* (pending Apple hardware — code is parse-clean and byte-i
 - **Normative spec:** `PROTOCOL.md`, `THREAT_MODEL.md`.
 - **Source of truth:** `shield-core/src/` (esp. `shield.rs`, `identity.rs`, `pqhybrid.rs`, `confidential/`).
 - **Conformance vectors:** `tests/v4_test_vectors.json`, `tests/pq_kex_vectors.json`.
-- **Change history (honest record):** `CHANGES-FROM-ORIGINAL.md` (Parts 10 = v4 AEAD, 11 = PQ rollout, 12 = SecureSession→AEAD).
-- **Prior self-reviews (NOT third-party audits — labeled as such):** `SECURITY_AUDIT.md`, `SECURITY_AUDIT_V2.md`.
+- **Change history (honest record):** `CHANGES-FROM-ORIGINAL.md` (Parts 10 = v4 AEAD, 11 = PQ rollout, 12 = SecureSession→AEAD, 13 = C post-quantum).
 - **Benchmarks:** `BENCHMARKS.md`.
+
+*(Note: earlier LLM self-review documents that predated the rebuild and carried the discredited "EXPTIME" framing have been removed to avoid confusion — this is the intended scoping document for an independent review.)*
 
 ---
 
