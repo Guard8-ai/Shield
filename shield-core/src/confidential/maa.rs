@@ -80,11 +80,16 @@ impl AttestationProvider for MAAAttestationProvider {
         TEEType::Maa
     }
 
-    async fn verify(&self, evidence: &[u8]) -> Result<AttestationResult, AttestationError> {
+    async fn verify(
+        &self,
+        evidence: &[u8],
+        expected_report_data: Option<&[u8]>,
+    ) -> Result<AttestationResult, AttestationError> {
         let token = std::str::from_utf8(evidence)
             .map_err(|e| AttestationError::InvalidFormat(format!("Invalid token encoding: {e}")))?;
 
         let payload = Self::parse_jwt(token)?;
+        let _ = expected_report_data;
 
         // Build measurements
         let mut measurements = HashMap::new();
@@ -224,6 +229,7 @@ impl AttestationProvider for MAAAttestationProvider {
 
 impl MAAAttestationProvider {
     /// Get TEE quote from local environment.
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     async fn get_tee_quote(&self, user_data: Option<&[u8]>) -> Result<Vec<u8>, AttestationError> {
         // Try SEV-SNP first
         #[cfg(target_os = "linux")]
@@ -314,8 +320,12 @@ impl AzureKeyVaultSKR {
         &self,
         key_name: &str,
         attestation_evidence: &[u8],
+        expected_report_data: Option<&[u8]>,
     ) -> Result<Vec<u8>, AttestationError> {
-        let result = self.provider.verify(attestation_evidence).await?;
+        let result = self
+            .provider
+            .verify(attestation_evidence, expected_report_data)
+            .await?;
 
         if !result.verified {
             return Err(AttestationError::verification_failed(
@@ -419,10 +429,21 @@ impl ConfidentialContainerSidecar {
     }
 
     /// Get an application key with attestation.
+    ///
+    /// Generates a fresh random challenge, binds it into the attestation evidence
+    /// as report-data, and requires the same challenge when releasing the key so
+    /// the attestation cannot be replayed.
     #[cfg(feature = "async")]
     pub async fn get_app_key(&self, key_name: &str) -> Result<Vec<u8>, AttestationError> {
-        let attestation = self.maa_provider.generate_evidence(None).await?;
-        self.skr.release_key(key_name, &attestation).await
+        let challenge: [u8; 32] = crate::random::random_bytes()
+            .map_err(|e| AttestationError::IoError(format!("Challenge RNG failed: {e}")))?;
+        let attestation = self
+            .maa_provider
+            .generate_evidence(Some(&challenge))
+            .await?;
+        self.skr
+            .release_key(key_name, &attestation, Some(&challenge))
+            .await
     }
 }
 

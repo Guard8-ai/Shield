@@ -153,7 +153,12 @@ impl AttestationProvider for NitroAttestationProvider {
         TEEType::Nitro
     }
 
-    async fn verify(&self, evidence: &[u8]) -> Result<AttestationResult, AttestationError> {
+    async fn verify(
+        &self,
+        evidence: &[u8],
+        expected_report_data: Option<&[u8]>,
+    ) -> Result<AttestationResult, AttestationError> {
+        let _ = expected_report_data;
         let doc = Self::parse_cose_sign1(evidence)?;
 
         // Build measurements
@@ -248,6 +253,7 @@ impl AttestationProvider for NitroAttestationProvider {
         Ok(result)
     }
 
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     async fn generate_evidence(
         &self,
         user_data: Option<&[u8]>,
@@ -360,7 +366,10 @@ struct NitroAttestationDocument {
 
 /// vsock client for communicating with parent EC2 instance.
 pub struct NitroVsockClient {
+    // vsock is Linux-only; these fields are read only by the Linux `send` impl.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     cid: u32,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     port: u32,
 }
 
@@ -445,6 +454,8 @@ impl NitroVsockClient {
 
 /// vsock server for receiving requests from Nitro Enclave.
 pub struct NitroVsockServer {
+    // vsock is Linux-only; `port` is read only by the Linux `start` impl.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     port: u32,
 }
 

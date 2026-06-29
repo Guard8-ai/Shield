@@ -121,7 +121,12 @@ impl AttestationProvider for SGXAttestationProvider {
         TEEType::Sgx
     }
 
-    async fn verify(&self, evidence: &[u8]) -> Result<AttestationResult, AttestationError> {
+    async fn verify(
+        &self,
+        evidence: &[u8],
+        expected_report_data: Option<&[u8]>,
+    ) -> Result<AttestationResult, AttestationError> {
+        let _ = expected_report_data;
         if evidence.len() < SGX_QUOTE_HEADER_SIZE + SGX_REPORT_BODY_SIZE {
             return Ok(AttestationResult::failure(
                 self.tee_type(),

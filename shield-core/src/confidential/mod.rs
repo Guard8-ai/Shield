@@ -20,11 +20,16 @@
 //!         .with_expected_pcr(0, "abc123...")
 //! );
 //!
-//! let attestation_doc = provider.generate_evidence(None).await?;
-//! let result = provider.verify(&attestation_doc).await?;
+//! // A fresh, server-generated random challenge that the enclave must bind
+//! // into its attestation report-data (anti-replay / freshness).
+//! let challenge: [u8; 32] = [0u8; 32]; // use a CSPRNG value in production
+//! let attestation_doc = provider.generate_evidence(Some(&challenge)).await?;
+//! let result = provider.verify(&attestation_doc, Some(&challenge)).await?;
 //! if result.verified {
 //!     let key_manager = TEEKeyManager::new("password", "service", provider);
-//!     let _key = key_manager.get_key(&attestation_doc, "encryption").await?;
+//!     let _key = key_manager
+//!         .get_key(&attestation_doc, "encryption", Some(&challenge))
+//!         .await?;
 //! }
 //! # Ok(())
 //! # }
