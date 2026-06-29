@@ -4,7 +4,7 @@
 
 # Shield
 
-**Authenticated symmetric encryption that uses no RSA/ECC, so it is unaffected by attacks that break asymmetric crypto; 256-bit keys give ~128-bit post-quantum security.**
+**Misuse-resistant authenticated encryption on a standard AEAD core (AES-256-GCM / ChaCha20-Poly1305), byte-identical across 12 language bindings, with an optional post-quantum hybrid key exchange (X25519 + ML-KEM-768, FIPS 203). The symmetric core uses no RSA/ECC, so it is unaffected by attacks on asymmetric crypto; 256-bit keys give ~128-bit post-quantum security.**
 
 [![CI](https://github.com/Dikestra-ai/Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/Dikestra-ai/Shield/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -147,6 +147,7 @@ code := totp.Generate(time.Now().Unix())
 | `RecoveryCodes` | Backup 2FA codes | Account recovery |
 | `SymmetricSignature` | HMAC signatures | API authentication |
 | `LamportSignature` | Quantum-safe signatures | Long-term documents |
+| Post-quantum hybrid KEX | X25519 + ML-KEM-768 (FIPS 203) key agreement | Post-quantum key exchange |
 | `KeyRotationManager` | Key versioning | Zero-downtime rotation |
 | `GroupEncryption` | Multi-recipient | Team messaging |
 | `IdentityProvider` | Token-based auth | SSO systems |
@@ -299,10 +300,10 @@ const decrypted = new Shield('pw', 'app').decrypt(encrypted);
 ## What Shield Protects Against
 
 - **Brute force** - 600,000 PBKDF2 iterations slow attackers
-- **Tampering** - HMAC-SHA256 detects any modification
+- **Tampering** - the AEAD authentication tag (AES-GCM / ChaCha20-Poly1305) detects any modification
 - **Replay attacks** - Use RatchetSession (per-message counters); the base API only enforces a timestamp freshness window
-- **Quantum computers** - 256-bit symmetric = ~128-bit post-quantum
-- **P=NP proofs** - No asymmetric crypto to break
+- **Quantum computers** - 256-bit symmetric = ~128-bit post-quantum; plus an optional hybrid X25519 + ML-KEM-768 key exchange for post-quantum key agreement
+- **P=NP proofs** - No asymmetric crypto in the symmetric core to break
 
 ## What Shield Does NOT Protect Against
 
@@ -362,33 +363,34 @@ the full per-language tables and methodology.
 
 ## Tests
 
+All 12 language bindings build and pass their test suites on hosted CI
+(Linux, Windows, and real Apple-hardware macOS runners). The GitHub Actions
+matrix is the authoritative, always-current source of truth — see the
+**Actions** tab / CI badge above.
+
 ```bash
-# Rust core (121 tests: 106 unit + 7 interop + 8 doc-tests)
-cd shield-core && cargo test
+# Rust core (97 lib tests + interop + doc-tests; clippy clean)
+cd shield-core && cargo test && cargo clippy --all-targets
 
-# Shield Proxy (33 tests)
-cd shield-proxy && cargo test
-
-# Python (161 tests)
+# Python (209 tests)
 cd python && python -m pytest
 
-# JavaScript (89 tests)
-cd javascript && npm test
+# JavaScript (119 tests)
+cd javascript && node --test test/
 
-# Go (39 tests)
+# Go
 cd go && go test ./...
 
-# C (21 tests)
+# C (34 tests; + post-quantum vectors on Linux via c/scripts/build_and_test_pq.sh)
 cd c && make test
 
-# Java (19 tests)
-cd java && gradle test
-
-# WebAssembly (uses shield-core)
-cd wasm && cargo test
+# Java / Kotlin / C# / Android — gradle test / dotnet test
+# WebAssembly — wasm-pack build (re-exports shield-core)
 ```
 
-**Total: 493+ tests across all implementations**
+Cross-language conformance (byte-identical output) is enforced by shared
+vector files (`tests/v4_test_vectors.json`, `tests/pq_kex_vectors.json`) that
+every binding must reproduce.
 
 ---
 

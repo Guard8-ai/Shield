@@ -1,9 +1,19 @@
 # Security Audit Report - Shield Encryption Library
 
+> **⚠️ HISTORICAL / SUPERSEDED — internal LLM self-review, NOT a third-party audit.**
+> This document predates the honest rebuild (it is dated 2026-01-11, version 0.1.0)
+> and reflects the *old* design and its overstated "EXPTIME-secure" framing, which
+> has since been **removed repo-wide as cryptographically unsound**. It is retained
+> only for historical context and must not be cited as a security assurance.
+> For the current, accurate picture see **`THREAT_MODEL.md`** (real guarantees and
+> honest limits) and **`AUDIT_READINESS.md`** (scope for a genuine third-party audit).
+> Shield uses a **standard AEAD** (AES-256-GCM / ChaCha20-Poly1305, wire format v4);
+> it makes **no "EXPTIME" or "unbreakable" claims**.
+
 **Date:** 2026-01-11
-**Auditor:** Claude Security Audit Agent
-**Scope:** Shield EXPTIME-Secure Encryption Library (All implementations)
-**Version:** 0.1.0
+**Auditor:** Claude Security Audit Agent (automated self-review — not independent)
+**Scope:** Shield (old design, all implementations)
+**Version:** 0.1.0 (historical)
 
 ---
 
