@@ -25,7 +25,7 @@ wasm = ["dep:wasm-bindgen", "dep:getrandom", "getrandom/js"]
 async = ["dep:tokio", "dep:reqwest"]
 confidential = ["async", "dep:ciborium", "dep:async-trait", "dep:jsonwebtoken", "dep:dcap-qvl"]
 openapi = ["confidential", "dep:utoipa"]
-fido2 = ["std", "dep:webauthn-rs", "dep:webauthn-rs-proto"]
+fido2 = ["std"]
 pgvector = ["async", "dep:tokio-postgres", "dep:postgres-types", "dep:chrono"]
 # Post-quantum hybrid key exchange (X25519 + ML-KEM-768). Optional, off by default.
 pq = ["dep:ml-kem", "dep:x25519-dalek", "dep:hkdf", "dep:sha2"]
@@ -69,9 +69,6 @@ dcap-qvl = { version = "0.5", optional = true }
 reqwest = { version = "0.11", features = ["json"], optional = true }
 # OpenAPI/Swagger support
 utoipa = { version = "4.2", features = ["chrono"], optional = true }
-# FIDO2/WebAuthn dependencies
-webauthn-rs = { version = "0.4", optional = true }
-webauthn-rs-proto = { version = "0.4", optional = true }
 # pgvector dependencies
 tokio-postgres = { version = "0.7", optional = true }
 postgres-types = { version = "0.2", optional = true }

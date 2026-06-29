@@ -5,7 +5,7 @@ use super::credential::{ShieldCredentialStore, StoredCredential};
 use super::error::{Fido2Error, Result};
 use crate::Shield;
 use base64::Engine;
-use ring::hmac;
+use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -233,14 +233,20 @@ impl<S: CredentialStore> Fido2Manager<S> {
             return Err(Fido2Error::CounterDecreased);
         }
 
-        // Verify HMAC-SHA256 signature using stored credential's public_key
-        // Signature covers: challenge || credential_id || counter (domain separation)
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &stored_cred.public_key);
+        // Verify the ECDSA P-256 (ES256) signature with the stored credential's
+        // PUBLIC key. This is real asymmetric verification, as WebAuthn requires:
+        // only the holder of the authenticator's private key can produce a valid
+        // signature. (The previous implementation used the public key as an
+        // HMAC secret, so anyone who learned the public key could forge auth.)
+        // Signed data: challenge || credential_id || counter (domain separation).
         let mut sign_data = Vec::with_capacity(challenge.len() + credential_id.len() + 4);
         sign_data.extend_from_slice(&challenge);
         sign_data.extend_from_slice(credential_id);
         sign_data.extend_from_slice(&counter.to_le_bytes());
-        hmac::verify(&hmac_key, &sign_data, signature).map_err(|_| Fido2Error::InvalidSignature)?;
+        let public_key = UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, &stored_cred.public_key);
+        public_key
+            .verify(&sign_data, signature)
+            .map_err(|_| Fido2Error::InvalidSignature)?;
 
         // Update counter
         self.store
@@ -309,6 +315,8 @@ pub struct AuthenticationResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ring::rand::SystemRandom;
+    use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
 
     fn create_test_manager() -> Fido2Manager<ShieldCredentialStore> {
         let config = WebAuthnConfig::new("example.com", "Test App", "https://example.com");
@@ -316,20 +324,33 @@ mod tests {
         Fido2Manager::new_with_shield(config, shield)
     }
 
-    /// Compute a valid HMAC-SHA256 signature for FIDO2 authentication.
+    /// A throwaway ECDSA P-256 authenticator: returns the signing key, its RNG,
+    /// and the SEC1 uncompressed public-key point that gets registered.
+    fn gen_authenticator() -> (EcdsaKeyPair, SystemRandom, Vec<u8>) {
+        let rng = SystemRandom::new();
+        let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
+        let key_pair =
+            EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng)
+                .unwrap();
+        let public_key = key_pair.public_key().as_ref().to_vec();
+        (key_pair, rng, public_key)
+    }
+
+    /// Produce a real ES256 signature from the authenticator's PRIVATE key over
+    /// `challenge || credential_id || counter`.
     fn compute_test_signature(
-        public_key: &[u8],
+        key_pair: &EcdsaKeyPair,
+        rng: &SystemRandom,
         challenge_b64: &str,
         credential_id: &[u8],
         counter: u32,
     ) -> Vec<u8> {
         let challenge = b64_decode(challenge_b64).unwrap();
-        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, public_key);
         let mut sign_data = Vec::new();
         sign_data.extend_from_slice(&challenge);
         sign_data.extend_from_slice(credential_id);
         sign_data.extend_from_slice(&counter.to_le_bytes());
-        hmac::sign(&hmac_key, &sign_data).as_ref().to_vec()
+        key_pair.sign(rng, &sign_data).unwrap().as_ref().to_vec()
     }
 
     #[test]
@@ -362,7 +383,7 @@ mod tests {
         let mut manager = create_test_manager();
         let user_id = b"user123";
         let credential_id = b"cred_id_123".to_vec();
-        let public_key = b"public_key_data".to_vec();
+        let (key_pair, rng, public_key) = gen_authenticator();
 
         // Register first
         let reg_challenge = manager
@@ -381,9 +402,9 @@ mod tests {
         assert!(!auth_challenge.challenge.is_empty());
         assert_eq!(auth_challenge.allowed_credentials.len(), 1);
 
-        // Compute valid HMAC signature
+        // Sign with the authenticator's private key (real ES256).
         let signature =
-            compute_test_signature(&public_key, &auth_challenge.challenge, &credential_id, 1);
+            compute_test_signature(&key_pair, &rng, &auth_challenge.challenge, &credential_id, 1);
 
         let result = manager
             .verify_authentication(&auth_challenge.challenge, &credential_id, &signature, 1)
@@ -392,6 +413,44 @@ mod tests {
         assert!(result.success);
         assert_eq!(result.user_id, user_id);
         assert_eq!(result.counter, 1);
+    }
+
+    #[test]
+    fn test_forged_signature_with_public_key_rejected() {
+        // Regression for the audit finding: knowing the (public) credential key
+        // must NOT let an attacker forge auth. The old code HMAC'd with the
+        // public key, so HMAC(public_key, data) verified. With real ES256 that
+        // attempt is just an invalid signature.
+        let mut manager = create_test_manager();
+        let user_id = b"user123";
+        let credential_id = b"cred_id_123".to_vec();
+        let (_key_pair, _rng, public_key) = gen_authenticator();
+
+        let reg_challenge = manager
+            .generate_registration_challenge(user_id, "testuser", "Test User")
+            .unwrap();
+        manager
+            .verify_registration(
+                &reg_challenge.challenge,
+                credential_id.clone(),
+                public_key.clone(),
+            )
+            .unwrap();
+
+        let auth_challenge = manager.generate_authentication_challenge(user_id).unwrap();
+
+        // Attacker forges the old HMAC-with-public-key "signature".
+        let challenge = b64_decode(&auth_challenge.challenge).unwrap();
+        let hmac_key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &public_key);
+        let mut sign_data = Vec::new();
+        sign_data.extend_from_slice(&challenge);
+        sign_data.extend_from_slice(&credential_id);
+        sign_data.extend_from_slice(&1u32.to_le_bytes());
+        let forged = ring::hmac::sign(&hmac_key, &sign_data).as_ref().to_vec();
+
+        let result =
+            manager.verify_authentication(&auth_challenge.challenge, &credential_id, &forged, 1);
+        assert!(matches!(result, Err(Fido2Error::InvalidSignature)));
     }
 
     #[test]
@@ -431,7 +490,7 @@ mod tests {
         let mut manager = create_test_manager();
         let user_id = b"user123";
         let credential_id = b"cred_id_123".to_vec();
-        let public_key = b"public_key_data".to_vec();
+        let (key_pair, rng, public_key) = gen_authenticator();
 
         // Register
         let reg_challenge = manager
@@ -448,7 +507,7 @@ mod tests {
         // First authentication with valid signature
         let auth_challenge = manager.generate_authentication_challenge(user_id).unwrap();
         let sig1 =
-            compute_test_signature(&public_key, &auth_challenge.challenge, &credential_id, 1);
+            compute_test_signature(&key_pair, &rng, &auth_challenge.challenge, &credential_id, 1);
         manager
             .verify_authentication(&auth_challenge.challenge, &credential_id, &sig1, 1)
             .unwrap();
@@ -456,7 +515,7 @@ mod tests {
         // Second authentication with same counter should fail (replay)
         let auth_challenge2 = manager.generate_authentication_challenge(user_id).unwrap();
         let sig2 =
-            compute_test_signature(&public_key, &auth_challenge2.challenge, &credential_id, 1);
+            compute_test_signature(&key_pair, &rng, &auth_challenge2.challenge, &credential_id, 1);
         let result =
             manager.verify_authentication(&auth_challenge2.challenge, &credential_id, &sig2, 1);
         assert!(result.is_err());
