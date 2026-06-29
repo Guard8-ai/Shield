@@ -137,8 +137,8 @@ final class ShieldTests: XCTestCase {
         XCTAssertEqual(decrypted1, plaintext)
         XCTAssertEqual(decrypted2, plaintext)
 
-        // Distinct random salts in the headers (bytes [1..<17]).
-        XCTAssertNotEqual(Array(encrypted1[1..<17]), Array(encrypted2[1..<17]))
+        // Distinct random salts in the headers (v4: bytes [2..<18]).
+        XCTAssertNotEqual(Array(encrypted1[2..<18]), Array(encrypted2[2..<18]))
     }
 
     // MARK: - Security-fix Tests (CR-1 / CR-2 / CR-3)
@@ -149,7 +149,7 @@ final class ShieldTests: XCTestCase {
         let b = Shield(password: "hunter2", service: "github.com")
         let ca = try a.encrypt(Array("identical".utf8))
         let cb = try b.encrypt(Array("identical".utf8))
-        XCTAssertNotEqual(Array(ca[1..<17]), Array(cb[1..<17]))
+        XCTAssertNotEqual(Array(ca[2..<18]), Array(cb[2..<18]))
     }
 
     /// CR-2: PBKDF2 iteration count is 600,000.
@@ -157,24 +157,24 @@ final class ShieldTests: XCTestCase {
         XCTAssertEqual(Shield.pbkdf2Iterations, 600_000)
     }
 
-    /// CR-3: password ciphertext starts with 0x02; key/quick ciphertext with 0x12.
+    /// v4: password ciphertext starts with 0x03; key/quick ciphertext with 0x13.
     func testVersionBytes() throws {
         let pwCt = try Shield(password: "pw", service: "svc").encrypt(Array("x".utf8))
-        XCTAssertEqual(pwCt[0], 0x02)
+        XCTAssertEqual(pwCt[0], 0x03)
 
         let key = (0..<32).map { UInt8($0) }
         let quickCt = try Shield.quickEncrypt(key: key, plaintext: Array("x".utf8))
-        XCTAssertEqual(quickCt[0], 0x12)
+        XCTAssertEqual(quickCt[0], 0x13)
 
         let keyedCt = try Shield(key: key).encrypt(Array("x".utf8))
-        XCTAssertEqual(keyedCt[0], 0x12)
+        XCTAssertEqual(keyedCt[0], 0x13)
     }
 
     /// CR-3: tampering with the authenticated salt fails the MAC.
     func testTamperSaltDetected() throws {
         let shield = Shield(password: "pw", service: "svc")
         var ct = try shield.encrypt(Array("authenticated salt".utf8))
-        ct[1] ^= 0xFF
+        ct[2] ^= 0xFF  // flip a salt byte (v4 header: version, suite, then salt)
         XCTAssertThrowsError(try shield.decrypt(ct)) { error in
             XCTAssertEqual(error as? ShieldError, ShieldError.authenticationFailed)
         }
@@ -184,7 +184,7 @@ final class ShieldTests: XCTestCase {
     func testTamperVersionDetected() throws {
         let shield = Shield(password: "pw", service: "svc")
         var ct = try shield.encrypt(Array("authenticated version".utf8))
-        ct[0] = 0x12
+        ct[0] = 0x13
         XCTAssertThrowsError(try shield.decrypt(ct))
     }
 
@@ -209,7 +209,7 @@ final class ShieldTests: XCTestCase {
         }
     }
 
-    /// Key-mode (0x12) roundtrip via the pre-shared-key constructor.
+    /// Key-mode (0x13) roundtrip via the pre-shared-key constructor.
     func testKeyModeRoundtrip() throws {
         let key = (0..<32).map { UInt8($0) }
         let shield = try Shield(key: key)
@@ -233,7 +233,7 @@ final class ShieldTests: XCTestCase {
         let b = Shield(password: "pw", service: "svc", salt: salt, iterations: Shield.pbkdf2Iterations)
 
         let ct = try a.encrypt(Array("data".utf8))
-        XCTAssertEqual(Array(ct[1..<17]), salt)
+        XCTAssertEqual(Array(ct[2..<18]), salt)  // v4: salt follows version + suite
         XCTAssertEqual(try b.decrypt(ct), Array("data".utf8))
     }
 
@@ -285,8 +285,8 @@ final class ShieldTests: XCTestCase {
 
         let encrypted = try shield.encrypt(plaintext)
 
-        // Verify password-mode format: version(1) + salt(16) + nonce(16) + ciphertext + MAC(16)
-        XCTAssertEqual(encrypted[0], 0x02)
+        // Verify password-mode v4 format: version(1) + suite(1) + salt(16) + nonce(12) + ciphertext + tag(16)
+        XCTAssertEqual(encrypted[0], 0x03)
         XCTAssertGreaterThanOrEqual(encrypted.count, 49 + plaintext.count)
 
         // Verify decryption works
