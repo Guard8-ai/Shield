@@ -6,7 +6,7 @@
 
 **Misuse-resistant authenticated encryption on a standard AEAD core (AES-256-GCM / ChaCha20-Poly1305), byte-identical across 12 language bindings, with an optional post-quantum hybrid key exchange (X25519 + ML-KEM-768, FIPS 203). The symmetric core uses no RSA/ECC, so it is unaffected by attacks on asymmetric crypto; 256-bit keys give ~128-bit post-quantum security.**
 
-[![CI](https://github.com/Dikestra-ai/Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/Dikestra-ai/Shield/actions/workflows/ci.yml)
+[![CI](https://github.com/llamaboi55/Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/llamaboi55/Shield/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Crates.io](https://img.shields.io/crates/v/shield-core.svg)](https://crates.io/crates/shield-core)
 [![npm](https://img.shields.io/npm/v/@dikestra/shield.svg)](https://www.npmjs.com/package/@dikestra/shield)
