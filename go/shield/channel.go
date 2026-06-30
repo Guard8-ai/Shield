@@ -248,19 +248,22 @@ func (ch *ShieldChannel) computeSessionKey(config *ChannelConfig, salt, localCon
 	baseKey := PAKECombine(localContribution, remoteContribution)
 	passwordKey := PAKEDerive(config.Password, salt, "session", config.Iterations)
 
-	// Final session key = SHA256(baseKey || passwordKey || service).
+	// Final session key = HMAC-SHA256(base_key, password_key || service).
 	// Binding the service identifier provides domain separation: the same
 	// shared secret used for two different services derives two different
 	// session keys, so a credential provisioned for one service cannot
-	// establish a channel for another.
+	// establish a channel for another. password_key is a fixed 32 bytes,
+	// so the concatenation is unambiguous across implementations.
+	// Keyed HMAC (not SHA256(key || data)) avoids length-extension and
+	// matches the Rust source of truth byte-for-byte.
 	serviceBytes := []byte(config.Service)
-	combined := make([]byte, 0, 64+len(serviceBytes))
-	combined = append(combined, baseKey...)
-	combined = append(combined, passwordKey...)
-	combined = append(combined, serviceBytes...)
+	macInput := make([]byte, 0, len(passwordKey)+len(serviceBytes))
+	macInput = append(macInput, passwordKey...)
+	macInput = append(macInput, serviceBytes...)
 
-	h := sha256.Sum256(combined)
-	return h[:]
+	mac := hmac.New(sha256.New, baseKey)
+	mac.Write(macInput)
+	return mac.Sum(nil)
 }
 
 func (ch *ShieldChannel) sendHandshake(msgType byte, data []byte) error {

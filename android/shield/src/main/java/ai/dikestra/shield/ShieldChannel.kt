@@ -174,8 +174,18 @@ class ShieldChannel private constructor(
                 config.password, salt, "session", config.iterations
             )
 
-            val combined = baseKey + passwordKey
-            return ShieldUtils.sha256(combined)
+            // Final session key = HMAC-SHA256(base_key, password_key || service).
+            // Binding the service identifier provides domain separation: the same
+            // shared secret used for two different services derives two different
+            // session keys, so a credential provisioned for one service cannot
+            // establish a channel for another. password_key is a fixed 32 bytes,
+            // so the concatenation is unambiguous across implementations.
+            // Keyed HMAC (not SHA256(key || data)) avoids length-extension and
+            // matches the Rust source of truth byte-for-byte.
+            val macInput = passwordKey + config.service.toByteArray(Charsets.UTF_8)
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(baseKey, "HmacSHA256"))
+            return mac.doFinal(macInput)
         }
 
         private fun sendHandshake(output: OutputStream, msgType: Byte, data: ByteArray) {
