@@ -13,7 +13,10 @@ Features:
 - Rate limiting with encrypted counters
 - CORS with encrypted cookies
 - Browser-side encryption helpers
-- Confidential Computing: TEE attestation for AWS Nitro, GCP SEV, Azure MAA, Intel SGX
+- Confidential Computing: TEE attestation evidence parsing + TEE-aware key
+  management for AWS Nitro, GCP SEV, Azure MAA, Intel SGX. NOTE: the Python
+  providers are fail-closed and do NOT cryptographically verify signatures —
+  the verifying implementation is the Rust shield-core confidential module.
 """
 
 from shield.integrations.fastapi import (
