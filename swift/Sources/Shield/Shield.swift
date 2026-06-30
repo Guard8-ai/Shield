@@ -67,7 +67,13 @@ public class Shield {
     /// stored in the ciphertext header so a recipient with the same
     /// password+service can re-derive the key.
     public convenience init(password: String, service: String) {
-        let salt = Shield.randomBytes(Shield.saltSize) ?? [UInt8](repeating: 0, count: Shield.saltSize)
+        // Fail closed on CSPRNG failure: never fall back to a predictable
+        // (all-zero) salt, which would derive identical keys across instances.
+        // fatalError is the unrecoverable-error analog of the Go (panic) and
+        // Rust (RandomFailed) references.
+        guard let salt = Shield.randomBytes(Shield.saltSize) else {
+            fatalError("Shield: CSPRNG failure generating salt (fail-closed)")
+        }
         self.init(password: password, service: service, salt: salt, iterations: Shield.iterations)
     }
 

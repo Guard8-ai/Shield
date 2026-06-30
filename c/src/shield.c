@@ -603,9 +603,14 @@ void shield_init(shield_t *ctx, const char *password, const char *service, int64
     uint8_t salt[SHIELD_SALT_SIZE];
     /* Per-instance random salt (CSPRNG, same source as nonces). */
     if (shield_random_bytes(salt, SHIELD_SALT_SIZE) != SHIELD_OK) {
-        /* CSPRNG failure: zero the salt deterministically so the context is in a
-         * defined state. (Mirrors panic-on-failure in the Go reference.) */
-        memset(salt, 0, SHIELD_SALT_SIZE);
+        /* CSPRNG failure is catastrophic and unrecoverable. Fail closed: never
+         * fall back to a predictable (e.g. all-zero) salt, which would derive
+         * identical keys across every instance on the affected host. shield_init
+         * returns void, so we abort rather than continue insecurely — this is
+         * the actual panic-on-RNG-failure behavior of the Go (panic) and Rust
+         * (RandomFailed) references. */
+        fprintf(stderr, "shield_init: CSPRNG failure; aborting (fail-closed)\n");
+        abort();
     }
     shield_init_with_salt(ctx, password, service, salt, max_age_ms);
     shield_secure_wipe(salt, SHIELD_SALT_SIZE);

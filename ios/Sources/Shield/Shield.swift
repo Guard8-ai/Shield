@@ -74,9 +74,13 @@ public final class Shield {
 
     /// Create Shield instance from password and service name.
     public convenience init(password: String, service: String, iterations: UInt32 = pbkdf2Iterations) {
+        // Fail closed on CSPRNG failure: never fall back to a predictable
+        // (all-zero) salt, which would derive identical keys across instances.
+        // fatalError is the unrecoverable-error analog of the Go (panic) and
+        // Rust (RandomFailed) references.
         var randomSalt = [UInt8](repeating: 0, count: Self.saltSize)
-        if SecRandomCopyBytes(kSecRandomDefault, Self.saltSize, &randomSalt) != errSecSuccess {
-            randomSalt = [UInt8](repeating: 0, count: Self.saltSize)
+        guard SecRandomCopyBytes(kSecRandomDefault, Self.saltSize, &randomSalt) == errSecSuccess else {
+            fatalError("Shield: CSPRNG failure generating salt (fail-closed)")
         }
         self.init(password: password, service: service, salt: randomSalt, iterations: iterations)
     }
