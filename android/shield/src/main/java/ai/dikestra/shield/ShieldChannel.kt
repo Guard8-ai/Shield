@@ -3,6 +3,7 @@ package ai.dikestra.shield
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.Socket
+import java.security.MessageDigest
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -221,7 +222,9 @@ class ShieldChannel private constructor(
             mac.init(SecretKeySpec(sessionKey, "HmacSHA256"))
             val expected = mac.doFinal(label.toByteArray(Charsets.UTF_8)).copyOfRange(0, 16)
 
-            require(received.contentEquals(expected)) { "Authentication failed" }
+            // Constant-time MAC comparison: MessageDigest.isEqual does not
+            // short-circuit on content (length is fixed at 16 above).
+            require(MessageDigest.isEqual(received, expected)) { "Authentication failed" }
         }
 
         private fun writeFrame(output: OutputStream, data: ByteArray) {

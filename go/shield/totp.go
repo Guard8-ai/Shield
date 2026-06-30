@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"
 	"fmt"
@@ -70,16 +71,18 @@ func (t *TOTP) Verify(code string, timestamp int64, window int) bool {
 		window = 1
 	}
 
+	codeBytes := []byte(code)
 	for i := 0; i <= window; i++ {
-		// Check current and past
+		// Check current and past (constant-time compare; subtle.ConstantTimeCompare
+		// returns 0 on length mismatch without leaking content timing).
 		checkTime := timestamp - int64(i)*t.interval
-		if t.Generate(checkTime) == code {
+		if subtle.ConstantTimeCompare([]byte(t.Generate(checkTime)), codeBytes) == 1 {
 			return true
 		}
 		// Check future (except for i=0)
 		if i > 0 {
 			checkTime = timestamp + int64(i)*t.interval
-			if t.Generate(checkTime) == code {
+			if subtle.ConstantTimeCompare([]byte(t.Generate(checkTime)), codeBytes) == 1 {
 				return true
 			}
 		}

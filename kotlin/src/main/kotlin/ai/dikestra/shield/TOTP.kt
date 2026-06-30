@@ -1,6 +1,7 @@
 package ai.dikestra.shield
 
 import java.nio.ByteBuffer
+import java.security.MessageDigest
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -29,9 +30,12 @@ class TOTP(
     }
 
     fun verify(code: String, timestamp: Long = System.currentTimeMillis() / 1000, window: Int = 1): Boolean {
+        // Constant-time compare: MessageDigest.isEqual does not short-circuit on
+        // content; a length mismatch (length is not secret) returns false.
+        val codeBytes = code.toByteArray(Charsets.UTF_8)
         for (i in 0..window) {
-            if (generate(timestamp - i * interval) == code) return true
-            if (i > 0 && generate(timestamp + i * interval) == code) return true
+            if (MessageDigest.isEqual(generate(timestamp - i * interval).toByteArray(Charsets.UTF_8), codeBytes)) return true
+            if (i > 0 && MessageDigest.isEqual(generate(timestamp + i * interval).toByteArray(Charsets.UTF_8), codeBytes)) return true
         }
         return false
     }
