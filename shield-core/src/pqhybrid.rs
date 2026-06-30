@@ -225,6 +225,11 @@ impl HybridPrivateKey {
         let classical_secret = self
             .x25519
             .diffie_hellman(&PublicKey::from(eph_x25519_public));
+        // Reject low-order peer keys (all-zero / non-contributory shared secret),
+        // matching the Go/JS bindings. Prevents a forced known shared secret.
+        if !classical_secret.was_contributory() {
+            return Err(ShieldError::InvalidFormat);
+        }
 
         let public = self.public_key();
         let mut transcript = public.to_bytes();
@@ -261,6 +266,10 @@ pub fn initiate(peer: &HybridPublicKey) -> Result<(Vec<u8>, [u8; SHARED_KEY_SIZE
     let eph_secret = StaticSecret::from(random_bytes::<X25519_SIZE>()?);
     let eph_public = PublicKey::from(&eph_secret).to_bytes();
     let classical_secret = eph_secret.diffie_hellman(&PublicKey::from(peer.x25519_public));
+    // Reject low-order peer keys (all-zero / non-contributory shared secret).
+    if !classical_secret.was_contributory() {
+        return Err(ShieldError::InvalidFormat);
+    }
 
     let mut transcript = peer.to_bytes();
     transcript.extend_from_slice(&eph_public);
@@ -296,6 +305,29 @@ mod tests {
         // A handshake accepted by the restored key must yield the same shared key.
         let (handshake, alice_key) = initiate(&bob.public_key()).unwrap();
         assert_eq!(restored.accept(&handshake).unwrap(), alice_key);
+    }
+
+    #[test]
+    fn initiate_rejects_low_order_x25519_peer_key() {
+        // An all-zero X25519 public key is a low-order point: the DH yields a
+        // non-contributory (all-zero) shared secret. initiate() must reject it.
+        let bob = HybridPrivateKey::generate().unwrap();
+        let mut peer = bob.public_key();
+        peer.x25519_public = [0u8; X25519_SIZE];
+        assert!(initiate(&peer).is_err());
+    }
+
+    #[test]
+    fn accept_rejects_low_order_x25519_ephemeral() {
+        // Build a valid handshake, then zero its ephemeral X25519 public key.
+        // ML-KEM decapsulation still succeeds, but the X25519 DH is now
+        // non-contributory, so accept() must reject it.
+        let bob = HybridPrivateKey::generate().unwrap();
+        let (mut handshake, _key) = initiate(&bob.public_key()).unwrap();
+        for b in handshake.iter_mut().take(X25519_SIZE) {
+            *b = 0;
+        }
+        assert!(bob.accept(&handshake).is_err());
     }
 
     #[test]
