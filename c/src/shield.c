@@ -1357,6 +1357,12 @@ shield_error_t shield_recovery_init(shield_recovery_t *ctx, int count, int lengt
     if (count > SHIELD_MAX_RECOVERY_CODES) count = SHIELD_MAX_RECOVERY_CODES;
     if (length <= 0) length = 8;
     if (length % 2 != 0) length++;
+    /* Cap length so the formatted code (length hex chars + '-' + NUL) fits in
+     * ctx->codes[i] (SHIELD_RECOVERY_CODE_LEN bytes). Without this, length > 8
+     * overflows the fixed buffer (stack/heap corruption). LEN-2 is even (8). */
+    if (length > SHIELD_RECOVERY_CODE_LEN - 2) {
+        length = SHIELD_RECOVERY_CODE_LEN - 2;
+    }
 
     byte_len = length / 2;
     bytes = (uint8_t *)malloc(byte_len);

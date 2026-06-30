@@ -759,6 +759,33 @@ void test_recovery_codes(void) {
     PASS();
 }
 
+void test_recovery_codes_length_overflow(void) {
+    TEST("recovery_codes_length_overflow");
+
+    /* Regression: an oversized `length` must be capped, not overflow the fixed
+     * ctx->codes[i] buffer. A canary immediately after the struct detects a
+     * write past the end. */
+    struct {
+        shield_recovery_t rec;
+        uint32_t canary;
+    } guard;
+    guard.canary = 0xDEADBEEFu;
+
+    assert(shield_recovery_init(&guard.rec, SHIELD_MAX_RECOVERY_CODES, 100) == SHIELD_OK);
+    assert(guard.canary == 0xDEADBEEFu); /* not overflowed */
+
+    /* Every code must be NUL-terminated within its buffer. */
+    for (int i = 0; i < SHIELD_MAX_RECOVERY_CODES; i++) {
+        int n = 0;
+        while (n < SHIELD_RECOVERY_CODE_LEN && guard.rec.codes[i][n] != '\0') n++;
+        assert(n < SHIELD_RECOVERY_CODE_LEN);
+    }
+
+    shield_recovery_wipe(&guard.rec);
+
+    PASS();
+}
+
 void test_recovery_codes_normalize(void) {
     TEST("recovery_codes_normalize");
 
@@ -1068,6 +1095,7 @@ int main(void) {
 
     printf("\nRecovery Codes Tests:\n");
     test_recovery_codes();
+    test_recovery_codes_length_overflow();
     test_recovery_codes_normalize();
 
     printf("\nUtility Tests:\n");
