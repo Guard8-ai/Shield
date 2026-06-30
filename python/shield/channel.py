@@ -251,8 +251,12 @@ class ShieldChannel:
             config.password, salt, "session", config.iterations
         )
 
-        # Final session key = hash(base_key || password_key)
-        combined = base_key + password_key
+        # Final session key = SHA256(base_key || password_key || service).
+        # Binding the service identifier provides domain separation: the same
+        # shared secret used for two different services derives two different
+        # session keys, so a credential provisioned for one service cannot
+        # establish a channel for another.
+        combined = base_key + password_key + config.service.encode()
         return hashlib.sha256(combined).digest()
 
     @classmethod

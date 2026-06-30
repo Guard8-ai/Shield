@@ -234,10 +234,18 @@ impl HandshakeState {
             Some(config.iterations),
         );
 
-        // Final session key = HMAC-SHA256(base_key, password_key)
-        // Using keyed HMAC instead of SHA256(key || data) to prevent length-extension
+        // Final session key = HMAC-SHA256(base_key, password_key || service).
+        // Binding the service identifier provides domain separation: the same
+        // shared secret used for two different services derives two different
+        // session keys, so a credential provisioned for one service cannot
+        // establish a channel for another. `password_key` is a fixed 32 bytes,
+        // so the concatenation is unambiguous across implementations.
+        // Keyed HMAC (not SHA256(key || data)) avoids length-extension.
         let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &base_key);
-        let tag = hmac::sign(&hmac_key, &password_key);
+        let mut mac_input = Vec::with_capacity(password_key.len() + config.service.len());
+        mac_input.extend_from_slice(&password_key);
+        mac_input.extend_from_slice(config.service.as_bytes());
+        let tag = hmac::sign(&hmac_key, &mac_input);
         let mut result = [0u8; 32];
         result.copy_from_slice(&tag.as_ref()[..32]);
         Ok(result)
@@ -672,6 +680,67 @@ mod tests {
     }
 
     #[test]
+    fn test_session_key_depends_on_service() {
+        // Same password, salt, and contributions but a different service must
+        // yield a different session key: a shared secret provisioned for one
+        // service must not establish a channel for another (domain separation).
+        let salt = [7u8; 16];
+        let contribution = [9u8; 32];
+
+        let state = HandshakeState {
+            salt,
+            local_contribution: contribution,
+            remote_contribution: Some(contribution),
+            is_initiator: true,
+        };
+
+        let config_a = ChannelConfig::new("same-password", "service-a");
+        let config_b = ChannelConfig::new("same-password", "service-b");
+
+        let key_a = state.compute_session_key(&config_a).unwrap();
+        let key_b = state.compute_session_key(&config_b).unwrap();
+
+        assert_ne!(
+            key_a, key_b,
+            "session key must be bound to the service identifier"
+        );
+    }
+
+    #[test]
+    fn test_session_key_conformance_vector() {
+        // Golden vector locking the Rust session-key derivation. The sync and
+        // async Rust channels must derive this exact key from these fixed
+        // inputs (see the matching async test) so they interoperate, and it
+        // pins the derivation against accidental change. NOTE: the Go/Python/JS
+        // bindings use a SHA256-based derivation rather than this HMAC one, so
+        // they do NOT share this vector (see CHANGES-FROM-ORIGINAL: cross-
+        // language channel derivations are not interoperable today).
+        //
+        //   salt                = 16 x 0x01
+        //   local_contribution  = 32 x 0x02
+        //   remote_contribution = 32 x 0x03
+        //   password            = "conformance-secret"
+        //   service             = "shield.conformance"
+        //   iterations          = 600000
+        let state = HandshakeState {
+            salt: [0x01; 16],
+            local_contribution: [0x02; 32],
+            remote_contribution: Some([0x03; 32]),
+            is_initiator: true,
+        };
+        let config = ChannelConfig::new("conformance-secret", "shield.conformance");
+
+        let key = state.compute_session_key(&config).unwrap();
+        // c81854ce5fcbcf6f4db68b2a8b389366232b1707fa057a7251d6536bf529183d
+        let expected: [u8; 32] = [
+            0xc8, 0x18, 0x54, 0xce, 0x5f, 0xcb, 0xcf, 0x6f, 0x4d, 0xb6, 0x8b, 0x2a, 0x8b, 0x38,
+            0x93, 0x66, 0x23, 0x2b, 0x17, 0x07, 0xfa, 0x05, 0x7a, 0x72, 0x51, 0xd6, 0x53, 0x6b,
+            0xf5, 0x29, 0x18, 0x3d,
+        ];
+        assert_eq!(key, expected, "session key conformance vector mismatch");
+    }
+
+    #[test]
     fn test_channel_handshake() {
         let (client_stream, server_stream) = MockStream::pair();
         let config = ChannelConfig::new("test-password", "test.service");
@@ -852,14 +921,15 @@ mod tests {
         let client_result = ShieldChannel::connect(client_stream, &client_config);
         let server_result = server_handle.join().unwrap();
 
-        // Different services should still connect (service is metadata, not part of key)
-        // But they will have different session keys due to different service in PAKE
-        // This test verifies the behavior - adjust based on actual design
-        if let (Ok(client), Ok(server)) = (client_result, server_result) {
-            // If both succeed, verify services are different
-            assert_eq!(client.service(), "service1");
-            assert_eq!(server.service(), "service2");
-        }
+        // The service is bound into the session key for domain separation, so the
+        // same password under two different services derives two different session
+        // keys. The handshake confirmation must therefore FAIL on at least one
+        // side: a credential for "service1" cannot establish a channel as
+        // "service2".
+        assert!(
+            client_result.is_err() || server_result.is_err(),
+            "mismatched services must not establish a channel"
+        );
     }
 
     #[test]

@@ -27,10 +27,10 @@ const (
 
 // Channel errors
 var (
-	ErrInvalidHandshake  = errors.New("shield: invalid handshake")
+	ErrInvalidHandshake   = errors.New("shield: invalid handshake")
 	ErrUnsupportedVersion = errors.New("shield: unsupported protocol version")
-	ErrMessageTooLarge   = errors.New("shield: message too large")
-	ErrConnectionClosed  = errors.New("shield: connection closed")
+	ErrMessageTooLarge    = errors.New("shield: message too large")
+	ErrConnectionClosed   = errors.New("shield: connection closed")
 )
 
 // ChannelConfig holds channel configuration.
@@ -248,9 +248,16 @@ func (ch *ShieldChannel) computeSessionKey(config *ChannelConfig, salt, localCon
 	baseKey := PAKECombine(localContribution, remoteContribution)
 	passwordKey := PAKEDerive(config.Password, salt, "session", config.Iterations)
 
-	combined := make([]byte, 64)
-	copy(combined[:32], baseKey)
-	copy(combined[32:], passwordKey)
+	// Final session key = SHA256(baseKey || passwordKey || service).
+	// Binding the service identifier provides domain separation: the same
+	// shared secret used for two different services derives two different
+	// session keys, so a credential provisioned for one service cannot
+	// establish a channel for another.
+	serviceBytes := []byte(config.Service)
+	combined := make([]byte, 0, 64+len(serviceBytes))
+	combined = append(combined, baseKey...)
+	combined = append(combined, passwordKey...)
+	combined = append(combined, serviceBytes...)
 
 	h := sha256.Sum256(combined)
 	return h[:]

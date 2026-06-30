@@ -251,7 +251,16 @@ class ShieldChannel {
             config.password, salt, 'session', config.iterations
         );
 
-        const combined = Buffer.concat([baseKey, passwordKey]);
+        // Final session key = SHA256(baseKey || passwordKey || service).
+        // Binding the service identifier provides domain separation: the same
+        // shared secret used for two different services derives two different
+        // session keys, so a credential provisioned for one service cannot
+        // establish a channel for another.
+        const combined = Buffer.concat([
+            baseKey,
+            passwordKey,
+            Buffer.from(config.service, 'utf8'),
+        ]);
         return crypto.createHash('sha256').update(combined).digest();
     }
 

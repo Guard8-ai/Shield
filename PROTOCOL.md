@@ -340,6 +340,20 @@ shared_secret = HMAC-SHA256(
 session_key = HMAC-SHA256(shared_secret, "session_key")
 ```
 
+The session key is additionally bound to the **service identifier** for domain
+separation: the same shared secret used for two different services derives two
+different session keys, so a credential provisioned for one service cannot
+establish a channel for another. (Concretely, the implementation folds the
+service bytes into the final key-derivation HMAC input.)
+
+> **Note (cross-language status):** the prose above is a simplified model. The
+> actual key-derivation primitives are *not yet byte-identical across bindings* —
+> Rust uses HMAC-SHA256 throughout while Go/Python/JS use SHA256 for the
+> contribution/combine/session steps — so a Rust channel peer does **not**
+> currently interoperate with a Go/Python/JS peer. Unifying these (alongside a
+> real DH-based PAKE) is a tracked follow-up. The service-binding domain
+> separation described here is implemented in **all** bindings.
+
 ### 3.6 Finish Messages
 
 ```
