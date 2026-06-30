@@ -1,6 +1,19 @@
 //! Multi-recipient encryption.
 //!
 //! Encrypt once for multiple recipients, each can decrypt with their own key.
+//!
+//! # Security limit: no per-sender authentication
+//!
+//! Each message's authentication tag is keyed by a **shared** group/member
+//! key, so a valid tag proves only that the message was produced by *someone*
+//! who holds the shared key — **not which member**. Any group member (and
+//! anyone who recovers the group key, which every recipient does in order to
+//! decrypt) can therefore forge a message that appears to come from any other
+//! member. This is inherent to symmetric multi-recipient encryption; it
+//! provides confidentiality and group-level integrity, **not** sender
+//! authenticity / non-repudiation. If you need to attribute a message to a
+//! specific sender, additionally sign it with a per-sender asymmetric key
+//! (e.g. Ed25519) outside this layer.
 
 // Member indices fit in u16 for practical group sizes (<65k members)
 #![allow(clippy::cast_possible_truncation)]

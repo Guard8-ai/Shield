@@ -1,6 +1,16 @@
 //! `OpenAPI`/Swagger Support for Confidential Computing APIs
 //!
 //! Provides utoipa schemas and documentation for attestation endpoints.
+//!
+//! # Important: these handlers are non-functional spec stubs
+//!
+//! The handler functions below exist to generate the `OpenAPI` schema only.
+//! They do **not** implement attestation or encryption: `verify_attestation`
+//! always returns `verified: false`, `get_attestation` reports "Not running in
+//! a TEE", and `encrypt_data`/`decrypt_data` **echo their input unchanged**. Do
+//! not mistake these for a working endpoint — wire them to the real
+//! [`crate::confidential`] verifiers and a [`crate::Shield`] instance before
+//! use. The schema's descriptions are corrected accordingly.
 
 // utoipa::OpenApi derive macro generates for_each internally
 #![allow(clippy::needless_for_each)]
@@ -171,7 +181,10 @@ impl OpenAPISchemas {
     info(
         title = "Shield Confidential Computing API",
         version = "1.0.0",
-        description = "Authenticated symmetric encryption with hardware attestation verification",
+        description = "OpenAPI schema for Shield's attestation-bound encryption API. \
+NOTE: the bundled handlers are non-functional spec stubs (verify returns false; \
+encrypt/decrypt echo their input) and must be wired to the real confidential \
+verifiers and a Shield instance before use.",
         license(name = "MIT")
     ),
     paths(
@@ -264,7 +277,7 @@ mod openapi_handlers {
         }
     }
 
-    /// Encrypt data with attestation binding.
+    /// Encrypt data with attestation binding. (Spec stub: echoes input — not real.)
     #[utoipa::path(
         post,
         path = "/api/secure/encrypt",
@@ -286,7 +299,7 @@ mod openapi_handlers {
         }
     }
 
-    /// Decrypt data inside TEE.
+    /// Decrypt data inside TEE. (Spec stub: echoes input — not real.)
     #[utoipa::path(
         post,
         path = "/api/secure/decrypt",
