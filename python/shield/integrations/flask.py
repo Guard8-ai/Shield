@@ -2,7 +2,7 @@
 Flask Integration for Shield Encryption
 
 Provides extension and decorators for protecting Flask applications
-with EXPTIME-secure encryption.
+with authenticated symmetric encryption.
 
 Usage:
     from flask import Flask

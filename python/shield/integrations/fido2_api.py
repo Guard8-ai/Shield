@@ -4,16 +4,32 @@ FIDO2/WebAuthn FastAPI integration for passwordless authentication.
 This module provides FastAPI endpoints for FIDO2 registration and authentication
 using Shield-encrypted credential storage.
 
+.. danger::
+    **INSECURE DEMONSTRATION SCAFFOLDING — NOT FOR PRODUCTION.**
+
+    These endpoints perform **NO** real WebAuthn verification. ``/login/complete``
+    verifies no signature, ``clientDataJSON``, origin, challenge, or counter, and
+    issues an **unsigned** (forgeable) bearer token; ``/login/begin`` returns a
+    user's credential IDs to any caller; and ``GET``/``DELETE /credentials`` take
+    the target username straight from the query string with no authentication
+    (credential enumeration and deletion). Wiring this router as-is would deploy a
+    complete authentication bypass.
+
+    For this reason the router refuses to instantiate unless you pass
+    ``allow_insecure_demo=True``, explicitly acknowledging it is an insecure demo.
+    For production, perform real WebAuthn assertion verification (e.g. via the
+    Rust ``fido2`` module / a vetted WebAuthn library) and sign tokens with
+    Shield's ``IdentityProvider`` or a real JWT.
+
 Example:
     from fastapi import FastAPI
     from shield.integrations.fido2_api import Fido2Router
 
     app = FastAPI()
-    app.include_router(Fido2Router(password="master_password", service="myapp.com"))
-
-Note:
-    This is a simplified implementation demonstrating the API structure.
-    Production use should integrate with the Rust fido2 module via FFI/PyO3.
+    app.include_router(
+        Fido2Router(password="master_password", service="myapp.com",
+                    allow_insecure_demo=True).router
+    )
 """
 
 import base64
@@ -22,7 +38,18 @@ import hmac
 import json
 import secrets
 import time
+import warnings
 from typing import Any, Dict, List, Optional
+
+#: Message used both for the refusal error and the construction-time warning.
+_INSECURE_DEMO_MESSAGE = (
+    "shield.integrations.fido2_api performs NO real WebAuthn verification "
+    "(no signature / challenge / origin / counter checks; tokens are unsigned "
+    "and forgeable; credential routes are unauthenticated). It is insecure "
+    "demonstration scaffolding and MUST NOT be deployed. Pass "
+    "allow_insecure_demo=True to run it as a non-production demo, or use the "
+    "Rust fido2 module / a vetted WebAuthn library for production."
+)
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -70,6 +97,7 @@ class Fido2Router:
         rp_name: str = "Shield App",
         origin: str = "http://localhost:8000",
         timeout_ms: int = 60000,
+        allow_insecure_demo: bool = False,
     ):
         """
         Initialize FIDO2 router.
@@ -81,7 +109,17 @@ class Fido2Router:
             rp_name: Relying party name
             origin: Expected origin for WebAuthn
             timeout_ms: Challenge timeout in milliseconds
+            allow_insecure_demo: Must be True to construct this router. These
+                endpoints perform no real WebAuthn verification and are insecure
+                demonstration scaffolding only (see the module docstring).
+
+        Raises:
+            RuntimeError: if ``allow_insecure_demo`` is not True.
         """
+        if not allow_insecure_demo:
+            raise RuntimeError(_INSECURE_DEMO_MESSAGE)
+        warnings.warn(_INSECURE_DEMO_MESSAGE, UserWarning, stacklevel=2)
+
         self.password = password
         self.service = service
         self.rp_id = rp_id
@@ -306,6 +344,7 @@ def create_fido2_app(
     password: str,
     service: str,
     cors_origins: Optional[List[str]] = None,
+    allow_insecure_demo: bool = False,
 ) -> APIRouter:
     """
     Create a FIDO2 FastAPI router with CORS.
@@ -314,13 +353,20 @@ def create_fido2_app(
         password: Master password for Shield encryption
         service: Service identifier
         cors_origins: Allowed CORS origins (default: ["http://localhost:3000"])
+        allow_insecure_demo: Must be True — this is insecure demo scaffolding
+            that performs no real WebAuthn verification (see module docstring).
 
     Returns:
         Configured FastAPI router
+
+    Raises:
+        RuntimeError: if ``allow_insecure_demo`` is not True.
     """
     if cors_origins is None:
         cors_origins = ["http://localhost:3000"]
 
-    fido2_router = Fido2Router(password=password, service=service)
+    fido2_router = Fido2Router(
+        password=password, service=service, allow_insecure_demo=allow_insecure_demo
+    )
 
     return fido2_router.router

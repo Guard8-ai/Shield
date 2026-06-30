@@ -2,7 +2,7 @@
 Shield Key Exchange - Key exchange without public-key crypto.
 
 Methods:
-1. PAKE: Password-Authenticated Key Exchange
+1. PAKE: pre-shared-key handshake (NOT a true PAKE; see PAKEExchange below)
 2. Physical: QR codes, base64 for manual exchange
 3. Key Splitting: Threshold secret sharing
 
@@ -29,13 +29,21 @@ from typing import List, Optional, Tuple
 
 class PAKEExchange:
     """
-    Password-Authenticated Key Exchange.
+    Pre-shared-key handshake (NOT a true PAKE despite the name).
 
-    Both parties derive a shared key from a common password.
-    Uses role binding to prevent reflection attacks.
+    Both parties derive a shared key from a common pre-shared secret,
+    with role binding to prevent reflection attacks.
+
+    SECURITY: The handshake contribution HMAC(PBKDF2(secret, salt), role) is
+    sent on the wire together with the salt, so a recorded handshake permits an
+    OFFLINE DICTIONARY ATTACK against a low-entropy secret (PBKDF2 iterations
+    only slow each guess). Safe ONLY with a high-entropy shared secret
+    (>=128 bits). For password-based or forward-secret key establishment, use
+    the X25519 + ML-KEM-768 hybrid KEX (pqhybrid) instead. Type name retained
+    for API compatibility.
     """
 
-    ITERATIONS = 200000  # Higher than normal for key exchange
+    ITERATIONS = 600000  # CR-2: OWASP 2023 floor for PBKDF2-HMAC-SHA256
 
     @staticmethod
     def derive(
@@ -51,7 +59,7 @@ class PAKEExchange:
             password: Shared password between parties
             salt: Public salt (can be exchanged openly)
             role: Role identifier ('alice', 'bob', 'initiator', etc.)
-            iterations: PBKDF2 iterations (default: 200000)
+            iterations: PBKDF2 iterations (default: 600000)
 
         Returns:
             32-byte key contribution

@@ -31,15 +31,29 @@ public class TOTP {
         let ts = timestamp == 0 ? Int64(Date().timeIntervalSince1970) : timestamp
         let w = window > 0 ? window : 1
 
+        let codeBytes = Array(code.utf8)
         for i in 0...w {
-            if generate(timestamp: ts - Int64(i) * interval) == code {
+            if TOTP.constantTimeEquals(Array(generate(timestamp: ts - Int64(i) * interval).utf8), codeBytes) {
                 return true
             }
-            if i > 0 && generate(timestamp: ts + Int64(i) * interval) == code {
+            if i > 0 && TOTP.constantTimeEquals(Array(generate(timestamp: ts + Int64(i) * interval).utf8), codeBytes) {
                 return true
             }
         }
         return false
+    }
+
+    /// Constant-time byte-array equality. Guards unequal length first (length is
+    /// not secret) and never early-returns on the content comparison.
+    private static func constantTimeEquals(_ a: [UInt8], _ b: [UInt8]) -> Bool {
+        if a.count != b.count {
+            return false
+        }
+        var result: UInt8 = 0
+        for i in 0..<a.count {
+            result |= a[i] ^ b[i]
+        }
+        return result == 0
     }
 
     private func generateHOTP(counter: UInt64) -> String {

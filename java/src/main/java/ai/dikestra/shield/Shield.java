@@ -1,360 +1,383 @@
 package ai.dikestra.shield;
 
+import javax.crypto.Cipher;
 import javax.crypto.Mac;
 import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
- * Shield - EXPTIME-Secure Symmetric Encryption Library
+ * Shield - Authenticated Symmetric Encryption Library (wire format v4).
  *
- * Uses only symmetric cryptographic primitives with proven exponential-time security:
- * PBKDF2-SHA256, HMAC-SHA256, and SHA256-based stream cipher.
- * Breaking requires 2^256 operations - no shortcut exists.
+ * <p>v4 replaces the previous custom SHA-256 keystream + HMAC construction with a
+ * standard AEAD (AES-256-GCM by default, ChaCha20-Poly1305 optional) from the JCE.
+ * No cryptography is hand-rolled; key derivation uses PBKDF2-HMAC-SHA256 +
+ * HKDF-SHA256-Expand. The wire format matches every other Shield binding
+ * byte-for-byte (see tests/v4_test_vectors.json).
+ *
+ * <ul>
+ *   <li>Password mode: {@code 0x03 || suite(1) || salt(16) || nonce(12) || ciphertext||tag}</li>
+ *   <li>Key mode:       {@code 0x13 || suite(1) || nonce(12) || ciphertext||tag}</li>
+ * </ul>
+ * AAD = {@code version || suite || [salt]}; inner plaintext =
+ * {@code timestamp_ms(8 LE) || pad_len(1) || padding(32-128) || message}.
  */
 public class Shield {
     public static final int KEY_SIZE = 32;
+    // NONCE_SIZE/MAC_SIZE retained at 16 for API compatibility; the base AEAD
+    // cipher uses its own 12-byte nonce / 16-byte tag (below).
     public static final int NONCE_SIZE = 16;
     public static final int MAC_SIZE = 16;
-    public static final int ITERATIONS = 100000;
-    public static final int MIN_CIPHERTEXT_SIZE = NONCE_SIZE + 8 + MAC_SIZE;
+    public static final int SALT_SIZE = 16;
+    /** PBKDF2 iteration count (OWASP 2023 floor for PBKDF2-HMAC-SHA256). */
+    public static final int ITERATIONS = 600000;
 
-    // V2 constants
-    public static final int V2_HEADER_SIZE = 17;  // counter(8) + timestamp(8) + pad_len(1)
+    // Authenticated version bytes (leading byte of the ciphertext).
+    public static final byte VERSION_PASSWORD = 0x03; // 0x03 || suite || salt(16) || nonce(12) || ct||tag
+    public static final byte VERSION_KEY = 0x13;       // 0x13 || suite || nonce(12) || ct||tag
+
+    // Cipher-suite identifiers.
+    public static final byte SUITE_AES_GCM = 0x01;
+    public static final byte SUITE_CHACHA20_POLY1305 = 0x02;
+
     public static final int MIN_PADDING = 32;
     public static final int MAX_PADDING = 128;
-    public static final long MIN_TIMESTAMP_MS = 1577836800000L;  // 2020-01-01
-    public static final long MAX_TIMESTAMP_MS = 4102444800000L;  // 2100-01-01
     public static final long DEFAULT_MAX_AGE_MS = 60000L;
 
-    private final byte[] key;
-    private final byte[] encKey;  // encryption subkey
-    private final byte[] macKey;  // authentication subkey
-    private final Long maxAgeMs;  // null = disabled
+    // Base-AEAD constants.
+    private static final int AEAD_NONCE_SIZE = 12;
+    private static final int TAG_SIZE = 16;
+    private static final int INNER_HEADER_SIZE = 9; // timestamp(8) + pad_len(1)
+    private static final byte[] HKDF_AEAD_INFO = "shield/aead/v4".getBytes(StandardCharsets.UTF_8);
+
+    private final byte[] key;       // master key
+    private final byte[] aeadKey;   // HKDF-derived AEAD key
+    private final byte suite;
+    private final Long maxAgeMs;    // null = disabled
+
+    // Password-mode fields (null in pre-shared-key mode).
+    private final String password;
+    private final String service;
+    private final int iterations;
+    private final byte[] salt;
+    private final Map<String, byte[]> keyCache;
+
     private static final SecureRandom random = new SecureRandom();
 
-    /**
-     * Derive separated encryption and MAC subkeys from master key using HMAC-SHA256.
-     */
-    private static byte[][] deriveSubkeys(byte[] masterKey) {
-        byte[] encKey = hmacSha256(masterKey, "shield-encrypt".getBytes());
-        byte[] macKeyDerived = hmacSha256(masterKey, "shield-authenticate".getBytes());
-        return new byte[][] { encKey, macKeyDerived };
-    }
-
-    /**
-     * Create Shield from password and service name.
-     */
+    /** Create Shield from password and service name (password mode). */
     public Shield(String password, String service) {
         this(password, service, DEFAULT_MAX_AGE_MS);
     }
 
-    /**
-     * Create Shield from password and service name with custom max age.
-     */
+    /** Create Shield from password and service name with custom max age. */
     public Shield(String password, String service, Long maxAgeMs) {
-        byte[] salt = sha256(service.getBytes());
-        this.key = pbkdf2(password, salt, ITERATIONS, KEY_SIZE);
-        byte[][] subkeys = deriveSubkeys(this.key);
-        this.encKey = subkeys[0];
-        this.macKey = subkeys[1];
+        this(password, service, randomBytes(SALT_SIZE), ITERATIONS, maxAgeMs);
+    }
+
+    /** Create Shield from password and service name with an explicit salt. */
+    public Shield(String password, String service, byte[] salt, int iterations, Long maxAgeMs) {
+        if (salt.length != SALT_SIZE) {
+            throw new IllegalArgumentException("Salt must be " + SALT_SIZE + " bytes");
+        }
+        this.password = password;
+        this.service = service;
+        this.iterations = iterations;
+        this.salt = Arrays.copyOf(salt, SALT_SIZE);
+        this.suite = SUITE_AES_GCM;
+        this.keyCache = new HashMap<>();
+        this.key = deriveKey(this.salt);
+        this.aeadKey = deriveAeadKey(this.key);
         this.maxAgeMs = maxAgeMs;
     }
 
-    /**
-     * Create Shield with pre-shared key.
-     */
+    /** Create Shield with pre-shared key (no password/salt). */
     public Shield(byte[] key) {
         this(key, DEFAULT_MAX_AGE_MS);
     }
 
-    /**
-     * Create Shield with pre-shared key and custom max age.
-     */
+    /** Create Shield with pre-shared key and custom max age. */
     public Shield(byte[] key, Long maxAgeMs) {
         if (key.length != KEY_SIZE) {
             throw new IllegalArgumentException("Invalid key size");
         }
         this.key = Arrays.copyOf(key, KEY_SIZE);
-        byte[][] subkeys = deriveSubkeys(this.key);
-        this.encKey = subkeys[0];
-        this.macKey = subkeys[1];
+        this.aeadKey = deriveAeadKey(this.key);
+        this.suite = SUITE_AES_GCM;
         this.maxAgeMs = maxAgeMs;
+        this.password = null;
+        this.service = null;
+        this.iterations = 0;
+        this.salt = null;
+        this.keyCache = null;
+    }
+
+    /** Derive the 32-byte master key for a given salt (cached by salt). */
+    private byte[] deriveKey(byte[] saltBytes) {
+        String saltKey = toHex(saltBytes);
+        byte[] cached = keyCache.get(saltKey);
+        if (cached != null) {
+            return cached;
+        }
+        byte[] serviceBytes = service.getBytes(StandardCharsets.UTF_8);
+        byte[] pbkdf2Salt = new byte[saltBytes.length + serviceBytes.length];
+        System.arraycopy(saltBytes, 0, pbkdf2Salt, 0, saltBytes.length);
+        System.arraycopy(serviceBytes, 0, pbkdf2Salt, saltBytes.length, serviceBytes.length);
+        byte[] derived = pbkdf2(password, pbkdf2Salt, iterations, KEY_SIZE);
+        keyCache.put(saltKey, derived);
+        return derived;
     }
 
     /**
-     * Create Shield with hardware fingerprinting (device-bound encryption).
-     *
-     * <p>Derives keys from password + hardware identifier, binding encryption to
-     * the physical device. Keys cannot be transferred to other hardware.
-     *
-     * @param password User's password
-     * @param service Service identifier
-     * @param mode Fingerprint mode
-     * @return Shield instance with device-bound key
-     * @throws Exception If hardware fingerprint unavailable
-     *
-     * <p>Example:
-     * <pre>{@code
-     * Shield shield = Shield.withFingerprint("password", "github.com", FingerprintMode.COMBINED);
-     * byte[] encrypted = shield.encrypt("secret".getBytes());
-     * }</pre>
+     * AEAD key = HKDF-SHA256-Expand(master, "shield/aead/v4", 32). For a 32-byte
+     * output this is a single HKDF block: HMAC-SHA256(master, info || 0x01).
      */
+    public static byte[] deriveAeadKey(byte[] masterKey) {
+        byte[] input = new byte[HKDF_AEAD_INFO.length + 1];
+        System.arraycopy(HKDF_AEAD_INFO, 0, input, 0, HKDF_AEAD_INFO.length);
+        input[HKDF_AEAD_INFO.length] = 0x01;
+        return Arrays.copyOf(hmacSha256(masterKey, input), KEY_SIZE);
+    }
+
+    /** Create Shield with hardware fingerprinting (device-bound encryption). */
     public static Shield withFingerprint(String password, String service, Fingerprint.FingerprintMode mode) throws Exception {
         String fingerprint = Fingerprint.collect(mode);
-
         String combinedPassword = fingerprint.isEmpty() ? password : password + ":" + fingerprint;
-
         return new Shield(combinedPassword, service);
     }
 
-    /**
-     * Encrypt plaintext (v2 format).
-     */
+    /** Encrypt plaintext (password or pre-shared-key mode). */
     public byte[] encrypt(byte[] plaintext) {
-        return encryptWithSeparatedKeys(encKey, macKey, plaintext);
+        return seal(aeadKey, suite, salt, plaintext);
     }
 
-    /**
-     * Decrypt ciphertext (auto-detects v1/v2).
-     */
+    /** Decrypt ciphertext, dispatching on the leading authenticated version byte. */
     public byte[] decrypt(byte[] ciphertext) {
-        return decryptWithSeparatedKeys(encKey, macKey, ciphertext, maxAgeMs);
+        if (ciphertext.length < 1) {
+            throw new IllegalArgumentException("Ciphertext too short");
+        }
+
+        byte version = ciphertext[0];
+
+        if (version == VERSION_PASSWORD) {
+            if (salt == null) {
+                throw new SecurityException("Cannot derive key without password");
+            }
+            int aadLen = 2 + SALT_SIZE;
+            if (ciphertext.length < aadLen + AEAD_NONCE_SIZE + TAG_SIZE) {
+                throw new IllegalArgumentException("Ciphertext too short");
+            }
+            byte msgSuite = ciphertext[1];
+            byte[] msgSalt = Arrays.copyOfRange(ciphertext, 2, 2 + SALT_SIZE);
+            byte[] master = deriveKey(msgSalt);
+            byte[] derivedAead = deriveAeadKey(master);
+            return openCiphertext(derivedAead, msgSuite, ciphertext, aadLen, maxAgeMs);
+
+        } else if (version == VERSION_KEY) {
+            if (ciphertext.length < 2 + AEAD_NONCE_SIZE + TAG_SIZE) {
+                throw new IllegalArgumentException("Ciphertext too short");
+            }
+            return openCiphertext(aeadKey, ciphertext[1], ciphertext, 2, maxAgeMs);
+
+        } else {
+            throw new SecurityException("Invalid version byte");
+        }
     }
 
     /**
-     * Decrypt v1 format explicitly (for legacy compatibility).
-     */
-    public byte[] decryptV1(byte[] ciphertext) {
-        return decryptV1WithSeparatedKeys(encKey, macKey, ciphertext);
-    }
-
-    /**
-     * @deprecated Exposing derived key is a security risk. Will be removed in v3.
-     * For testing only - use encrypt/decrypt operations instead.
+     * @deprecated For testing/interop only.
      */
     @Deprecated
     byte[] getKey() {
         return Arrays.copyOf(key, KEY_SIZE);
     }
 
-    /**
-     * Wipe key from memory.
-     */
+    /** Wipe key material from memory. */
     public void wipe() {
         Arrays.fill(key, (byte) 0);
-        Arrays.fill(encKey, (byte) 0);
-        Arrays.fill(macKey, (byte) 0);
+        Arrays.fill(aeadKey, (byte) 0);
     }
 
     // ============== Static Methods ==============
 
-    /**
-     * Quick encrypt with explicit key.
-     */
+    /** Quick encrypt with explicit key (pre-shared-key mode, AES-256-GCM, 0x13). */
     public static byte[] quickEncrypt(byte[] key, byte[] plaintext) {
         if (key.length != KEY_SIZE) {
             throw new IllegalArgumentException("Invalid key size");
         }
-        byte[][] subkeys = deriveSubkeys(key);
-        return encryptWithSeparatedKeys(subkeys[0], subkeys[1], plaintext);
+        byte[] aeadKey = deriveAeadKey(key);
+        return seal(aeadKey, SUITE_AES_GCM, null, plaintext);
     }
 
-    /**
-     * Quick decrypt with explicit key.
-     */
+    /** Quick decrypt with explicit key (pre-shared-key mode). */
     public static byte[] quickDecrypt(byte[] key, byte[] ciphertext) {
         if (key.length != KEY_SIZE) {
             throw new IllegalArgumentException("Invalid key size");
         }
-        byte[][] subkeys = deriveSubkeys(key);
-        return decryptWithSeparatedKeys(subkeys[0], subkeys[1], ciphertext, null);
+        if (ciphertext.length < 1) {
+            throw new IllegalArgumentException("Ciphertext too short");
+        }
+        if (ciphertext[0] != VERSION_KEY) {
+            throw new SecurityException("Invalid version byte");
+        }
+        if (ciphertext.length < 2 + AEAD_NONCE_SIZE + TAG_SIZE) {
+            throw new IllegalArgumentException("Ciphertext too short");
+        }
+        byte[] aeadKey = deriveAeadKey(key);
+        return openCiphertext(aeadKey, ciphertext[1], ciphertext, 2, null);
     }
 
-    private static byte[] encryptWithSeparatedKeys(byte[] encKey, byte[] macKey, byte[] plaintext) {
-        // Generate random nonce
-        byte[] nonce = new byte[NONCE_SIZE];
-        random.nextBytes(nonce);
+    /** Build the AEAD additional data (= wire prefix before the nonce). */
+    private static byte[] buildAad(byte suite, byte[] salt) {
+        if (salt != null) {
+            byte[] aad = new byte[2 + SALT_SIZE];
+            aad[0] = VERSION_PASSWORD;
+            aad[1] = suite;
+            System.arraycopy(salt, 0, aad, 2, SALT_SIZE);
+            return aad;
+        }
+        return new byte[] { VERSION_KEY, suite };
+    }
 
-        // Counter prefix (8 bytes of zeros)
-        byte[] counter = new byte[8];
-
-        // Timestamp in milliseconds since Unix epoch
-        long timestampMs = System.currentTimeMillis();
-        byte[] timestamp = new byte[8];
-        ByteBuffer.wrap(timestamp).order(ByteOrder.LITTLE_ENDIAN).putLong(timestampMs);
-
-        // Random padding: 32-128 bytes (rejection sampling to avoid modulo bias)
+    private static int samplePadLen() {
         int padRange = MAX_PADDING - MIN_PADDING + 1; // 97
-        int padLen;
-        do {
+        while (true) {
             int val = random.nextInt() & 0xFF;
-            if (val < padRange * (256 / padRange)) { // Reject biased values
-                padLen = (val % padRange) + MIN_PADDING;
-                break;
+            if (val < padRange * (256 / padRange)) {
+                return (val % padRange) + MIN_PADDING;
             }
-        } while (true);
-        byte[] padLenByte = new byte[] { (byte) padLen };
+        }
+    }
+
+    /** Seal with a fresh random nonce, timestamp and padding. */
+    private static byte[] seal(byte[] aeadKey, byte suite, byte[] salt, byte[] plaintext) {
+        byte[] nonce = new byte[AEAD_NONCE_SIZE];
+        random.nextBytes(nonce);
+        int padLen = samplePadLen();
         byte[] padding = new byte[padLen];
         random.nextBytes(padding);
+        return sealDeterministic(aeadKey, suite, salt, nonce, System.currentTimeMillis(),
+                padLen, padding, plaintext);
+    }
 
-        // Data to encrypt: counter || timestamp || pad_len || padding || plaintext
-        byte[] dataToEncrypt = new byte[8 + 8 + 1 + padLen + plaintext.length];
-        int pos = 0;
-        System.arraycopy(counter, 0, dataToEncrypt, pos, 8);
-        pos += 8;
-        System.arraycopy(timestamp, 0, dataToEncrypt, pos, 8);
-        pos += 8;
-        System.arraycopy(padLenByte, 0, dataToEncrypt, pos, 1);
-        pos += 1;
-        System.arraycopy(padding, 0, dataToEncrypt, pos, padLen);
-        pos += padLen;
-        System.arraycopy(plaintext, 0, dataToEncrypt, pos, plaintext.length);
+    /**
+     * Deterministic AEAD seal over fully specified inputs (used for conformance
+     * vectors and wrapped by the randomized seal).
+     */
+    public static byte[] sealDeterministic(byte[] aeadKey, byte suite, byte[] salt, byte[] nonce,
+            long timestampMs, int padLen, byte[] padding, byte[] plaintext) {
+        byte[] aad = buildAad(suite, salt);
 
-        // Generate keystream and XOR (using encryption subkey)
-        byte[] keystream = generateKeystream(encKey, nonce, dataToEncrypt.length);
-        byte[] ciphertext = new byte[dataToEncrypt.length];
-        for (int i = 0; i < dataToEncrypt.length; i++) {
-            ciphertext[i] = (byte) (dataToEncrypt[i] ^ keystream[i]);
-        }
+        byte[] inner = new byte[INNER_HEADER_SIZE + padding.length + plaintext.length];
+        ByteBuffer.wrap(inner, 0, 8).order(ByteOrder.LITTLE_ENDIAN).putLong(timestampMs);
+        inner[8] = (byte) padLen;
+        System.arraycopy(padding, 0, inner, INNER_HEADER_SIZE, padding.length);
+        System.arraycopy(plaintext, 0, inner, INNER_HEADER_SIZE + padding.length, plaintext.length);
 
-        // Compute HMAC over nonce || ciphertext (using MAC subkey)
-        byte[] macData = new byte[NONCE_SIZE + ciphertext.length];
-        System.arraycopy(nonce, 0, macData, 0, NONCE_SIZE);
-        System.arraycopy(ciphertext, 0, macData, NONCE_SIZE, ciphertext.length);
-        byte[] mac = hmacSha256(macKey, macData);
+        byte[] ctTag = aeadSeal(suite, aeadKey, nonce, aad, inner);
 
-        // Format: nonce || ciphertext || mac
-        byte[] result = new byte[NONCE_SIZE + ciphertext.length + MAC_SIZE];
-        System.arraycopy(nonce, 0, result, 0, NONCE_SIZE);
-        System.arraycopy(ciphertext, 0, result, NONCE_SIZE, ciphertext.length);
-        System.arraycopy(mac, 0, result, NONCE_SIZE + ciphertext.length, MAC_SIZE);
-
+        byte[] result = new byte[aad.length + nonce.length + ctTag.length];
+        System.arraycopy(aad, 0, result, 0, aad.length);
+        System.arraycopy(nonce, 0, result, aad.length, nonce.length);
+        System.arraycopy(ctTag, 0, result, aad.length + nonce.length, ctTag.length);
         return result;
     }
 
-    private static byte[] decryptWithSeparatedKeys(byte[] encKey, byte[] macKey, byte[] encrypted, Long maxAgeMs) {
-        if (encrypted.length < MIN_CIPHERTEXT_SIZE) {
+    /**
+     * Open an AEAD ciphertext, validate the inner layout and freshness window.
+     * aadLen is the offset of the nonce (= len(version||suite||[salt])).
+     */
+    public static byte[] openCiphertext(byte[] aeadKey, byte suite, byte[] encrypted, int aadLen, Long maxAgeMs) {
+        if (encrypted.length < aadLen + AEAD_NONCE_SIZE + TAG_SIZE) {
+            throw new IllegalArgumentException("Ciphertext too short");
+        }
+        byte[] aad = Arrays.copyOfRange(encrypted, 0, aadLen);
+        byte[] nonce = Arrays.copyOfRange(encrypted, aadLen, aadLen + AEAD_NONCE_SIZE);
+        byte[] ctTag = Arrays.copyOfRange(encrypted, aadLen + AEAD_NONCE_SIZE, encrypted.length);
+
+        byte[] inner = aeadOpen(suite, aeadKey, nonce, aad, ctTag);
+
+        if (inner.length < INNER_HEADER_SIZE) {
+            throw new SecurityException("Authentication failed");
+        }
+        byte[] tsBytes = Arrays.copyOfRange(inner, 0, 8);
+        long timestampMs = ByteBuffer.wrap(tsBytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
+        int padLen = inner[8] & 0xFF;
+        if (padLen < MIN_PADDING || padLen > MAX_PADDING) {
+            throw new SecurityException("Authentication failed");
+        }
+        int dataStart = INNER_HEADER_SIZE + padLen;
+        if (inner.length < dataStart) {
             throw new IllegalArgumentException("Ciphertext too short");
         }
 
-        // Parse components
-        byte[] nonce = Arrays.copyOfRange(encrypted, 0, NONCE_SIZE);
-        byte[] ciphertext = Arrays.copyOfRange(encrypted, NONCE_SIZE, encrypted.length - MAC_SIZE);
-        byte[] receivedMac = Arrays.copyOfRange(encrypted, encrypted.length - MAC_SIZE, encrypted.length);
-
-        // Verify MAC (using MAC subkey)
-        byte[] macData = new byte[NONCE_SIZE + ciphertext.length];
-        System.arraycopy(nonce, 0, macData, 0, NONCE_SIZE);
-        System.arraycopy(ciphertext, 0, macData, NONCE_SIZE, ciphertext.length);
-        byte[] expectedMac = hmacSha256(macKey, macData);
-
-        if (!constantTimeEquals(receivedMac, Arrays.copyOf(expectedMac, MAC_SIZE))) {
-            throw new SecurityException("Authentication failed");
-        }
-
-        // Decrypt (using encryption subkey)
-        byte[] keystream = generateKeystream(encKey, nonce, ciphertext.length);
-        byte[] decrypted = new byte[ciphertext.length];
-        for (int i = 0; i < ciphertext.length; i++) {
-            decrypted[i] = (byte) (ciphertext[i] ^ keystream[i]);
-        }
-
-        // Auto-detect v2 by timestamp range (2020-2100)
-        if (decrypted.length >= V2_HEADER_SIZE) {
-            byte[] timestampBytes = Arrays.copyOfRange(decrypted, 8, 16);
-            long timestampMs = ByteBuffer.wrap(timestampBytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
-
-            if (timestampMs >= MIN_TIMESTAMP_MS && timestampMs <= MAX_TIMESTAMP_MS) {
-                // v2 format detected
-                int padLen = decrypted[16] & 0xFF;
-
-                // Validate padding length is within protocol bounds (SECURITY: CVE-PENDING)
-                if (padLen < MIN_PADDING || padLen > MAX_PADDING) {
-                    throw new SecurityException("Authentication failed");
-                }
-
-                int dataStart = V2_HEADER_SIZE + padLen;
-
-                if (decrypted.length < dataStart) {
-                    throw new IllegalArgumentException("Ciphertext too short");
-                }
-
-                // Replay protection
-                if (maxAgeMs != null) {
-                    long nowMs = System.currentTimeMillis();
-                    long age = nowMs - timestampMs;
-
-                    // Reject if too far in future (>5s clock skew) or too old
-                    if (timestampMs > nowMs + 5000 || age > maxAgeMs) {
-                        throw new SecurityException("Authentication failed");
-                    }
-                }
-
-                return Arrays.copyOfRange(decrypted, dataStart, decrypted.length);
+        if (maxAgeMs != null) {
+            long nowMs = System.currentTimeMillis();
+            long age = nowMs - timestampMs;
+            if (timestampMs > nowMs + 5000 || age > maxAgeMs) {
+                throw new SecurityException("Authentication failed");
             }
         }
 
-        // v1 format: skip counter (8 bytes)
-        return Arrays.copyOfRange(decrypted, 8, decrypted.length);
+        return Arrays.copyOfRange(inner, dataStart, inner.length);
     }
 
-    private static byte[] decryptV1WithSeparatedKeys(byte[] encKey, byte[] macKey, byte[] encrypted) {
-        if (encrypted.length < MIN_CIPHERTEXT_SIZE) {
-            throw new IllegalArgumentException("Ciphertext too short");
+    /** AEAD seal: returns ciphertext||tag. */
+    private static byte[] aeadSeal(byte suite, byte[] key, byte[] nonce, byte[] aad, byte[] plaintext) {
+        try {
+            Cipher cipher = aeadCipher(suite, Cipher.ENCRYPT_MODE, key, nonce);
+            cipher.updateAAD(aad);
+            return cipher.doFinal(plaintext);
+        } catch (GeneralSecurityException e) {
+            throw new SecurityException("AEAD seal failed", e);
         }
-
-        // Parse components
-        byte[] nonce = Arrays.copyOfRange(encrypted, 0, NONCE_SIZE);
-        byte[] ciphertext = Arrays.copyOfRange(encrypted, NONCE_SIZE, encrypted.length - MAC_SIZE);
-        byte[] receivedMac = Arrays.copyOfRange(encrypted, encrypted.length - MAC_SIZE, encrypted.length);
-
-        // Verify MAC (using MAC subkey)
-        byte[] macData = new byte[NONCE_SIZE + ciphertext.length];
-        System.arraycopy(nonce, 0, macData, 0, NONCE_SIZE);
-        System.arraycopy(ciphertext, 0, macData, NONCE_SIZE, ciphertext.length);
-        byte[] expectedMac = hmacSha256(macKey, macData);
-
-        if (!constantTimeEquals(receivedMac, Arrays.copyOf(expectedMac, MAC_SIZE))) {
-            throw new SecurityException("Authentication failed");
-        }
-
-        // Decrypt (using encryption subkey)
-        byte[] keystream = generateKeystream(encKey, nonce, ciphertext.length);
-        byte[] decrypted = new byte[ciphertext.length];
-        for (int i = 0; i < ciphertext.length; i++) {
-            decrypted[i] = (byte) (ciphertext[i] ^ keystream[i]);
-        }
-
-        // v1 format: skip counter (8 bytes)
-        return Arrays.copyOfRange(decrypted, 8, decrypted.length);
     }
 
-    private static byte[] generateKeystream(byte[] key, byte[] nonce, int length) {
-        int numBlocks = (length + 31) / 32;
-        byte[] keystream = new byte[numBlocks * 32];
-
-        for (int i = 0; i < numBlocks; i++) {
-            byte[] block = new byte[KEY_SIZE + NONCE_SIZE + 4];
-            System.arraycopy(key, 0, block, 0, KEY_SIZE);
-            System.arraycopy(nonce, 0, block, KEY_SIZE, NONCE_SIZE);
-            ByteBuffer.wrap(block, KEY_SIZE + NONCE_SIZE, 4)
-                    .order(ByteOrder.LITTLE_ENDIAN)
-                    .putInt(i);
-
-            byte[] hash = sha256(block);
-            System.arraycopy(hash, 0, keystream, i * 32, 32);
+    /** AEAD open: returns plaintext, throws SecurityException on auth failure. */
+    private static byte[] aeadOpen(byte suite, byte[] key, byte[] nonce, byte[] aad, byte[] ctTag) {
+        try {
+            Cipher cipher = aeadCipher(suite, Cipher.DECRYPT_MODE, key, nonce);
+            cipher.updateAAD(aad);
+            return cipher.doFinal(ctTag);
+        } catch (GeneralSecurityException e) {
+            throw new SecurityException("Authentication failed", e);
         }
+    }
 
-        return Arrays.copyOf(keystream, length);
+    private static Cipher aeadCipher(byte suite, int mode, byte[] key, byte[] nonce) throws GeneralSecurityException {
+        Cipher cipher;
+        if (suite == SUITE_AES_GCM) {
+            cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(mode, new SecretKeySpec(key, "AES"), new GCMParameterSpec(TAG_SIZE * 8, nonce));
+        } else if (suite == SUITE_CHACHA20_POLY1305) {
+            cipher = Cipher.getInstance("ChaCha20-Poly1305");
+            cipher.init(mode, new SecretKeySpec(key, "ChaCha20"), new IvParameterSpec(nonce));
+        } else {
+            throw new GeneralSecurityException("Unknown cipher suite");
+        }
+        return cipher;
     }
 
     // ============== Crypto Utilities ==============
+
+    private static String toHex(byte[] data) {
+        StringBuilder sb = new StringBuilder(data.length * 2);
+        for (byte b : data) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+            sb.append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString();
+    }
 
     public static byte[] sha256(byte[] data) {
         try {

@@ -1,46 +1,96 @@
 import Foundation
 import CommonCrypto
+import CryptoKit
 
-/// Shield - EXPTIME-Secure Symmetric Encryption Library
+/// Shield - Authenticated Symmetric Encryption Library (wire format v4).
 ///
-/// Uses only symmetric cryptographic primitives with proven exponential-time security:
-/// PBKDF2-SHA256, HMAC-SHA256, and SHA256-based stream cipher.
-/// Breaking requires 2^256 operations - no shortcut exists.
+/// v4 replaces the previous custom SHA-256 keystream + HMAC construction with a
+/// standard AEAD (AES-256-GCM by default, ChaCha20-Poly1305 optional) from Apple
+/// CryptoKit. No cryptography is hand-rolled: key derivation uses PBKDF2-HMAC-SHA256
+/// (CommonCrypto) + HKDF-SHA256-Expand (CryptoKit), and encryption uses CryptoKit's
+/// AEAD primitives. The wire format matches every other Shield binding byte-for-byte
+/// (see tests/v4_test_vectors.json).
 public class Shield {
     public static let keySize = 32
+    // nonceSize/macSize are retained at 16 for the auxiliary keystream layers
+    // (ratchet/stream). The base AEAD cipher uses its own 12-byte nonce.
     public static let nonceSize = 16
     public static let macSize = 16
-    public static let iterations: UInt32 = 100_000
-    public static let minCiphertextSize = nonceSize + 8 + macSize
+    public static let saltSize = 16
+    public static let iterations: UInt32 = 600_000
 
-    // V2 constants
-    public static let v2HeaderSize = 17  // counter(8) + timestamp(8) + pad_len(1)
+    // Authenticated leading version bytes (wire format v4).
+    // Password mode: 0x03 || suite(1) || salt(16) || nonce(12) || ciphertext||tag
+    // Key mode:      0x13 || suite(1) || nonce(12) || ciphertext||tag
+    public static let versionPassword: UInt8 = 0x03
+    public static let versionKey: UInt8 = 0x13
+
+    // Cipher-suite identifiers.
+    public static let suiteAesGcm: UInt8 = 0x01
+    public static let suiteChaCha20Poly1305: UInt8 = 0x02
+
+    // Base-AEAD constants.
+    public static let aeadNonceSize = 12
+    public static let tagSize = 16
+    public static let innerHeaderSize = 9  // timestamp(8) + pad_len(1)
     public static let minPadding = 32
     public static let maxPadding = 128
-    public static let minTimestampMs: Int64 = 1577836800000  // 2020-01-01
-    public static let maxTimestampMs: Int64 = 4102444800000  // 2100-01-01
     public static let defaultMaxAgeMs: Int64 = 60000
+    public static let hkdfAeadInfo = "shield/aead/v4"
 
     private var key: [UInt8]
-    private var encKey: [UInt8]  // encryption subkey
-    private var macKey: [UInt8]  // authentication subkey
+    private var aeadKey: [UInt8]
+    private let suite: UInt8
     private let maxAgeMs: Int64?
 
-    /// Derive separated encryption and MAC subkeys from master key.
-    private static func deriveSubkeys(_ masterKey: [UInt8]) -> (enc: [UInt8], mac: [UInt8]) {
-        let encKey = hmacSha256(key: masterKey, data: Array("shield-encrypt".utf8))
-        let macKey = hmacSha256(key: masterKey, data: Array("shield-authenticate".utf8))
-        return (encKey, macKey)
+    // Password-mode fields (nil in pre-shared-key mode).
+    private let password: String?
+    private let service: String?
+    private let pbkdf2Iterations: UInt32
+    private let salt: [UInt8]?
+    private var keyCache: [[UInt8]: [UInt8]] = [:]
+
+    /// AEAD key = HKDF-SHA256-Expand(master, "shield/aead/v4", 32).
+    public static func deriveAeadKey(_ masterKey: [UInt8]) -> [UInt8] {
+        let okm = HKDF<SHA256>.expand(
+            pseudoRandomKey: SymmetricKey(data: Data(masterKey)),
+            info: Data(hkdfAeadInfo.utf8),
+            outputByteCount: keySize)
+        return okm.withUnsafeBytes { Array($0) }
     }
 
     /// Create Shield from password and service name.
-    public init(password: String, service: String) {
-        let salt = Shield.sha256(Array(service.utf8))
-        self.key = Shield.pbkdf2(password: password, salt: salt, iterations: Shield.iterations, keyLength: Shield.keySize)
-        let subkeys = Shield.deriveSubkeys(self.key)
-        self.encKey = subkeys.enc
-        self.macKey = subkeys.mac
+    ///
+    /// A cryptographically secure random 16-byte salt is generated per instance.
+    /// master = PBKDF2-HMAC-SHA256(password, salt || service, iterations, 32);
+    /// aeadKey = HKDF-Expand(master, "shield/aead/v4", 32). The random salt is
+    /// stored in the ciphertext header so a recipient with the same
+    /// password+service can re-derive the key.
+    public convenience init(password: String, service: String) {
+        // Fail closed on CSPRNG failure: never fall back to a predictable
+        // (all-zero) salt, which would derive identical keys across instances.
+        // fatalError is the unrecoverable-error analog of the Go (panic) and
+        // Rust (RandomFailed) references.
+        guard let salt = Shield.randomBytes(Shield.saltSize) else {
+            fatalError("Shield: CSPRNG failure generating salt (fail-closed)")
+        }
+        self.init(password: password, service: service, salt: salt, iterations: Shield.iterations)
+    }
+
+    /// Create Shield from password and service name with an explicit salt and iteration count.
+    public init(password: String, service: String, salt: [UInt8], iterations: UInt32) {
+        self.password = password
+        self.service = service
+        self.pbkdf2Iterations = iterations
+        self.salt = salt
+        self.suite = Shield.suiteAesGcm
         self.maxAgeMs = Shield.defaultMaxAgeMs
+
+        let pbkdfSalt = salt + Array(service.utf8)
+        let derived = Shield.pbkdf2(password: password, salt: pbkdfSalt, iterations: iterations, keyLength: Shield.keySize)
+        self.key = derived
+        self.aeadKey = Shield.deriveAeadKey(derived)
+        self.keyCache[salt] = derived
     }
 
     /// Create Shield with pre-shared key.
@@ -49,10 +99,13 @@ public class Shield {
             throw ShieldError.invalidKeySize
         }
         self.key = key
-        let subkeys = Shield.deriveSubkeys(key)
-        self.encKey = subkeys.enc
-        self.macKey = subkeys.mac
+        self.aeadKey = Shield.deriveAeadKey(key)
+        self.suite = Shield.suiteAesGcm
         self.maxAgeMs = Shield.defaultMaxAgeMs
+        self.password = nil
+        self.service = nil
+        self.pbkdf2Iterations = Shield.iterations
+        self.salt = nil
     }
 
     /// Create Shield with pre-shared key and custom max age.
@@ -61,72 +114,128 @@ public class Shield {
             throw ShieldError.invalidKeySize
         }
         self.key = key
-        let subkeys = Shield.deriveSubkeys(key)
-        self.encKey = subkeys.enc
-        self.macKey = subkeys.mac
+        self.aeadKey = Shield.deriveAeadKey(key)
+        self.suite = Shield.suiteAesGcm
         self.maxAgeMs = maxAgeMs
+        self.password = nil
+        self.service = nil
+        self.pbkdf2Iterations = Shield.iterations
+        self.salt = nil
     }
 
-    /// Encrypt plaintext (v2 format).
+    /// Derive the 32-byte master key for a given salt (cached by salt).
+    private static func deriveKeyCaching(
+        password: String, service: String, salt: [UInt8],
+        iterations: UInt32, cache: inout [[UInt8]: [UInt8]]
+    ) -> [UInt8] {
+        if let cached = cache[salt] {
+            return cached
+        }
+        let pbkdfSalt = salt + Array(service.utf8)
+        let derived = pbkdf2(password: password, salt: pbkdfSalt, iterations: iterations, keyLength: keySize)
+        cache[salt] = derived
+        return derived
+    }
+
+    /// Encrypt plaintext.
+    ///
+    /// Password mode output: 0x03 || suite || salt(16) || nonce(12) || ciphertext||tag.
+    /// Key mode output:      0x13 || suite || nonce(12) || ciphertext||tag.
     public func encrypt(_ plaintext: [UInt8]) throws -> [UInt8] {
-        return try Shield.encryptWithSeparatedKeys(encKey, macKey: macKey, plaintext: plaintext)
+        return try Shield.seal(aeadKey: aeadKey, suite: suite, salt: salt, plaintext: plaintext)
     }
 
-    /// Decrypt ciphertext (auto-detects v1/v2).
+    /// Decrypt ciphertext, dispatching on the leading authenticated version byte.
     public func decrypt(_ ciphertext: [UInt8]) throws -> [UInt8] {
-        return try Shield.decryptWithSeparatedKeys(encKey, macKey: macKey, ciphertext: ciphertext, maxAgeMs: maxAgeMs)
+        guard ciphertext.count >= 1 else {
+            throw ShieldError.ciphertextTooShort
+        }
+
+        let version = ciphertext[0]
+        if version == Shield.versionPassword {
+            guard let _ = salt, let password = password, let service = service else {
+                throw ShieldError.authenticationFailed
+            }
+            let aadLen = 2 + Shield.saltSize
+            guard ciphertext.count >= aadLen + Shield.aeadNonceSize + Shield.tagSize else {
+                throw ShieldError.ciphertextTooShort
+            }
+            let msgSuite = ciphertext[1]
+            let headerSalt = Array(ciphertext[2..<(2 + Shield.saltSize)])
+            let derived = Shield.deriveKeyCaching(
+                password: password, service: service, salt: headerSalt,
+                iterations: pbkdf2Iterations, cache: &keyCache)
+            let derivedAead = Shield.deriveAeadKey(derived)
+            return try Shield.openCiphertext(aeadKey: derivedAead, suite: msgSuite,
+                                             encrypted: ciphertext, aadLen: aadLen, maxAgeMs: maxAgeMs)
+
+        } else if version == Shield.versionKey {
+            guard ciphertext.count >= 2 + Shield.aeadNonceSize + Shield.tagSize else {
+                throw ShieldError.ciphertextTooShort
+            }
+            return try Shield.openCiphertext(aeadKey: aeadKey, suite: ciphertext[1],
+                                             encrypted: ciphertext, aadLen: 2, maxAgeMs: maxAgeMs)
+
+        } else {
+            throw ShieldError.invalidVersion
+        }
     }
 
-    /// Get the derived key.
+    /// Get the derived master key.
     public func getKey() -> [UInt8] {
         return key
     }
 
-    /// Wipe key from memory.
+    /// Wipe key material from memory.
     public func wipe() {
         for i in 0..<key.count { key[i] = 0 }
-        for i in 0..<encKey.count { encKey[i] = 0 }
-        for i in 0..<macKey.count { macKey[i] = 0 }
+        for i in 0..<aeadKey.count { aeadKey[i] = 0 }
     }
 
     // MARK: - Static Methods
 
-    /// Quick encrypt with explicit key.
+    /// Quick encrypt with explicit key (pre-shared-key mode, AES-256-GCM, 0x13).
     public static func quickEncrypt(key: [UInt8], plaintext: [UInt8]) throws -> [UInt8] {
         guard key.count == keySize else {
             throw ShieldError.invalidKeySize
         }
-        let subkeys = deriveSubkeys(key)
-        return try encryptWithSeparatedKeys(subkeys.enc, macKey: subkeys.mac, plaintext: plaintext)
+        return try seal(aeadKey: deriveAeadKey(key), suite: suiteAesGcm, salt: nil, plaintext: plaintext)
     }
 
-    /// Quick decrypt with explicit key.
+    /// Quick decrypt with explicit key (pre-shared-key mode).
     public static func quickDecrypt(key: [UInt8], ciphertext: [UInt8]) throws -> [UInt8] {
         guard key.count == keySize else {
             throw ShieldError.invalidKeySize
         }
-        let subkeys = deriveSubkeys(key)
-        return try decryptWithSeparatedKeys(subkeys.enc, macKey: subkeys.mac, ciphertext: ciphertext, maxAgeMs: nil)
+        guard ciphertext.count >= 1 else {
+            throw ShieldError.ciphertextTooShort
+        }
+        guard ciphertext[0] == versionKey else {
+            throw ShieldError.invalidVersion
+        }
+        guard ciphertext.count >= 2 + aeadNonceSize + tagSize else {
+            throw ShieldError.ciphertextTooShort
+        }
+        return try openCiphertext(aeadKey: deriveAeadKey(key), suite: ciphertext[1],
+                                  encrypted: ciphertext, aadLen: 2, maxAgeMs: nil)
     }
 
-    private static func encryptWithSeparatedKeys(_ encKey: [UInt8], macKey: [UInt8], plaintext: [UInt8]) throws -> [UInt8] {
-        // Generate random nonce
-        var nonce = [UInt8](repeating: 0, count: nonceSize)
-        guard SecRandomCopyBytes(kSecRandomDefault, nonceSize, &nonce) == errSecSuccess else {
+    /// Build the AEAD additional data (= wire prefix before the nonce).
+    private static func buildAad(suite: UInt8, salt: [UInt8]?) -> [UInt8] {
+        if let salt = salt {
+            return [versionPassword, suite] + salt
+        }
+        return [versionKey, suite]
+    }
+
+    /// Seal with a fresh random nonce, timestamp and padding.
+    private static func seal(aeadKey: [UInt8], suite: UInt8, salt: [UInt8]?, plaintext: [UInt8]) throws -> [UInt8] {
+        var nonce = [UInt8](repeating: 0, count: aeadNonceSize)
+        guard SecRandomCopyBytes(kSecRandomDefault, aeadNonceSize, &nonce) == errSecSuccess else {
             throw ShieldError.randomGenerationFailed
         }
 
-        // Counter prefix (8 bytes of zeros)
-        let counter = [UInt8](repeating: 0, count: 8)
-
-        // Timestamp in milliseconds (little-endian)
-        let timestampMs = Int64(Date().timeIntervalSince1970 * 1000)
-        var timestamp = [UInt8](repeating: 0, count: 8)
-        for i in 0..<8 {
-            timestamp[i] = UInt8(truncatingIfNeeded: timestampMs >> (i * 8))
-        }
-
-        // Random padding: 32-128 bytes (rejection sampling)
+        // Random padding: 32-128 bytes (rejection sampling to avoid modulo bias).
         let padRange = maxPadding - minPadding + 1  // 97
         var padLen = 0
         var buf = [UInt8](repeating: 0, count: 1)
@@ -145,98 +254,110 @@ public class Shield {
             throw ShieldError.randomGenerationFailed
         }
 
-        // Data to encrypt: counter || timestamp || pad_len || padding || plaintext
-        var dataToEncrypt = counter + timestamp + [UInt8(padLen)] + padding + plaintext
-
-        // Generate keystream and XOR (using encryption subkey)
-        let keystream = generateKeystream(key: encKey, nonce: nonce, length: dataToEncrypt.count)
-        var ciphertext = [UInt8](repeating: 0, count: dataToEncrypt.count)
-        for i in 0..<dataToEncrypt.count {
-            ciphertext[i] = dataToEncrypt[i] ^ keystream[i]
-        }
-
-        // Compute HMAC over nonce || ciphertext (using MAC subkey)
-        let macData = nonce + ciphertext
-        let mac = hmacSha256(key: macKey, data: macData)
-
-        // Format: nonce || ciphertext || mac
-        return nonce + ciphertext + Array(mac.prefix(macSize))
+        let timestampMs = Int64(Date().timeIntervalSince1970 * 1000)
+        return try sealDeterministic(aeadKey: aeadKey, suite: suite, salt: salt, nonce: nonce,
+                                     timestampMs: timestampMs, padLen: padLen, padding: padding,
+                                     plaintext: plaintext)
     }
 
-    private static func decryptWithSeparatedKeys(_ encKey: [UInt8], macKey: [UInt8], ciphertext encrypted: [UInt8], maxAgeMs: Int64?) throws -> [UInt8] {
-        guard encrypted.count >= minCiphertextSize else {
+    /// Deterministic AEAD seal over fully specified inputs (used for conformance
+    /// vectors and wrapped by the randomized `seal`).
+    public static func sealDeterministic(aeadKey: [UInt8], suite: UInt8, salt: [UInt8]?, nonce: [UInt8],
+                                         timestampMs: Int64, padLen: Int, padding: [UInt8],
+                                         plaintext: [UInt8]) throws -> [UInt8] {
+        let aad = buildAad(suite: suite, salt: salt)
+
+        var timestamp = [UInt8](repeating: 0, count: 8)
+        for i in 0..<8 {
+            timestamp[i] = UInt8(truncatingIfNeeded: timestampMs >> (i * 8))
+        }
+        let inner = timestamp + [UInt8(padLen)] + padding + plaintext
+
+        let ctTag = try aeadSeal(suite: suite, key: aeadKey, nonce: nonce, aad: aad, plaintext: inner)
+        return aad + nonce + ctTag
+    }
+
+    /// Open an AEAD ciphertext, validate the inner layout and freshness window.
+    /// `aadLen` is the offset of the nonce (= len(version||suite||[salt])).
+    public static func openCiphertext(aeadKey: [UInt8], suite: UInt8, encrypted: [UInt8],
+                                      aadLen: Int, maxAgeMs: Int64?) throws -> [UInt8] {
+        guard encrypted.count >= aadLen + aeadNonceSize + tagSize else {
+            throw ShieldError.ciphertextTooShort
+        }
+        let aad = Array(encrypted[0..<aadLen])
+        let nonce = Array(encrypted[aadLen..<(aadLen + aeadNonceSize)])
+        let ctTag = Array(encrypted[(aadLen + aeadNonceSize)...])
+
+        let inner = try aeadOpen(suite: suite, key: aeadKey, nonce: nonce, aad: aad, ctTag: ctTag)
+
+        guard inner.count >= innerHeaderSize else {
+            throw ShieldError.authenticationFailed
+        }
+        var timestampMs: Int64 = 0
+        for i in 0..<8 {
+            timestampMs |= Int64(inner[i]) << (i * 8)
+        }
+        let padLen = Int(inner[8])
+        guard padLen >= minPadding && padLen <= maxPadding else {
+            throw ShieldError.authenticationFailed
+        }
+        let dataStart = innerHeaderSize + padLen
+        guard inner.count >= dataStart else {
             throw ShieldError.ciphertextTooShort
         }
 
-        // Parse components
-        let nonce = Array(encrypted.prefix(nonceSize))
-        let ciphertext = Array(encrypted[nonceSize..<(encrypted.count - macSize)])
-        let receivedMac = Array(encrypted.suffix(macSize))
-
-        // Verify MAC (using MAC subkey)
-        let macData = nonce + ciphertext
-        let expectedMac = Array(hmacSha256(key: macKey, data: macData).prefix(macSize))
-
-        guard constantTimeEquals(receivedMac, expectedMac) else {
-            throw ShieldError.authenticationFailed
-        }
-
-        // Decrypt (using encryption subkey)
-        let keystream = generateKeystream(key: encKey, nonce: nonce, length: ciphertext.count)
-        var decrypted = [UInt8](repeating: 0, count: ciphertext.count)
-        for i in 0..<ciphertext.count {
-            decrypted[i] = ciphertext[i] ^ keystream[i]
-        }
-
-        // Auto-detect v2 by timestamp range
-        if decrypted.count >= v2HeaderSize {
-            var timestampMs: Int64 = 0
-            for i in 0..<8 {
-                timestampMs |= Int64(decrypted[8 + i]) << (i * 8)
-            }
-
-            if timestampMs >= minTimestampMs && timestampMs <= maxTimestampMs {
-                // v2 format detected
-                let padLen = Int(decrypted[16])
-
-                guard padLen >= minPadding && padLen <= maxPadding else {
-                    throw ShieldError.authenticationFailed
-                }
-
-                let dataStart = v2HeaderSize + padLen
-                guard decrypted.count >= dataStart else {
-                    throw ShieldError.ciphertextTooShort
-                }
-
-                if let maxAge = maxAgeMs {
-                    let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-                    let age = nowMs - timestampMs
-                    if timestampMs > nowMs + 5000 || age > maxAge {
-                        throw ShieldError.authenticationFailed
-                    }
-                }
-
-                return Array(decrypted[dataStart...])
+        if let maxAge = maxAgeMs {
+            let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+            let age = nowMs - timestampMs
+            if timestampMs > nowMs + 5000 || age > maxAge {
+                throw ShieldError.authenticationFailed
             }
         }
 
-        // v1 format: skip counter (8 bytes)
-        return Array(decrypted.dropFirst(8))
+        return Array(inner[dataStart...])
     }
 
-    private static func generateKeystream(key: [UInt8], nonce: [UInt8], length: Int) -> [UInt8] {
-        let numBlocks = (length + 31) / 32
-        var keystream = [UInt8]()
-        keystream.reserveCapacity(numBlocks * 32)
-
-        for i in 0..<numBlocks {
-            var block = key + nonce
-            block.append(contentsOf: withUnsafeBytes(of: UInt32(i).littleEndian) { Array($0) })
-            let hash = sha256(block)
-            keystream.append(contentsOf: hash)
+    /// AEAD seal: returns ciphertext||tag.
+    private static func aeadSeal(suite: UInt8, key: [UInt8], nonce: [UInt8], aad: [UInt8], plaintext: [UInt8]) throws -> [UInt8] {
+        let symKey = SymmetricKey(data: Data(key))
+        if suite == suiteAesGcm {
+            let box = try AES.GCM.seal(Data(plaintext),
+                                       using: symKey,
+                                       nonce: try AES.GCM.Nonce(data: Data(nonce)),
+                                       authenticating: Data(aad))
+            return Array(box.ciphertext) + Array(box.tag)
+        } else if suite == suiteChaCha20Poly1305 {
+            let box = try ChaChaPoly.seal(Data(plaintext),
+                                          using: symKey,
+                                          nonce: try ChaChaPoly.Nonce(data: Data(nonce)),
+                                          authenticating: Data(aad))
+            return Array(box.ciphertext) + Array(box.tag)
         }
+        throw ShieldError.invalidVersion
+    }
 
-        return Array(keystream.prefix(length))
+    /// AEAD open: returns plaintext, throws on authentication failure.
+    private static func aeadOpen(suite: UInt8, key: [UInt8], nonce: [UInt8], aad: [UInt8], ctTag: [UInt8]) throws -> [UInt8] {
+        guard ctTag.count >= tagSize else {
+            throw ShieldError.authenticationFailed
+        }
+        let ct = Array(ctTag[0..<(ctTag.count - tagSize)])
+        let tag = Array(ctTag[(ctTag.count - tagSize)...])
+        let symKey = SymmetricKey(data: Data(key))
+        do {
+            if suite == suiteAesGcm {
+                let box = try AES.GCM.SealedBox(nonce: try AES.GCM.Nonce(data: Data(nonce)),
+                                                ciphertext: Data(ct), tag: Data(tag))
+                return Array(try AES.GCM.open(box, using: symKey, authenticating: Data(aad)))
+            } else if suite == suiteChaCha20Poly1305 {
+                let box = try ChaChaPoly.SealedBox(nonce: try ChaChaPoly.Nonce(data: Data(nonce)),
+                                                   ciphertext: Data(ct), tag: Data(tag))
+                return Array(try ChaChaPoly.open(box, using: symKey, authenticating: Data(aad)))
+            }
+        } catch {
+            throw ShieldError.authenticationFailed
+        }
+        throw ShieldError.invalidVersion
     }
 
     // MARK: - Crypto Utilities
@@ -268,7 +389,7 @@ public class Shield {
 
         passwordData.withUnsafeBytes { passwordBuffer in
             salt.withUnsafeBytes { saltBuffer in
-                CCKeyDerivationPBKDF(
+                _ = CCKeyDerivationPBKDF(
                     CCPBKDFAlgorithm(kCCPBKDF2),
                     passwordBuffer.baseAddress?.assumingMemoryBound(to: Int8.self),
                     passwordData.count,
@@ -315,6 +436,8 @@ public enum ShieldError: Error {
     case invalidKeySize
     case ciphertextTooShort
     case authenticationFailed
+    case streamTruncated
+    case invalidVersion
     case randomGenerationFailed
     case lamportKeyUsed
     case replayDetected

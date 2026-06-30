@@ -1,9 +1,34 @@
 //! Shield Secure Channel - TLS/SSH-like secure transport using symmetric crypto.
 //!
 //! Provides encrypted bidirectional communication with:
-//! - PAKE-based handshake (no certificates needed)
-//! - Forward secrecy via key ratcheting
+//! - Pre-shared-key handshake (no certificates needed)
+//! - Forward secrecy *of message keys* via key ratcheting (see limits below)
 //! - Message authentication and replay protection
+//!
+//! # Security limits — read before use
+//!
+//! The handshake is a **pre-shared-key** handshake, **not** a true PAKE
+//! (Password-Authenticated Key Exchange), even though it is built on the
+//! [`PAKEExchange`] helper. Each side's handshake contribution is a
+//! deterministic function of the shared secret, `HMAC(PBKDF2(secret, salt),
+//! role)`, and both the salt and the contribution are transmitted in the clear
+//! during `ClientHello`/`ServerHello`/`Finished`. An attacker who records one
+//! handshake can therefore run an **offline dictionary attack**: guess a
+//! password, recompute the contribution, and compare. The 600 000-iteration
+//! PBKDF2 only slows each guess.
+//!
+//! Consequences:
+//! - **Use a high-entropy shared secret only** (≥128 bits, e.g. a random key or
+//!   long diceware passphrase). With such a secret the offline search is
+//!   infeasible and the channel is sound.
+//! - **Do not** bootstrap a channel from a low-entropy human password.
+//! - The ratchet gives forward secrecy of *individual message keys* going
+//!   forward, but it does **not** protect against compromise of the long-term
+//!   shared secret: anyone who learns (or brute-forces) that secret can
+//!   re-derive the session from a recorded transcript. For real password-based
+//!   or asymmetric forward-secret establishment, use the X25519 + ML-KEM-768
+//!   hybrid KEX (`pqhybrid`, `pq` feature) and feed its output key here via the
+//!   pre-shared-key path.
 //!
 //! # Example
 //!
@@ -67,7 +92,7 @@ enum HandshakeType {
 /// Channel configuration.
 #[derive(Clone)]
 pub struct ChannelConfig {
-    /// Shared password for PAKE.
+    /// Shared secret for the pre-shared-key handshake (use high entropy).
     password: String,
     /// Service identifier (domain binding).
     service: String,
@@ -199,7 +224,7 @@ impl HandshakeState {
         // CRITICAL: Include password-derived key in session key computation
         // This ensures different passwords produce different session keys
         // even though contributions are exchanged.
-        let base_key = PAKEExchange::combine(&[self.local_contribution, remote]);
+        let base_key = PAKEExchange::combine(&[self.local_contribution, remote])?;
 
         // Mix in the password-derived secret that wasn't exchanged
         let password_key = PAKEExchange::derive(
@@ -209,10 +234,18 @@ impl HandshakeState {
             Some(config.iterations),
         );
 
-        // Final session key = HMAC-SHA256(base_key, password_key)
-        // Using keyed HMAC instead of SHA256(key || data) to prevent length-extension
+        // Final session key = HMAC-SHA256(base_key, password_key || service).
+        // Binding the service identifier provides domain separation: the same
+        // shared secret used for two different services derives two different
+        // session keys, so a credential provisioned for one service cannot
+        // establish a channel for another. `password_key` is a fixed 32 bytes,
+        // so the concatenation is unambiguous across implementations.
+        // Keyed HMAC (not SHA256(key || data)) avoids length-extension.
         let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &base_key);
-        let tag = hmac::sign(&hmac_key, &password_key);
+        let mut mac_input = Vec::with_capacity(password_key.len() + config.service.len());
+        mac_input.extend_from_slice(&password_key);
+        mac_input.extend_from_slice(config.service.as_bytes());
+        let tag = hmac::sign(&hmac_key, &mac_input);
         let mut result = [0u8; 32];
         result.copy_from_slice(&tag.as_ref()[..32]);
         Ok(result)
@@ -221,10 +254,15 @@ impl HandshakeState {
 
 /// Shield secure channel for encrypted communication.
 ///
-/// Provides TLS-like security using only symmetric cryptography:
-/// - PAKE handshake establishes shared key from password
-/// - `RatchetSession` provides forward secrecy
+/// Provides TLS-like transport using only symmetric cryptography:
+/// - Pre-shared-key handshake establishes a session key from the shared secret
+/// - `RatchetSession` provides forward secrecy of per-message keys
 /// - All messages authenticated with HMAC
+///
+/// **Security limit:** the handshake is not a true PAKE and exposes the shared
+/// secret to an offline dictionary attack from a recorded transcript. Supply a
+/// **high-entropy** secret only. See the [module-level security
+/// limits](crate::channel).
 pub struct ShieldChannel<S> {
     stream: S,
     session: RatchetSession,
@@ -235,7 +273,9 @@ pub struct ShieldChannel<S> {
 impl<S: Read + Write> ShieldChannel<S> {
     /// Connect as client (initiator).
     ///
-    /// Performs PAKE handshake and establishes encrypted channel.
+    /// Performs the pre-shared-key handshake and establishes an encrypted
+    /// channel. The shared secret must be high-entropy (see [security
+    /// limits](crate::channel)).
     ///
     /// # Arguments
     /// * `stream` - Underlying transport (TCP, etc.)
@@ -640,6 +680,67 @@ mod tests {
     }
 
     #[test]
+    fn test_session_key_depends_on_service() {
+        // Same password, salt, and contributions but a different service must
+        // yield a different session key: a shared secret provisioned for one
+        // service must not establish a channel for another (domain separation).
+        let salt = [7u8; 16];
+        let contribution = [9u8; 32];
+
+        let state = HandshakeState {
+            salt,
+            local_contribution: contribution,
+            remote_contribution: Some(contribution),
+            is_initiator: true,
+        };
+
+        let config_a = ChannelConfig::new("same-password", "service-a");
+        let config_b = ChannelConfig::new("same-password", "service-b");
+
+        let key_a = state.compute_session_key(&config_a).unwrap();
+        let key_b = state.compute_session_key(&config_b).unwrap();
+
+        assert_ne!(
+            key_a, key_b,
+            "session key must be bound to the service identifier"
+        );
+    }
+
+    #[test]
+    fn test_session_key_conformance_vector() {
+        // Golden vector locking the Rust session-key derivation. The sync and
+        // async Rust channels must derive this exact key from these fixed
+        // inputs (see the matching async test) so they interoperate, and it
+        // pins the derivation against accidental change. NOTE: the Go/Python/JS
+        // bindings use a SHA256-based derivation rather than this HMAC one, so
+        // they do NOT share this vector (see CHANGES-FROM-ORIGINAL: cross-
+        // language channel derivations are not interoperable today).
+        //
+        //   salt                = 16 x 0x01
+        //   local_contribution  = 32 x 0x02
+        //   remote_contribution = 32 x 0x03
+        //   password            = "conformance-secret"
+        //   service             = "shield.conformance"
+        //   iterations          = 600000
+        let state = HandshakeState {
+            salt: [0x01; 16],
+            local_contribution: [0x02; 32],
+            remote_contribution: Some([0x03; 32]),
+            is_initiator: true,
+        };
+        let config = ChannelConfig::new("conformance-secret", "shield.conformance");
+
+        let key = state.compute_session_key(&config).unwrap();
+        // c81854ce5fcbcf6f4db68b2a8b389366232b1707fa057a7251d6536bf529183d
+        let expected: [u8; 32] = [
+            0xc8, 0x18, 0x54, 0xce, 0x5f, 0xcb, 0xcf, 0x6f, 0x4d, 0xb6, 0x8b, 0x2a, 0x8b, 0x38,
+            0x93, 0x66, 0x23, 0x2b, 0x17, 0x07, 0xfa, 0x05, 0x7a, 0x72, 0x51, 0xd6, 0x53, 0x6b,
+            0xf5, 0x29, 0x18, 0x3d,
+        ];
+        assert_eq!(key, expected, "session key conformance vector mismatch");
+    }
+
+    #[test]
     fn test_channel_handshake() {
         let (client_stream, server_stream) = MockStream::pair();
         let config = ChannelConfig::new("test-password", "test.service");
@@ -724,10 +825,10 @@ mod tests {
     #[test]
     fn test_config_builder() {
         let config = ChannelConfig::new("password", "service")
-            .with_iterations(100_000)
+            .with_iterations(600_000)
             .with_timeout(5_000);
 
-        assert_eq!(config.iterations, 100_000);
+        assert_eq!(config.iterations, 600_000);
         assert_eq!(config.handshake_timeout_ms, 5_000);
     }
 
@@ -820,14 +921,15 @@ mod tests {
         let client_result = ShieldChannel::connect(client_stream, &client_config);
         let server_result = server_handle.join().unwrap();
 
-        // Different services should still connect (service is metadata, not part of key)
-        // But they will have different session keys due to different service in PAKE
-        // This test verifies the behavior - adjust based on actual design
-        if let (Ok(client), Ok(server)) = (client_result, server_result) {
-            // If both succeed, verify services are different
-            assert_eq!(client.service(), "service1");
-            assert_eq!(server.service(), "service2");
-        }
+        // The service is bound into the session key for domain separation, so the
+        // same password under two different services derives two different session
+        // keys. The handshake confirmation must therefore FAIL on at least one
+        // side: a credential for "service1" cannot establish a channel as
+        // "service2".
+        assert!(
+            client_result.is_err() || server_result.is_err(),
+            "mismatched services must not establish a channel"
+        );
     }
 
     #[test]

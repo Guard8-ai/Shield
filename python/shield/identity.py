@@ -23,6 +23,16 @@ import base64
 from typing import Optional, Dict, List
 from dataclasses import dataclass, field, asdict
 
+from .core import Shield
+
+# Per-user key-derivation parameters.
+# CR-1: each identity gets a cryptographically random 16-byte salt (stored
+#   below), so two users with the same password derive different keys and no
+#   precomputed table built from a public identifier (e.g. the user_id) helps.
+# CR-2: 600,000 PBKDF2-HMAC-SHA256 iterations (OWASP 2023 floor).
+SALT_SIZE = 16
+PBKDF2_ITERATIONS = 600_000
+
 
 @dataclass
 class Identity:
@@ -30,6 +40,7 @@ class Identity:
     user_id: str
     display_name: str
     verification_key: bytes
+    salt: bytes = b""
     created_at: int = field(default_factory=lambda: int(time.time()))
     attributes: Dict = field(default_factory=dict)
 
@@ -39,6 +50,7 @@ class Identity:
             'user_id': self.user_id,
             'display_name': self.display_name,
             'verification_key': base64.b64encode(self.verification_key).decode(),
+            'salt': base64.b64encode(self.salt).decode(),
             'created_at': self.created_at,
             'attributes': self.attributes
         }
@@ -50,6 +62,7 @@ class Identity:
             user_id=data['user_id'],
             display_name=data['display_name'],
             verification_key=base64.b64decode(data['verification_key']),
+            salt=base64.b64decode(data['salt']) if data.get('salt') else b"",
             created_at=data['created_at'],
             attributes=data.get('attributes', {})
         )
@@ -120,15 +133,19 @@ class IdentityProvider:
         if user_id in self._identities:
             raise ValueError(f"User {user_id} already exists")
 
-        # Derive user's verification key from password
-        salt = hashlib.sha256(f"user:{user_id}".encode()).digest()
-        user_key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+        # Derive user's verification key from password.
+        # CR-1: random per-user salt (not a deterministic hash of the public
+        # user_id); CR-2: 600,000 iterations. The salt is stored on the
+        # identity so authenticate() can re-derive.
+        salt = secrets.token_bytes(SALT_SIZE)
+        user_key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, PBKDF2_ITERATIONS)
         verification_key = hashlib.sha256(b'verify:' + user_key).digest()
 
         identity = Identity(
             user_id=user_id,
             display_name=display_name,
             verification_key=verification_key,
+            salt=salt,
             attributes=attributes or {}
         )
 
@@ -159,9 +176,8 @@ class IdentityProvider:
 
         identity = self._identities[user_id]
 
-        # Verify password
-        salt = hashlib.sha256(f"user:{user_id}".encode()).digest()
-        user_key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+        # Verify password using the per-user salt stored at registration (CR-1/CR-2).
+        user_key = hashlib.pbkdf2_hmac('sha256', password.encode(), identity.salt, PBKDF2_ITERATIONS)
         verification_key = hashlib.sha256(b'verify:' + user_key).digest()
 
         if not hmac.compare_digest(verification_key, identity.verification_key):
@@ -400,41 +416,31 @@ class SecureSession:
         return False
 
     def encrypt(self, data: bytes) -> bytes:
-        """Encrypt with current key (auto-rotates if needed)."""
+        """Encrypt with current key (auto-rotates if needed).
+
+        The payload is sealed with the standard AEAD core (AES-256-GCM via the
+        v4 wire format) under the current per-version session key. The 4-byte key
+        version is prepended so ``decrypt`` can select the right key after a
+        rotation. The freshness window is disabled because session payloads may
+        be read back at any point within the rotation interval; the AEAD tag
+        still provides integrity and authenticity.
+        """
         self._maybe_rotate()
 
         version = struct.pack('<I', self._key_version)
-        nonce = secrets.token_bytes(16)
-
-        # Simple XOR cipher with SHA256 keystream
-        keystream = b''
-        for i in range((len(data) + 31) // 32):
-            keystream += hashlib.sha256(
-                self._current_key + nonce + struct.pack('<I', i)
-            ).digest()
-
-        ciphertext = bytes(a ^ b for a, b in zip(data, keystream[:len(data)]))
-        mac = hmac.new(
-            self._current_key,
-            version + nonce + ciphertext,
-            hashlib.sha256
-        ).digest()[:16]
-
-        return version + nonce + ciphertext + mac
+        blob = Shield.with_key(self._current_key, max_age_ms=None).encrypt(data)
+        return version + blob
 
     def decrypt(self, encrypted: bytes) -> Optional[bytes]:
         """Decrypt with appropriate key version."""
         self._maybe_rotate()
 
-        if len(encrypted) < 36:
+        if len(encrypted) < 4:
             return None
 
         version = struct.unpack('<I', encrypted[:4])[0]
-        nonce = encrypted[4:20]
-        ciphertext = encrypted[20:-16]
-        mac = encrypted[-16:]
 
-        # Find appropriate key
+        # Find appropriate key for this version.
         if version == self._key_version:
             key = self._current_key
         elif version < self._key_version:
@@ -445,21 +451,4 @@ class SecureSession:
         else:
             return None
 
-        # Verify MAC
-        expected_mac = hmac.new(
-            key,
-            encrypted[:-16],
-            hashlib.sha256
-        ).digest()[:16]
-
-        if not hmac.compare_digest(mac, expected_mac):
-            return None
-
-        # Decrypt
-        keystream = b''
-        for i in range((len(ciphertext) + 31) // 32):
-            keystream += hashlib.sha256(
-                key + nonce + struct.pack('<I', i)
-            ).digest()
-
-        return bytes(a ^ b for a, b in zip(ciphertext, keystream[:len(ciphertext)]))
+        return Shield.with_key(key, max_age_ms=None).decrypt(encrypted[4:])

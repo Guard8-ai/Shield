@@ -175,8 +175,10 @@ type Identity struct {
 
 // NewIdentity creates a new identity.
 func NewIdentity(id, password string) *Identity {
+	// Deterministic per-identity derivation (the same id+password must
+	// reproduce the same key). CR-2: 600,000 iterations (OWASP 2023 floor).
 	salt := sha256.Sum256([]byte("identity:" + id))
-	key := pbkdf2.Key([]byte(password), salt[:], 100000, KeySize, sha256.New)
+	key := pbkdf2.Key([]byte(password), salt[:], 600000, KeySize, sha256.New)
 
 	identity := &Identity{
 		ID:       id,

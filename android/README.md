@@ -1,16 +1,16 @@
-# Shield - EXPTIME-Secure Encryption (Android)
+# Shield - Authenticated Symmetric Encryption (Android)
 
 [![Maven Central](https://img.shields.io/maven-central/v/ai.dikestra/shield-android.svg)](https://search.maven.org/artifact/ai.dikestra/shield-android)
 [![API](https://img.shields.io/badge/API-23%2B-brightgreen.svg)](https://android-arsenal.com/api?level=23)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Symmetric cryptography with proven exponential-time security for Android.
+Symmetric authenticated encryption with 256-bit keys (~128-bit post-quantum security) for Android.
 
 ## Why Shield?
 
-Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Breaking requires 2^256 operations - no shortcut exists:
+Shield builds on well-established symmetric primitives (SHA-256, HMAC-SHA256, PBKDF2). A 256-bit key gives 256-bit classical and ~128-bit post-quantum brute-force resistance, assuming these primitives are secure:
 
-- **PBKDF2-SHA256** for key derivation (100,000 iterations)
+- **PBKDF2-SHA256** for key derivation (600,000 iterations)
 - **SHA256-based stream cipher** (AES-256-CTR equivalent)
 - **HMAC-SHA256** for authentication
 - **Android Keystore** for hardware-backed key storage

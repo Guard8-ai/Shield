@@ -54,7 +54,9 @@ function shieldMiddleware(options) {
         // Store original json method
         const originalJson = res.json.bind(res);
 
-        // Override json method to encrypt
+        // Override json method to encrypt.
+        // NOTE: only res.json is wrapped — res.send/res.end/streaming responses
+        // are NOT encrypted by this middleware.
         res.json = (data) => {
             try {
                 const plaintext = Buffer.from(JSON.stringify(data));
@@ -66,9 +68,14 @@ function shieldMiddleware(options) {
                     data: encryptedB64
                 });
             } catch (err) {
-                // On error, send original data
+                // Fail CLOSED: never fall back to sending the plaintext response
+                // (that would silently downgrade an "encrypted" endpoint to
+                // cleartext). Respond with an error and no sensitive body.
                 console.error('Shield encryption error:', err);
-                return originalJson(data);
+                if (typeof res.status === 'function') {
+                    res.status(500);
+                }
+                return originalJson({ encrypted: false, error: 'Encryption failed' });
             }
         };
 

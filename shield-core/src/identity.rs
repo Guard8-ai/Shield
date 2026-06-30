@@ -14,6 +14,7 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
 use crate::error::{Result, ShieldError};
+use crate::shield::Shield;
 
 /// Generate keystream using HMAC-SHA256 (keyed PRF).
 fn generate_keystream(key: &[u8], nonce: &[u8], length: usize) -> Result<Vec<u8>> {
@@ -96,7 +97,9 @@ pub struct IdentityProvider {
 }
 
 impl IdentityProvider {
-    const ITERATIONS: u32 = 100_000;
+    // CR-2: 600,000 PBKDF2-HMAC-SHA256 iterations (OWASP 2023 floor).
+    // (Salt is already a per-user random 16 bytes, see register().)
+    const ITERATIONS: u32 = 600_000;
 
     /// Create new identity provider.
     #[must_use]
@@ -522,21 +525,6 @@ impl IdentityProvider {
     }
 }
 
-/// Derive separated encryption and MAC subkeys for session operations.
-fn derive_session_subkeys(key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
-    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, key);
-
-    let enc_tag = hmac::sign(&hmac_key, b"shield-session-encrypt");
-    let mut enc_key = [0u8; 32];
-    enc_key.copy_from_slice(&enc_tag.as_ref()[..32]);
-
-    let mac_tag = hmac::sign(&hmac_key, b"shield-session-authenticate");
-    let mut mac_key = [0u8; 32];
-    mac_key.copy_from_slice(&mac_tag.as_ref()[..32]);
-
-    (enc_key, mac_key)
-}
-
 /// Secure session with automatic key rotation.
 pub struct SecureSession {
     master_key: [u8; 32],
@@ -605,37 +593,26 @@ impl SecureSession {
     }
 
     /// Encrypt session data.
+    ///
+    /// The payload is sealed with the standard AEAD core (AES-256-GCM via the v4
+    /// wire format) under the current per-version session key. The 4-byte key
+    /// version is prepended so `decrypt` can select the right key after a
+    /// rotation. The freshness window is disabled because session payloads may be
+    /// read back long after they were written (anywhere within the rotation
+    /// interval); the AEAD tag still provides integrity and authenticity.
     pub fn encrypt(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         self.maybe_rotate();
 
-        let key = self
+        let key = *self
             .keys
             .get(&self.key_version)
             .ok_or(ShieldError::UnknownVersion(self.key_version))?;
-        let (enc_key, mac_key) = derive_session_subkeys(key);
-        let nonce: [u8; 16] = crate::random::random_bytes()?;
 
-        let keystream = generate_keystream(&enc_key, &nonce, data.len())?;
-        let ciphertext: Vec<u8> = data
-            .iter()
-            .zip(keystream.iter())
-            .map(|(p, k)| p ^ k)
-            .collect();
+        let blob = Shield::with_key(key).with_max_age(None).encrypt(data)?;
 
-        let version_bytes = self.key_version.to_le_bytes();
-
-        let hmac_signing_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
-        let mut hmac_data = Vec::with_capacity(4 + 16 + ciphertext.len());
-        hmac_data.extend_from_slice(&version_bytes);
-        hmac_data.extend_from_slice(&nonce);
-        hmac_data.extend_from_slice(&ciphertext);
-        let tag = hmac::sign(&hmac_signing_key, &hmac_data);
-
-        let mut result = Vec::with_capacity(4 + 16 + ciphertext.len() + 16);
-        result.extend_from_slice(&version_bytes);
-        result.extend_from_slice(&nonce);
-        result.extend_from_slice(&ciphertext);
-        result.extend_from_slice(&tag.as_ref()[..16]);
+        let mut result = Vec::with_capacity(4 + blob.len());
+        result.extend_from_slice(&self.key_version.to_le_bytes());
+        result.extend_from_slice(&blob);
 
         Ok(result)
     }
@@ -644,34 +621,17 @@ impl SecureSession {
     pub fn decrypt(&mut self, encrypted: &[u8]) -> Option<Vec<u8>> {
         self.maybe_rotate();
 
-        if encrypted.len() < 36 {
+        if encrypted.len() < 4 {
             return None;
         }
 
         let version = u32::from_le_bytes(encrypted[..4].try_into().ok()?);
-        let nonce = &encrypted[4..20];
-        let ciphertext = &encrypted[20..encrypted.len() - 16];
-        let mac = &encrypted[encrypted.len() - 16..];
+        let key = *self.keys.get(&version)?;
 
-        let key = self.keys.get(&version)?;
-        let (enc_key, mac_key) = derive_session_subkeys(key);
-
-        // Verify MAC with mac_key
-        let hmac_signing_key = hmac::Key::new(hmac::HMAC_SHA256, &mac_key);
-        let expected_tag = hmac::sign(&hmac_signing_key, &encrypted[..encrypted.len() - 16]);
-
-        if mac.ct_eq(&expected_tag.as_ref()[..16]).unwrap_u8() != 1 {
-            return None;
-        }
-
-        let keystream = generate_keystream(&enc_key, nonce, ciphertext.len()).ok()?;
-        let plaintext: Vec<u8> = ciphertext
-            .iter()
-            .zip(keystream.iter())
-            .map(|(c, k)| c ^ k)
-            .collect();
-
-        Some(plaintext)
+        Shield::with_key(key)
+            .with_max_age(None)
+            .decrypt(&encrypted[4..])
+            .ok()
     }
 
     /// Get current key version (for testing).
@@ -820,5 +780,37 @@ mod tests {
         let mut encrypted = session.encrypt(b"data").unwrap();
         encrypted[20] ^= 0xFF;
         assert!(session.decrypt(&encrypted).is_none());
+    }
+
+    #[test]
+    fn test_secure_session_uses_standard_aead_format() {
+        // The session payload must be the standard v4 key-mode AEAD blob, not a
+        // bespoke keystream construction: 4-byte LE version, then the pre-shared
+        // -key AEAD version byte 0x13 and the AES-256-GCM suite byte 0x01.
+        let mut session = SecureSession::new([7u8; 32], 3600, 3);
+        let encrypted = session.encrypt(b"session data").unwrap();
+        assert_eq!(&encrypted[..4], &1u32.to_le_bytes()); // initial key version
+        assert_eq!(encrypted[4], 0x13); // VERSION_KEY (pre-shared-key AEAD)
+        assert_eq!(encrypted[5], 0x01); // SUITE_AES_256_GCM
+                                        // Length obfuscation: two encryptions of the same input differ and are
+                                        // not trivially the plaintext length.
+        let again = session.encrypt(b"session data").unwrap();
+        assert_ne!(encrypted, again);
+    }
+
+    #[test]
+    fn test_secure_session_rotation_old_key_decrypt() {
+        // Encrypt under v1, force a rotation, and confirm the ciphertext still
+        // decrypts via the retained old key (version selection preserved).
+        let mut session = SecureSession::new([3u8; 32], 3600, 3);
+        let encrypted = session.encrypt(b"before rotation").unwrap();
+        assert_eq!(session.key_version(), 1);
+
+        session.rotation_interval = 0; // next op rotates
+        session.maybe_rotate();
+        assert!(session.key_version() >= 2);
+
+        let decrypted = session.decrypt(&encrypted).unwrap();
+        assert_eq!(decrypted.as_slice(), b"before rotation");
     }
 }

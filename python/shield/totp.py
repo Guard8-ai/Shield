@@ -27,7 +27,7 @@ class TOTP:
     Compatible with RFC 6238 and common authenticator apps.
 
     Security:
-        Uses HMAC-SHA1/SHA256 with EXPTIME-hard security.
+        Uses HMAC-SHA1/SHA256 for code generation.
         OTP is derived from secret + time, providing second factor.
     """
 

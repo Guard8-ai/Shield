@@ -16,6 +16,7 @@ data class Identity(
     val userId: String,
     val displayName: String,
     val verificationKey: ByteArray,
+    val salt: ByteArray,
     val createdAt: Long,
     val attributes: MutableMap<String, Any> = mutableMapOf()
 ) {
@@ -59,7 +60,7 @@ class IdentityProvider(
     private val identities = mutableMapOf<String, Identity>()
 
     companion object {
-        private const val PBKDF2_ITERATIONS = 100000
+        private const val PBKDF2_ITERATIONS = 600000 // CR-2: OWASP 2023 floor
         private val random = SecureRandom()
     }
 
@@ -83,11 +84,15 @@ class IdentityProvider(
             throw IllegalArgumentException("User $userId already exists")
         }
 
-        val verificationKey = deriveVerificationKey(userId, password)
+        // CR-1: per-user random salt (not a hash of the public userId),
+        // stored on the identity so authenticate() can re-derive.
+        val salt = ByteArray(16).also { random.nextBytes(it) }
+        val verificationKey = deriveVerificationKey(salt, password)
         val identity = Identity(
             userId = userId,
             displayName = displayName,
             verificationKey = verificationKey,
+            salt = salt,
             createdAt = System.currentTimeMillis() / 1000,
             attributes = (attributes?.toMutableMap() ?: mutableMapOf())
         )
@@ -113,7 +118,7 @@ class IdentityProvider(
     ): String? {
         val identity = identities[userId] ?: return null
 
-        val verificationKey = deriveVerificationKey(userId, password)
+        val verificationKey = deriveVerificationKey(identity.salt, password)
         if (!constantTimeEquals(verificationKey, identity.verificationKey)) {
             return null
         }
@@ -274,9 +279,8 @@ class IdentityProvider(
 
     // Private helpers
 
-    private fun deriveVerificationKey(userId: String, password: String): ByteArray {
+    private fun deriveVerificationKey(salt: ByteArray, password: String): ByteArray {
         val md = MessageDigest.getInstance("SHA-256")
-        val salt = md.digest("user:$userId".toByteArray(StandardCharsets.UTF_8))
 
         val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
         val spec = PBEKeySpec(password.toCharArray(), salt, PBKDF2_ITERATIONS, 256)

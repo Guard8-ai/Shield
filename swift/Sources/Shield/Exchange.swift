@@ -4,16 +4,24 @@ import CommonCrypto
 /// Key Exchange - Key exchange without public-key crypto.
 ///
 /// Methods:
-/// 1. PAKE: Password-Authenticated Key Exchange
+/// 1. PAKE: pre-shared-key handshake (NOT a true PAKE; see PAKEExchange below)
 /// 2. QR: QR codes, base64 for manual exchange
 /// 3. Key Splitting: XOR-based secret sharing
 
-/// Password-Authenticated Key Exchange.
+/// Pre-shared-key handshake (NOT a true PAKE despite the name).
 ///
-/// Both parties derive a shared key from a common password.
-/// Uses role binding to prevent reflection attacks.
+/// Both parties derive a shared key from a common pre-shared secret, with role
+/// binding to prevent reflection attacks.
+///
+/// SECURITY: The handshake contribution HMAC(PBKDF2(secret, salt), role) is sent
+/// on the wire together with the salt, so a recorded handshake permits an
+/// OFFLINE DICTIONARY ATTACK against a low-entropy secret (PBKDF2 iterations only
+/// slow each guess). Safe ONLY with a high-entropy shared secret (>=128 bits).
+/// For password-based or forward-secret key establishment, use the X25519 +
+/// ML-KEM-768 hybrid KEX (pqhybrid) instead. Type name retained for API
+/// compatibility.
 public enum PAKEExchange {
-    public static let defaultIterations = 200000
+    public static let defaultIterations = 600000 // CR-2: OWASP 2023 floor
 
     /// Derive key contribution from password.
     ///
@@ -21,10 +29,10 @@ public enum PAKEExchange {
     ///   - password: Shared password between parties
     ///   - salt: Public salt (can be exchanged openly)
     ///   - role: Role identifier ('alice', 'bob', 'initiator', etc.)
-    ///   - iterations: PBKDF2 iterations (default: 200000)
+    ///   - iterations: PBKDF2 iterations (default: 600000)
     /// - Returns: 32-byte key contribution
     public static func derive(password: String, salt: [UInt8], role: String,
-                              iterations: Int = 200000) -> [UInt8] {
+                              iterations: Int = 600000) -> [UInt8] {
         let baseKey = pbkdf2(password: password, salt: salt, iterations: iterations, keyLength: 32)
 
         var combined = baseKey

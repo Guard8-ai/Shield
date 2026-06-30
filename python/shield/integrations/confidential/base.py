@@ -10,12 +10,35 @@ import base64
 import hashlib
 import json
 import time
+import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from shield import Shield
+
+
+#: Explains why a Python provider refuses to return ``verified=True``.
+ATTESTATION_NOT_VERIFIED_MESSAGE = (
+    "The Python {tee} attestation provider does NOT cryptographically verify the "
+    "quote/token signature or certificate chain — it only parses evidence and "
+    "compares measurement fields. Returning verified=True from unverified "
+    "evidence would let an attacker forge evidence and release keys "
+    "(TEEKeyManager). This provider is therefore FAIL-CLOSED: use the hardened "
+    "Rust shield-core confidential verifier for production attestation, or pass "
+    "allow_insecure_demo=True to accept unverified evidence in a NON-PRODUCTION "
+    "test/demo only."
+)
+
+
+def warn_insecure_attestation_demo(tee: str) -> None:
+    """Emit a loud warning when a provider is constructed in insecure-demo mode."""
+    warnings.warn(
+        "INSECURE DEMO MODE: " + ATTESTATION_NOT_VERIFIED_MESSAGE.format(tee=tee),
+        UserWarning,
+        stacklevel=3,
+    )
 
 
 class TEEType(Enum):

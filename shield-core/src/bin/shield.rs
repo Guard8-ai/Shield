@@ -62,7 +62,7 @@ fn main() -> ExitCode {
 
 fn print_help() {
     println!(
-        r#"Shield - EXPTIME-Secure Encryption
+        r#"Shield - Authenticated Symmetric Encryption
 
 USAGE:
     shield <COMMAND> [OPTIONS]
@@ -401,12 +401,12 @@ fn cmd_keygen(args: &[String]) -> ExitCode {
 }
 
 fn cmd_info() -> ExitCode {
-    println!("Shield - EXPTIME-Secure Encryption");
-    println!("===================================");
+    println!("Shield - Authenticated Symmetric Encryption");
+    println!("===========================================");
     println!("Version:     {}", env!("CARGO_PKG_VERSION"));
     println!("Algorithm:   SHA256-CTR + HMAC-SHA256");
     println!("Key Size:    256 bits");
-    println!("KDF:         PBKDF2-SHA256 (100,000 iterations)");
+    println!("KDF:         PBKDF2-SHA256 (600,000 iterations)");
     println!("Security:    2^256 operations to break");
     println!();
     println!("Repository:  https://github.com/Dikestra-ai/Shield");

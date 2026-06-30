@@ -67,6 +67,154 @@ namespace Shield.Tests
                 () => shield.Decrypt(encrypted));
         }
 
+        // ============== Security-Fix Tests (CR-1 / CR-2 / CR-3) ==============
+        // Mirrors python/tests/test_core_security_fix.py. C# Decrypt throws
+        // CryptographicException (instead of returning null) on auth failure,
+        // so tamper/version assertions check for that exception.
+
+        private const int SaltSize = Dikestra.Shield.Shield.SaltSize; // 16
+
+        [Fact]
+        public void TestSamePasswordServiceDifferentKeys()
+        {
+            // CR-1: two instances with the same password+service get DIFFERENT
+            // keys, because each gets a random per-instance salt.
+            using var a = new Dikestra.Shield.Shield("hunter2", "github.com");
+            using var b = new Dikestra.Shield.Shield("hunter2", "github.com");
+
+            byte[] msg = Encoding.UTF8.GetBytes("identical plaintext");
+            byte[] ca = a.Encrypt(msg);
+            byte[] cb = b.Encrypt(msg);
+
+            // Salts live at bytes [2..18) of a v4 password-mode ciphertext
+            // (after version + suite).
+            byte[] saltA = ca[2..(2 + SaltSize)];
+            byte[] saltB = cb[2..(2 + SaltSize)];
+            Assert.NotEqual(saltA, saltB);
+
+            // And the derived master keys differ (deterministic-key bug gone).
+            Assert.NotEqual(a.GetKey(), b.GetKey());
+        }
+
+        [Fact]
+        public void TestCrossInstanceRoundtrip()
+        {
+            // Bob (same password+service, different instance salt) decrypts Alice.
+            using var alice = new Dikestra.Shield.Shield("correct horse battery staple", "service.example");
+            using var bob = new Dikestra.Shield.Shield("correct horse battery staple", "service.example");
+
+            byte[] msg = Encoding.UTF8.GetBytes("hello from alice");
+            Assert.Equal(msg, bob.Decrypt(alice.Encrypt(msg)));
+        }
+
+        [Fact]
+        public void TestTamperDetectionAllBytes()
+        {
+            // CR-3: flipping ANY byte (version, salt, nonce, ct, mac) fails auth.
+            using var s = new Dikestra.Shield.Shield("pw", "svc");
+            byte[] ct = s.Encrypt(Encoding.UTF8.GetBytes("secret payload"));
+
+            // Sanity: untampered decrypts.
+            Assert.Equal(Encoding.UTF8.GetBytes("secret payload"), s.Decrypt(ct));
+
+            for (int i = 0; i < ct.Length; i++)
+            {
+                byte[] tampered = (byte[])ct.Clone();
+                tampered[i] ^= 0xFF;
+                Assert.True(
+                    Throws(() => s.Decrypt(tampered)),
+                    $"tamper at byte {i} not detected");
+            }
+        }
+
+        [Fact]
+        public void TestTamperVersionAndSaltBytes()
+        {
+            // Explicitly check the version byte (index 0) and a salt byte (index 2,
+            // after version + suite) are authenticated.
+            using var s = new Dikestra.Shield.Shield("pw", "svc");
+            byte[] ct = s.Encrypt(Encoding.UTF8.GetBytes("data"));
+
+            byte[] flipVersion = (byte[])ct.Clone();
+            flipVersion[0] ^= 0xFF;
+            Assert.True(Throws(() => s.Decrypt(flipVersion)));
+
+            byte[] flipSalt = (byte[])ct.Clone();
+            flipSalt[2] ^= 0xFF;
+            Assert.True(Throws(() => s.Decrypt(flipSalt)));
+        }
+
+        [Fact]
+        public void TestVersionBytes()
+        {
+            // v4: password ciphertext starts with 0x03; key/quick with 0x13.
+            byte[] pwCt = new Dikestra.Shield.Shield("pw", "svc").Encrypt(Encoding.UTF8.GetBytes("x"));
+            Assert.Equal(0x03, pwCt[0]);
+            Assert.Equal(Dikestra.Shield.Shield.VersionPassword, pwCt[0]);
+
+            byte[] key = Dikestra.Shield.Shield.RandomBytes(32);
+            byte[] quickCt = Dikestra.Shield.Shield.QuickEncrypt(key, Encoding.UTF8.GetBytes("x"));
+            Assert.Equal(0x13, quickCt[0]);
+            Assert.Equal(Dikestra.Shield.Shield.VersionKey, quickCt[0]);
+
+            byte[] keyedCt = new Dikestra.Shield.Shield(key).Encrypt(Encoding.UTF8.GetBytes("x"));
+            Assert.Equal(0x13, keyedCt[0]);
+        }
+
+        [Fact]
+        public void TestIterations600k()
+        {
+            // CR-2: PBKDF2 iteration count is 600,000.
+            Assert.Equal(600000, Dikestra.Shield.Shield.Iterations);
+        }
+
+        [Fact]
+        public void TestQuickKeyRoundtrip()
+        {
+            // Pre-shared-key one-shot encrypt/decrypt round-trips; wrong key fails.
+            byte[] key = Dikestra.Shield.Shield.RandomBytes(32);
+            byte[] msg = Encoding.UTF8.GetBytes("pre-shared key message");
+            Assert.Equal(msg, Dikestra.Shield.Shield.QuickDecrypt(key, Dikestra.Shield.Shield.QuickEncrypt(key, msg)));
+
+            byte[] wrongKey = Dikestra.Shield.Shield.RandomBytes(32);
+            byte[] encrypted = Dikestra.Shield.Shield.QuickEncrypt(key, msg);
+            Assert.True(Throws(() => Dikestra.Shield.Shield.QuickDecrypt(wrongKey, encrypted)));
+        }
+
+        [Fact]
+        public void TestExplicitSaltIsHonoredAndStored()
+        {
+            // Passing an explicit salt pins it and it is stored in the header.
+            byte[] salt = Dikestra.Shield.Shield.RandomBytes(SaltSize);
+            using var a = new Dikestra.Shield.Shield("pw", "svc", 60000L, salt);
+            using var b = new Dikestra.Shield.Shield("pw", "svc", 60000L, salt);
+            Assert.Equal(a.GetKey(), b.GetKey()); // same salt -> same key
+
+            byte[] ct = a.Encrypt(Encoding.UTF8.GetBytes("data"));
+            Assert.Equal(salt, ct[2..(2 + SaltSize)]);
+            Assert.Equal(Encoding.UTF8.GetBytes("data"), b.Decrypt(ct));
+        }
+
+        [Fact]
+        public void TestKeyModeRejectsPasswordCiphertext()
+        {
+            // A pre-shared-key instance cannot decrypt a password-mode (0x02) blob.
+            using var pw = new Dikestra.Shield.Shield("pw", "svc");
+            byte[] ct = pw.Encrypt(Encoding.UTF8.GetBytes("x"));
+
+            byte[] key = Dikestra.Shield.Shield.RandomBytes(32);
+            using var keyed = new Dikestra.Shield.Shield(key);
+            Assert.True(Throws(() => keyed.Decrypt(ct)));
+        }
+
+        /// <summary>Returns true if the action throws Crypto/Argument exception (auth failure).</summary>
+        private static bool Throws(Action action)
+        {
+            try { action(); return false; }
+            catch (System.Security.Cryptography.CryptographicException) { return true; }
+            catch (ArgumentException) { return true; }
+        }
+
         // ============== Ratchet Tests ==============
 
         [Fact]

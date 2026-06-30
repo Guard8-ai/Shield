@@ -45,6 +45,8 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    // Post-quantum hybrid KEX: FIPS 203 ML-KEM-768 + X25519 via the audited Bouncy Castle provider.
+    implementation("org.bouncycastle:bcprov-jdk18on:1.79")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
@@ -64,7 +66,7 @@ publishing {
 
             pom {
                 name.set("Shield Android")
-                description.set("EXPTIME-secure encryption for Android")
+                description.set("Authenticated symmetric encryption library")
                 url.set("https://github.com/Dikestra-ai/Shield")
 
                 licenses {

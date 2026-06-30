@@ -8,7 +8,12 @@
     <AssemblyName>Dikestra.Shield</AssemblyName>
     <Version>2.2.0</Version>
     <Authors>Dikestra.ai</Authors>
-    <Description>EXPTIME-Secure Symmetric Encryption Library</Description>
+    <Description>Authenticated symmetric encryption library</Description>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Post-quantum hybrid KEX: FIPS 203 ML-KEM-768 + X25519 via the audited Bouncy Castle provider. -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.1" />
+  </ItemGroup>
 
 </Project>

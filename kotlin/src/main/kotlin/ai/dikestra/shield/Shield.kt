@@ -4,218 +4,261 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
 import java.security.SecureRandom
+import javax.crypto.Cipher
 import javax.crypto.Mac
 import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * Shield - EXPTIME-Secure Symmetric Encryption Library
+ * Shield - Authenticated Symmetric Encryption Library (wire format v4).
  *
- * Uses only symmetric cryptographic primitives with proven exponential-time security:
- * PBKDF2-SHA256, HMAC-SHA256, and SHA256-based stream cipher.
- * Breaking requires 2^256 operations - no shortcut exists.
+ * v4 replaces the previous custom SHA-256 keystream + HMAC construction with a
+ * standard AEAD (AES-256-GCM by default, ChaCha20-Poly1305 optional) from the JCE.
+ * No cryptography is hand-rolled; key derivation uses PBKDF2-HMAC-SHA256 +
+ * HKDF-SHA256-Expand. The wire format matches every other Shield binding
+ * byte-for-byte (see tests/v4_test_vectors.json).
+ *
+ * - Password mode: 0x03 || suite(1) || salt(16) || nonce(12) || ciphertext||tag
+ * - Key mode:       0x13 || suite(1) || nonce(12) || ciphertext||tag
+ *
+ * AAD = version || suite || [salt]; inner plaintext =
+ * timestamp_ms(8 LE) || pad_len(1) || padding(32-128) || message.
  */
-class Shield private constructor(private val key: ByteArray) : AutoCloseable {
+class Shield private constructor(
+    private val key: ByteArray,
+    // Password-mode fields (null in pre-shared-key mode).
+    private val password: String?,
+    private val service: String?,
+    private val iterations: Int,
+    private val salt: ByteArray?,
+    private val maxAgeMs: Long?
+) : AutoCloseable {
 
-    private val encKey: ByteArray  // encryption subkey
-    private val macKey: ByteArray  // authentication subkey
+    private val aeadKey: ByteArray = deriveAeadKey(key)
+    private val suite: Byte = SUITE_AES_GCM
+    // Cache of derived master keys keyed by the hex of the 16-byte salt.
+    private val keyCache: MutableMap<String, ByteArray> = HashMap()
 
     init {
-        val subkeys = deriveSubkeys(key)
-        encKey = subkeys[0]
-        macKey = subkeys[1]
+        if (salt != null) {
+            keyCache[toHex(salt)] = key
+        }
+    }
+
+    /** Derive the 32-byte master key for a given salt (cached by salt). */
+    private fun deriveKey(saltBytes: ByteArray): ByteArray {
+        val saltKey = toHex(saltBytes)
+        keyCache[saltKey]?.let { return it }
+        val serviceBytes = service!!.toByteArray()
+        val pbkdf2Salt = saltBytes + serviceBytes
+        val derived = pbkdf2(password!!, pbkdf2Salt, iterations, KEY_SIZE)
+        keyCache[saltKey] = derived
+        return derived
     }
 
     companion object {
         const val KEY_SIZE = 32
+        // NONCE_SIZE/MAC_SIZE retained at 16 for API compatibility; the base AEAD
+        // cipher uses its own 12-byte nonce / 16-byte tag (below).
         const val NONCE_SIZE = 16
         const val MAC_SIZE = 16
-        const val ITERATIONS = 100_000
-        const val MIN_CIPHERTEXT_SIZE = NONCE_SIZE + 8 + MAC_SIZE
+        const val SALT_SIZE = 16
 
-        // V2 constants
-        const val V2_HEADER_SIZE = 17  // counter(8) + timestamp(8) + pad_len(1)
+        /** PBKDF2 iteration count (OWASP 2023 floor for PBKDF2-HMAC-SHA256). */
+        const val ITERATIONS = 600_000
+
+        // Authenticated version bytes (leading byte of the ciphertext).
+        const val VERSION_PASSWORD: Byte = 0x03  // 0x03 || suite || salt(16) || nonce(12) || ct||tag
+        const val VERSION_KEY: Byte = 0x13       // 0x13 || suite || nonce(12) || ct||tag
+
+        // Cipher-suite identifiers.
+        const val SUITE_AES_GCM: Byte = 0x01
+        const val SUITE_CHACHA20_POLY1305: Byte = 0x02
+
         const val MIN_PADDING = 32
         const val MAX_PADDING = 128
-        const val MIN_TIMESTAMP_MS = 1577836800000L  // 2020-01-01
-        const val MAX_TIMESTAMP_MS = 4102444800000L  // 2100-01-01
         const val DEFAULT_MAX_AGE_MS = 60000L
+
+        // Base-AEAD constants.
+        private const val AEAD_NONCE_SIZE = 12
+        private const val TAG_SIZE = 16
+        private const val INNER_HEADER_SIZE = 9 // timestamp(8) + pad_len(1)
+        private val HKDF_AEAD_INFO = "shield/aead/v4".toByteArray()
 
         private val random = SecureRandom()
 
-        /**
-         * Derive separated encryption and MAC subkeys from master key.
-         */
-        private fun deriveSubkeys(masterKey: ByteArray): Array<ByteArray> {
-            val encKey = hmacSha256(masterKey, "shield-encrypt".toByteArray())
-            val macKey = hmacSha256(masterKey, "shield-authenticate".toByteArray())
-            return arrayOf(encKey, macKey)
+        /** Create Shield from password and service name (password mode). */
+        fun create(
+            password: String,
+            service: String,
+            maxAgeMs: Long? = DEFAULT_MAX_AGE_MS
+        ): Shield = createWithSalt(password, service, randomBytes(SALT_SIZE), ITERATIONS, maxAgeMs)
+
+        /** Create Shield from password and service with an explicit salt and iteration count. */
+        fun createWithSalt(
+            password: String,
+            service: String,
+            salt: ByteArray,
+            iterations: Int = ITERATIONS,
+            maxAgeMs: Long? = DEFAULT_MAX_AGE_MS
+        ): Shield {
+            require(salt.size == SALT_SIZE) { "Salt must be $SALT_SIZE bytes" }
+            val pbkdf2Salt = salt + service.toByteArray()
+            val key = pbkdf2(password, pbkdf2Salt, iterations, KEY_SIZE)
+            return Shield(key, password, service, iterations, salt.copyOf(), maxAgeMs)
         }
 
-        /**
-         * Create Shield from password and service name.
-         */
-        fun create(password: String, service: String): Shield {
-            val salt = sha256(service.toByteArray())
-            val key = pbkdf2(password, salt, ITERATIONS, KEY_SIZE)
-            return Shield(key)
-        }
-
-        /**
-         * Create Shield with pre-shared key.
-         */
+        /** Create Shield with pre-shared key (pre-shared-key mode, no password/salt). */
         fun withKey(key: ByteArray): Shield {
             require(key.size == KEY_SIZE) { "Invalid key size" }
-            return Shield(key.copyOf())
+            return Shield(key.copyOf(), null, null, 0, null, DEFAULT_MAX_AGE_MS)
         }
 
-        /**
-         * Quick encrypt with explicit key.
-         */
+        /** Quick encrypt with explicit key (pre-shared-key mode, AES-256-GCM, 0x13). */
         fun quickEncrypt(key: ByteArray, plaintext: ByteArray): ByteArray {
             require(key.size == KEY_SIZE) { "Invalid key size" }
-            val subkeys = deriveSubkeys(key)
-            return encryptWithSeparatedKeys(subkeys[0], subkeys[1], plaintext)
+            return seal(deriveAeadKey(key), SUITE_AES_GCM, null, plaintext)
         }
 
-        /**
-         * Quick decrypt with explicit key.
-         */
+        /** Quick decrypt with explicit key (pre-shared-key mode). */
         fun quickDecrypt(key: ByteArray, ciphertext: ByteArray): ByteArray {
             require(key.size == KEY_SIZE) { "Invalid key size" }
-            val subkeys = deriveSubkeys(key)
-            return decryptWithSeparatedKeys(subkeys[0], subkeys[1], ciphertext, null)
+            require(ciphertext.isNotEmpty()) { "Ciphertext too short" }
+            if (ciphertext[0] != VERSION_KEY) {
+                throw SecurityException("Invalid version byte")
+            }
+            require(ciphertext.size >= 2 + AEAD_NONCE_SIZE + TAG_SIZE) { "Ciphertext too short" }
+            return openCiphertext(deriveAeadKey(key), ciphertext[1], ciphertext, 2, null)
         }
 
-        private fun encryptWithSeparatedKeys(
-            encKey: ByteArray, macKey: ByteArray, plaintext: ByteArray
-        ): ByteArray {
-            // Generate random nonce
-            val nonce = randomBytes(NONCE_SIZE)
+        /** AEAD key = HKDF-SHA256-Expand(master, "shield/aead/v4", 32) (single HKDF block). */
+        fun deriveAeadKey(masterKey: ByteArray): ByteArray =
+            hmacSha256(masterKey, HKDF_AEAD_INFO + byteArrayOf(0x01)).copyOf(KEY_SIZE)
 
-            // Counter prefix (8 bytes of zeros)
-            val counter = ByteArray(8)
+        /** Build the AEAD additional data (= wire prefix before the nonce). */
+        private fun buildAad(suite: Byte, salt: ByteArray?): ByteArray =
+            if (salt != null) byteArrayOf(VERSION_PASSWORD, suite) + salt
+            else byteArrayOf(VERSION_KEY, suite)
 
-            // Timestamp in milliseconds
-            val timestampMs = System.currentTimeMillis()
-            val timestamp = ByteArray(8)
-            ByteBuffer.wrap(timestamp).order(ByteOrder.LITTLE_ENDIAN).putLong(timestampMs)
-
-            // Random padding: 32-128 bytes (rejection sampling to avoid modulo bias)
-            val padRange = MAX_PADDING - MIN_PADDING + 1  // 97
-            val padLen: Int
+        private fun samplePadLen(): Int {
+            val padRange = MAX_PADDING - MIN_PADDING + 1 // 97
             while (true) {
                 val v = random.nextInt() and 0xFF
                 if (v < padRange * (256 / padRange)) {
-                    padLen = (v % padRange) + MIN_PADDING
-                    break
+                    return (v % padRange) + MIN_PADDING
                 }
             }
+        }
+
+        /** Seal with a fresh random nonce, timestamp and padding. */
+        private fun seal(aeadKey: ByteArray, suite: Byte, salt: ByteArray?, plaintext: ByteArray): ByteArray {
+            val nonce = randomBytes(AEAD_NONCE_SIZE)
+            val padLen = samplePadLen()
             val padding = randomBytes(padLen)
-
-            // Data to encrypt: counter || timestamp || pad_len || padding || plaintext
-            val dataToEncrypt = ByteArray(8 + 8 + 1 + padLen + plaintext.size)
-            var pos = 0
-            System.arraycopy(counter, 0, dataToEncrypt, pos, 8); pos += 8
-            System.arraycopy(timestamp, 0, dataToEncrypt, pos, 8); pos += 8
-            dataToEncrypt[pos] = padLen.toByte(); pos += 1
-            System.arraycopy(padding, 0, dataToEncrypt, pos, padLen); pos += padLen
-            System.arraycopy(plaintext, 0, dataToEncrypt, pos, plaintext.size)
-
-            // Generate keystream and XOR (using encryption subkey)
-            val keystream = generateKeystream(encKey, nonce, dataToEncrypt.size)
-            val ciphertext = ByteArray(dataToEncrypt.size)
-            for (i in dataToEncrypt.indices) {
-                ciphertext[i] = (dataToEncrypt[i].toInt() xor keystream[i].toInt()).toByte()
-            }
-
-            // Compute HMAC over nonce || ciphertext (using MAC subkey)
-            val macData = nonce + ciphertext
-            val mac = hmacSha256(macKey, macData)
-
-            // Format: nonce || ciphertext || mac
-            return nonce + ciphertext + mac.copyOf(MAC_SIZE)
+            return sealDeterministic(aeadKey, suite, salt, nonce, System.currentTimeMillis(),
+                padLen, padding, plaintext)
         }
 
-        private fun decryptWithSeparatedKeys(
-            encKey: ByteArray, macKey: ByteArray, encrypted: ByteArray, maxAgeMs: Long?
+        /**
+         * Deterministic AEAD seal over fully specified inputs (used for conformance
+         * vectors and wrapped by the randomized seal).
+         */
+        fun sealDeterministic(
+            aeadKey: ByteArray, suite: Byte, salt: ByteArray?, nonce: ByteArray,
+            timestampMs: Long, padLen: Int, padding: ByteArray, plaintext: ByteArray
         ): ByteArray {
-            require(encrypted.size >= MIN_CIPHERTEXT_SIZE) { "Ciphertext too short" }
+            val aad = buildAad(suite, salt)
+            val tsBytes = ByteArray(8)
+            ByteBuffer.wrap(tsBytes).order(ByteOrder.LITTLE_ENDIAN).putLong(timestampMs)
+            val inner = tsBytes + byteArrayOf(padLen.toByte()) + padding + plaintext
+            val ctTag = aeadSeal(suite, aeadKey, nonce, aad, inner)
+            return aad + nonce + ctTag
+        }
 
-            // Parse components
-            val nonce = encrypted.copyOfRange(0, NONCE_SIZE)
-            val ciphertext = encrypted.copyOfRange(NONCE_SIZE, encrypted.size - MAC_SIZE)
-            val receivedMac = encrypted.copyOfRange(encrypted.size - MAC_SIZE, encrypted.size)
+        /**
+         * Open an AEAD ciphertext, validate the inner layout and freshness window.
+         * aadLen is the offset of the nonce (= len(version||suite||[salt])).
+         */
+        fun openCiphertext(aeadKey: ByteArray, suite: Byte, encrypted: ByteArray, aadLen: Int, maxAgeMs: Long?): ByteArray {
+            require(encrypted.size >= aadLen + AEAD_NONCE_SIZE + TAG_SIZE) { "Ciphertext too short" }
+            val aad = encrypted.copyOfRange(0, aadLen)
+            val nonce = encrypted.copyOfRange(aadLen, aadLen + AEAD_NONCE_SIZE)
+            val ctTag = encrypted.copyOfRange(aadLen + AEAD_NONCE_SIZE, encrypted.size)
 
-            // Verify MAC (using MAC subkey)
-            val macData = nonce + ciphertext
-            val expectedMac = hmacSha256(macKey, macData).copyOf(MAC_SIZE)
+            val inner = aeadOpen(suite, aeadKey, nonce, aad, ctTag)
 
-            require(constantTimeEquals(receivedMac, expectedMac)) { "Authentication failed" }
-
-            // Decrypt (using encryption subkey)
-            val keystream = generateKeystream(encKey, nonce, ciphertext.size)
-            val decrypted = ByteArray(ciphertext.size)
-            for (i in ciphertext.indices) {
-                decrypted[i] = (ciphertext[i].toInt() xor keystream[i].toInt()).toByte()
+            if (inner.size < INNER_HEADER_SIZE) {
+                throw SecurityException("Authentication failed")
+            }
+            val tsBytes = inner.copyOfRange(0, 8)
+            val timestampMs = ByteBuffer.wrap(tsBytes).order(ByteOrder.LITTLE_ENDIAN).getLong()
+            val padLen = inner[8].toInt() and 0xFF
+            if (padLen < MIN_PADDING || padLen > MAX_PADDING) {
+                throw SecurityException("Authentication failed")
+            }
+            val dataStart = INNER_HEADER_SIZE + padLen
+            if (inner.size < dataStart) {
+                throw IllegalArgumentException("Ciphertext too short")
             }
 
-            // Auto-detect v2 by timestamp range
-            if (decrypted.size >= V2_HEADER_SIZE) {
-                val timestampBytes = decrypted.copyOfRange(8, 16)
-                val timestampMs = ByteBuffer.wrap(timestampBytes)
-                    .order(ByteOrder.LITTLE_ENDIAN).getLong()
-
-                if (timestampMs in MIN_TIMESTAMP_MS..MAX_TIMESTAMP_MS) {
-                    // v2 format detected
-                    val padLen = decrypted[16].toInt() and 0xFF
-
-                    if (padLen < MIN_PADDING || padLen > MAX_PADDING) {
-                        throw SecurityException("Authentication failed")
-                    }
-
-                    val dataStart = V2_HEADER_SIZE + padLen
-                    if (decrypted.size < dataStart) {
-                        throw IllegalArgumentException("Ciphertext too short")
-                    }
-
-                    if (maxAgeMs != null) {
-                        val nowMs = System.currentTimeMillis()
-                        val age = nowMs - timestampMs
-                        if (timestampMs > nowMs + 5000 || age > maxAgeMs) {
-                            throw SecurityException("Authentication failed")
-                        }
-                    }
-
-                    return decrypted.copyOfRange(dataStart, decrypted.size)
+            if (maxAgeMs != null) {
+                val nowMs = System.currentTimeMillis()
+                val age = nowMs - timestampMs
+                if (timestampMs > nowMs + 5000 || age > maxAgeMs) {
+                    throw SecurityException("Authentication failed")
                 }
             }
 
-            // v1 format: skip counter (8 bytes)
-            return decrypted.copyOfRange(8, decrypted.size)
+            return inner.copyOfRange(dataStart, inner.size)
         }
 
-        private fun generateKeystream(key: ByteArray, nonce: ByteArray, length: Int): ByteArray {
-            val numBlocks = (length + 31) / 32
-            val keystream = ByteArray(numBlocks * 32)
-
-            for (i in 0 until numBlocks) {
-                val block = ByteArray(KEY_SIZE + NONCE_SIZE + 4)
-                System.arraycopy(key, 0, block, 0, KEY_SIZE)
-                System.arraycopy(nonce, 0, block, KEY_SIZE, NONCE_SIZE)
-                ByteBuffer.wrap(block, KEY_SIZE + NONCE_SIZE, 4)
-                    .order(ByteOrder.LITTLE_ENDIAN)
-                    .putInt(i)
-
-                val hash = sha256(block)
-                System.arraycopy(hash, 0, keystream, i * 32, 32)
+        /** AEAD seal: returns ciphertext||tag. */
+        private fun aeadSeal(suite: Byte, key: ByteArray, nonce: ByteArray, aad: ByteArray, plaintext: ByteArray): ByteArray {
+            return try {
+                val cipher = aeadCipher(suite, Cipher.ENCRYPT_MODE, key, nonce)
+                cipher.updateAAD(aad)
+                cipher.doFinal(plaintext)
+            } catch (e: java.security.GeneralSecurityException) {
+                throw SecurityException("AEAD seal failed", e)
             }
+        }
 
-            return keystream.copyOf(length)
+        /** AEAD open: returns plaintext, throws SecurityException on auth failure. */
+        private fun aeadOpen(suite: Byte, key: ByteArray, nonce: ByteArray, aad: ByteArray, ctTag: ByteArray): ByteArray {
+            return try {
+                val cipher = aeadCipher(suite, Cipher.DECRYPT_MODE, key, nonce)
+                cipher.updateAAD(aad)
+                cipher.doFinal(ctTag)
+            } catch (e: java.security.GeneralSecurityException) {
+                throw SecurityException("Authentication failed", e)
+            }
+        }
+
+        private fun aeadCipher(suite: Byte, mode: Int, key: ByteArray, nonce: ByteArray): Cipher {
+            return when (suite) {
+                SUITE_AES_GCM -> Cipher.getInstance("AES/GCM/NoPadding").apply {
+                    init(mode, SecretKeySpec(key, "AES"), GCMParameterSpec(TAG_SIZE * 8, nonce))
+                }
+                SUITE_CHACHA20_POLY1305 -> Cipher.getInstance("ChaCha20-Poly1305").apply {
+                    init(mode, SecretKeySpec(key, "ChaCha20"), IvParameterSpec(nonce))
+                }
+                else -> throw java.security.GeneralSecurityException("Unknown cipher suite")
+            }
         }
 
         // ============== Crypto Utilities ==============
+
+        private fun toHex(data: ByteArray): String {
+            val sb = StringBuilder(data.size * 2)
+            for (b in data) {
+                sb.append("0123456789abcdef"[(b.toInt() shr 4) and 0xF])
+                sb.append("0123456789abcdef"[b.toInt() and 0xF])
+            }
+            return sb.toString()
+        }
 
         fun sha256(data: ByteArray): ByteArray {
             return MessageDigest.getInstance("SHA-256").digest(data)
@@ -253,30 +296,41 @@ class Shield private constructor(private val key: ByteArray) : AutoCloseable {
         }
     }
 
-    /**
-     * Encrypt plaintext (v2 format).
-     */
-    fun encrypt(plaintext: ByteArray): ByteArray =
-        encryptWithSeparatedKeys(encKey, macKey, plaintext)
+    /** Encrypt plaintext (password or pre-shared-key mode). */
+    fun encrypt(plaintext: ByteArray): ByteArray = seal(aeadKey, suite, salt, plaintext)
 
-    /**
-     * Decrypt ciphertext (auto-detects v1/v2).
-     */
-    fun decrypt(ciphertext: ByteArray): ByteArray =
-        decryptWithSeparatedKeys(encKey, macKey, ciphertext, DEFAULT_MAX_AGE_MS)
+    /** Decrypt ciphertext, dispatching on the leading authenticated version byte. */
+    fun decrypt(ciphertext: ByteArray): ByteArray {
+        require(ciphertext.isNotEmpty()) { "Ciphertext too short" }
 
-    /**
-     * Get the derived key.
-     */
+        when (ciphertext[0]) {
+            VERSION_PASSWORD -> {
+                if (salt == null) {
+                    throw SecurityException("Cannot derive key without password")
+                }
+                val aadLen = 2 + SALT_SIZE
+                require(ciphertext.size >= aadLen + AEAD_NONCE_SIZE + TAG_SIZE) { "Ciphertext too short" }
+                val msgSuite = ciphertext[1]
+                val msgSalt = ciphertext.copyOfRange(2, 2 + SALT_SIZE)
+                val derivedKey = deriveKey(msgSalt)
+                val derivedAead = deriveAeadKey(derivedKey)
+                return openCiphertext(derivedAead, msgSuite, ciphertext, aadLen, maxAgeMs)
+            }
+            VERSION_KEY -> {
+                require(ciphertext.size >= 2 + AEAD_NONCE_SIZE + TAG_SIZE) { "Ciphertext too short" }
+                return openCiphertext(aeadKey, ciphertext[1], ciphertext, 2, maxAgeMs)
+            }
+            else -> throw SecurityException("Invalid version byte")
+        }
+    }
+
+    /** Get the derived master key. */
     fun getKey(): ByteArray = key.copyOf()
 
-    /**
-     * Wipe key from memory.
-     */
+    /** Wipe key material from memory. */
     override fun close() {
         secureWipe(key)
-        secureWipe(encKey)
-        secureWipe(macKey)
+        secureWipe(aeadKey)
     }
 }
 

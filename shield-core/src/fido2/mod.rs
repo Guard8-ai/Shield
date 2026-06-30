@@ -8,7 +8,7 @@
 //!
 //! - **Registration**: Create and store FIDO2 credentials
 //! - **Authentication**: Verify users with stored credentials
-//! - **Shield Integration**: Credentials encrypted with EXPTIME-secure encryption
+//! - **Shield Integration**: Credentials encrypted with authenticated symmetric encryption
 //! - **Replay Protection**: Signature counter validation prevents replay attacks
 //! - **Challenge Management**: Secure challenge generation and validation
 //!

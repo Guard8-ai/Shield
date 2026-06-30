@@ -3,6 +3,8 @@ package ai.dikestra.shield;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Base64;
 
@@ -56,13 +58,15 @@ public class TOTP {
             window = 1;
         }
 
+        byte[] codeBytes = code.getBytes(StandardCharsets.UTF_8);
         for (int i = 0; i <= window; i++) {
-            // Check current and past
-            if (generate(timestamp - i * interval).equals(code)) {
+            // Check current and past (constant-time: MessageDigest.isEqual does
+            // not short-circuit on content; length is not secret).
+            if (MessageDigest.isEqual(generate(timestamp - i * interval).getBytes(StandardCharsets.UTF_8), codeBytes)) {
                 return true;
             }
             // Check future (except for i=0)
-            if (i > 0 && generate(timestamp + i * interval).equals(code)) {
+            if (i > 0 && MessageDigest.isEqual(generate(timestamp + i * interval).getBytes(StandardCharsets.UTF_8), codeBytes)) {
                 return true;
             }
         }

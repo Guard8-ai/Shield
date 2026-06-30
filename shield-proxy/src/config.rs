@@ -102,6 +102,12 @@ pub struct RedundancySection {
     #[serde(default = "default_failover_timeout")]
     pub failover_timeout_ms: u64,
     pub virtual_ip: Option<String>,
+    /// Pre-shared secret used to HMAC-authenticate heartbeats. When unset,
+    /// heartbeats are NOT authenticated (a warning is logged); an attacker who
+    /// can reach the heartbeat socket could then forge role transitions. Set a
+    /// high-entropy shared secret on both nodes for production.
+    #[serde(default)]
+    pub psk: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -158,7 +164,10 @@ fn default_peer_address() -> String { "127.0.0.1:8444".to_string() }
 fn default_heartbeat_interval() -> u64 { 500 }
 fn default_failover_timeout() -> u64 { 3000 }
 fn default_true() -> bool { true }
-fn default_metrics_bind() -> String { "0.0.0.0:9090".to_string() }
+// Bind metrics to loopback by default (RT2-9): the Prometheus endpoint is
+// unauthenticated and exposes operational info, so it must not default to all
+// interfaces. Operators can override to expose it behind auth / a network policy.
+fn default_metrics_bind() -> String { "127.0.0.1:9090".to_string() }
 fn default_metrics_path() -> String { "/metrics".to_string() }
 fn default_log_level() -> String { "info".to_string() }
 fn default_log_format() -> String { "text".to_string() }
@@ -237,7 +246,8 @@ mod tests {
         assert_eq!(config.proxy.bind_address, "0.0.0.0:8443");
         assert_eq!(config.proxy.max_connections, 10_000);
         assert!(config.metrics.enabled);
-        assert_eq!(config.metrics.bind_address, "0.0.0.0:9090");
+        // RT2-9: metrics bind to loopback by default (unauthenticated endpoint).
+        assert_eq!(config.metrics.bind_address, "127.0.0.1:9090");
     }
 
     #[test]
@@ -304,10 +314,10 @@ format = "json"
 
     #[test]
     fn test_validation_zero_max_connections() {
-        let toml = r#"
+        let toml = r"
 [proxy]
 max_connections = 0
-"#;
+";
         let result = ProxyConfig::from_toml(toml);
         assert!(result.is_err());
     }

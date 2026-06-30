@@ -62,8 +62,10 @@ func (km *KeyRotationManager) rotate() *VersionedKey {
 	verBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(verBytes, km.currentVer)
 
+	// Derived from a high-entropy master secret (not a password); 600,000
+	// iterations keeps the project-wide PBKDF2 floor consistent.
 	salt := sha256.Sum256(append([]byte("rotation:"), verBytes...))
-	key := pbkdf2.Key(km.masterSecret, salt[:], 100000, KeySize, sha256.New)
+	key := pbkdf2.Key(km.masterSecret, salt[:], 600000, KeySize, sha256.New)
 
 	vk := &VersionedKey{
 		Key:       key,

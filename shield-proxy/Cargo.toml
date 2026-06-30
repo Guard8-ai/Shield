@@ -20,6 +20,9 @@ path = "src/main.rs"
 # Shield encryption core
 shield-core = { path = "../shield-core", default-features = false, features = ["std"] }
 
+# Audited primitives (HMAC-SHA256 for authenticated HA heartbeats)
+ring = "0.17"
+
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
 

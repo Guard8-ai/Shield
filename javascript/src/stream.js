@@ -10,10 +10,41 @@ const fs = require('fs');
 
 const DEFAULT_CHUNK_SIZE = 64 * 1024; // 64KB
 
+// Domain-separation label for the authenticated end-of-stream key.
+const EOF_LABEL = Buffer.from('shield-stream-eof', 'ascii');
+
+/**
+ * Compute the authenticated end-of-stream tag.
+ *
+ * The tag commits to the stream salt and the total number of data chunks (a
+ * length commitment). A stream truncated at a chunk boundary has a different
+ * chunk count, and an attacker cannot forge a matching tag without the master
+ * key, so truncation -- including re-appending a bare zero-length end marker --
+ * is detected.
+ *
+ *   eof_key = HMAC_SHA256(master_key, "shield-stream-eof")
+ *   eof_tag = HMAC_SHA256(eof_key, stream_salt || chunk_count as u64 LE)
+ *
+ * @param {Buffer} masterKey - 32-byte stream master key
+ * @param {Buffer} streamSalt - 16-byte stream salt from the header
+ * @param {number|bigint} chunkCount - total number of data chunks
+ * @returns {Buffer} 32-byte tag
+ */
+function computeEofTag(masterKey, streamSalt, chunkCount) {
+    const eofKey = crypto.createHmac('sha256', masterKey)
+        .update(EOF_LABEL)
+        .digest();
+    const countBuf = Buffer.alloc(8);
+    countBuf.writeBigUInt64LE(BigInt(chunkCount));
+    return crypto.createHmac('sha256', eofKey)
+        .update(Buffer.concat([streamSalt, countBuf]))
+        .digest();
+}
+
 /**
  * Derive key from password using PBKDF2.
  */
-function deriveKey(password, salt, iterations = 100000) {
+function deriveKey(password, salt, iterations = 600000) {
     return crypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256');
 }
 
@@ -151,10 +182,13 @@ class StreamCipher {
             chunkNum++;
         }
 
-        // End marker
+        // Authenticated end-of-stream trailer: the zero-length marker followed
+        // by a tag committing to the total chunk count, so a truncated stream
+        // (with or without a forged bare marker) is detectable.
         const endMarker = Buffer.alloc(4);
         endMarker.writeUInt32LE(0);
-        chunks.push(endMarker);
+        const eofTag = computeEofTag(this.key, streamSalt, chunkNum);
+        chunks.push(Buffer.concat([endMarker, eofTag]));
 
         return Buffer.concat(chunks);
     }
@@ -174,10 +208,23 @@ class StreamCipher {
         const chunks = [];
         let offset = 20;
         let chunkNum = 0;
+        let sawEndMarker = false;
 
-        while (offset < encrypted.length) {
+        while (offset + 4 <= encrypted.length) {
             const encLen = encrypted.readUInt32LE(offset);
-            if (encLen === 0) break; // End marker
+            if (encLen === 0) {
+                // Authenticated end-of-stream marker: require the 32-byte tag.
+                if (offset + 4 + 32 > encrypted.length) {
+                    throw new Error('missing end-of-stream tag');
+                }
+                const tag = encrypted.slice(offset + 4, offset + 4 + 32);
+                const expected = computeEofTag(this.key, streamSalt, chunkNum);
+                if (!crypto.timingSafeEqual(tag, expected)) {
+                    throw new Error('end-of-stream tag verification failed');
+                }
+                sawEndMarker = true;
+                break;
+            }
 
             offset += 4;
             const encChunk = encrypted.slice(offset, offset + encLen);
@@ -197,6 +244,12 @@ class StreamCipher {
 
             chunks.push(decrypted);
             chunkNum++;
+        }
+
+        // A stream that ends without the authenticated marker has been truncated
+        // (the trailing chunks and the end-of-stream tag were dropped).
+        if (!sawEndMarker) {
+            throw new Error('stream truncated: missing end-of-stream marker');
         }
 
         return Buffer.concat(chunks);
@@ -231,5 +284,6 @@ module.exports = {
     StreamCipher,
     deriveKey,
     encryptBlock,
-    decryptBlock
+    decryptBlock,
+    computeEofTag
 };

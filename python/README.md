@@ -1,15 +1,15 @@
-# Shield - EXPTIME-Secure Encryption
+# Shield - Authenticated Symmetric Encryption
 
 [![PyPI version](https://badge.fury.io/py/shield-crypto.svg)](https://pypi.org/project/shield-crypto/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Symmetric cryptography with proven exponential-time security.
+Symmetric authenticated encryption with 256-bit keys (~128-bit post-quantum security).
 
 ## Why Shield?
 
-Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Breaking requires 2^256 operations - no shortcut exists:
+Shield builds on well-established symmetric primitives (SHA-256, HMAC-SHA256, PBKDF2). A 256-bit key gives 256-bit classical and ~128-bit post-quantum brute-force resistance, assuming these primitives are secure:
 
-- **PBKDF2-SHA256** for key derivation (100,000 iterations)
+- **PBKDF2-SHA256** for key derivation (600,000 iterations)
 - **SHA256-based stream cipher** (AES-256-CTR equivalent)
 - **HMAC-SHA256** for authentication
 
@@ -42,6 +42,34 @@ key = os.urandom(32)
 encrypted = quick_encrypt(key, b"data")
 decrypted = quick_decrypt(key, encrypted)
 ```
+
+### Post-Quantum Hybrid Key Exchange
+
+For two parties who have **never shared a secret**, derive a session key over an
+open network that stays safe even against a future quantum computer ("harvest now,
+decrypt later"). It runs a classical (X25519) and a quantum-safe (ML-KEM-768)
+exchange and mixes both — an attacker must break *both* to win.
+
+Requires the optional extra: `pip install shield-crypto[pq]`.
+
+```python
+from shield import Shield
+from shield.pqhybrid import HybridPrivateKey, HybridPublicKey, initiate
+
+# Recipient (Bob): generate a keypair, publish the public key anywhere.
+bob = HybridPrivateKey.generate()
+bob_public = bob.public_key().to_bytes()
+
+# Sender (Alice): derive a shared key + a handshake to send.
+handshake, key = initiate(HybridPublicKey.from_bytes(bob_public))
+ciphertext = Shield.with_key(key).encrypt(b"hello bob")     # send handshake + ciphertext
+
+# Recipient (Bob): recover the same key and decrypt.
+bob_key = bob.accept(handshake)
+Shield.with_key(bob_key).decrypt(ciphertext)                # b"hello bob"
+```
+
+See `examples/pq_hybrid_demo.py` for a narrated run.
 
 ### Large File Encryption
 
@@ -196,7 +224,7 @@ shield totp-code JBSWY3DPEHPK3PXP
 Main encryption class with password-derived keys.
 
 ```python
-Shield(password: str, service: str, salt: bytes = None, iterations: int = 100_000)
+Shield(password: str, service: str, salt: bytes = None, iterations: int = 600_000)
 Shield.with_key(key: bytes)  # Create from raw 32-byte key
 .encrypt(plaintext: bytes) -> bytes
 .decrypt(ciphertext: bytes) -> Optional[bytes]
@@ -241,14 +269,14 @@ TOTP.secret_from_base32(b32: str) -> bytes
 
 ## Security Model
 
-Shield uses only symmetric primitives with unconditional security:
+Shield builds on well-established symmetric primitives. Like all practical ciphers, their security is conjectural (it relies on standard assumptions), not unconditional:
 
 - **Symmetric encryption** (AES-256 equivalent)
 - **Hash functions** (SHA-256)
 - **HMAC authentication**
 - **Key derivation** (PBKDF2)
 
-Breaking requires 2^256 operations - no shortcut exists.
+Brute-forcing a full 256-bit key requires 2^256 operations; this relies on the standard assumption that SHA-256/HMAC have no exploitable structure (an assumption, not a mathematical proof).
 
 ## License
 

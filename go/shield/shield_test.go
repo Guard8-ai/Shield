@@ -28,6 +28,164 @@ func TestShieldEncryptDecrypt(t *testing.T) {
 	}
 }
 
+// CR-1: same password+service must produce DIFFERENT keys per instance,
+// because each instance generates a fresh random salt. This is the core fix
+// for the deterministic-salt bug.
+func TestSamePasswordServiceDifferentKeys(t *testing.T) {
+	maxAge := int64(DefaultMaxAgeMs)
+	s1 := New("password", "github.com", &maxAge)
+	s2 := New("password", "github.com", &maxAge)
+
+	if bytes.Equal(s1.DerivedKey(), s2.DerivedKey()) {
+		t.Errorf("two instances with same password+service must derive DIFFERENT keys (deterministic-salt bug)")
+	}
+}
+
+// CR-1: a recipient created independently with the same password+service must
+// be able to decrypt a ciphertext, because the random salt travels in the
+// header and the key is re-derived from it.
+func TestCrossInstanceRoundtrip(t *testing.T) {
+	maxAge := int64(DefaultMaxAgeMs)
+	sender := New("correct horse", "example.com", &maxAge)
+	recipient := New("correct horse", "example.com", &maxAge)
+
+	plaintext := []byte("cross-instance secret")
+	encrypted, err := sender.Encrypt(plaintext)
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+
+	decrypted, err := recipient.Decrypt(encrypted)
+	if err != nil {
+		t.Fatalf("cross-instance Decrypt failed: %v", err)
+	}
+	if !bytes.Equal(plaintext, decrypted) {
+		t.Errorf("Decrypted != plaintext across instances")
+	}
+}
+
+// CR-1: a different password (same service) must NOT decrypt.
+func TestWrongPasswordFails(t *testing.T) {
+	maxAge := int64(DefaultMaxAgeMs)
+	sender := New("right-password", "example.com", &maxAge)
+	wrong := New("wrong-password", "example.com", &maxAge)
+
+	encrypted, err := sender.Encrypt([]byte("secret"))
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+	if _, err := wrong.Decrypt(encrypted); err == nil {
+		t.Errorf("decrypt with wrong password must fail")
+	}
+}
+
+// CR-2: PBKDF2 iteration count must be 600,000 (OWASP 2023 floor).
+func TestIterationCount(t *testing.T) {
+	if Iterations != 600000 {
+		t.Errorf("Iterations must be 600000, got %d", Iterations)
+	}
+}
+
+// v4: password-mode ciphertext starts with the authenticated version byte 0x03,
+// then the suite byte, then the 16-byte salt.
+func TestVersionBytePassword(t *testing.T) {
+	maxAge := int64(DefaultMaxAgeMs)
+	s := New("password", "service", &maxAge)
+	encrypted, err := s.Encrypt([]byte("hello"))
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+	if encrypted[0] != VersionPassword {
+		t.Errorf("password-mode version byte must be 0x%02x, got 0x%02x", VersionPassword, encrypted[0])
+	}
+	if encrypted[1] != SuiteAES256GCM {
+		t.Errorf("default suite byte must be 0x%02x, got 0x%02x", SuiteAES256GCM, encrypted[1])
+	}
+	// Header layout: version(1) || suite(1) || salt(16) || nonce(12) || ct||tag(>=16)
+	if len(encrypted) < 2+SaltSize+aeadNonceSize+tagSize {
+		t.Errorf("ciphertext too short for password header")
+	}
+}
+
+// v4: pre-shared-key-mode ciphertext starts with the authenticated version
+// byte 0x13 and carries no salt.
+func TestVersionByteKey(t *testing.T) {
+	key := make([]byte, KeySize)
+	s, err := WithKey(key)
+	if err != nil {
+		t.Fatalf("WithKey failed: %v", err)
+	}
+	encrypted, err := s.Encrypt([]byte("hello"))
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+	if encrypted[0] != VersionKey {
+		t.Errorf("key-mode version byte must be 0x%02x, got 0x%02x", VersionKey, encrypted[0])
+	}
+}
+
+// v4: tampering with the authenticated salt (in the AEAD additional data) must
+// be detected by the AEAD tag. Salt lives at bytes [2 .. 2+SaltSize) after the
+// version and suite bytes.
+func TestTamperSaltDetected(t *testing.T) {
+	maxAge := int64(DefaultMaxAgeMs)
+	s := New("password", "service", &maxAge)
+	encrypted, err := s.Encrypt([]byte("authenticated salt"))
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+	// Flip a bit in the salt region (bytes 2..2+SaltSize).
+	encrypted[2] ^= 0xFF
+	if _, err := s.Decrypt(encrypted); err != ErrAuthenticationFailed {
+		t.Errorf("tampered salt must fail authentication, got %v", err)
+	}
+}
+
+// CR-3: tampering with the version byte must be detected by the MAC.
+func TestTamperVersionDetected(t *testing.T) {
+	maxAge := int64(DefaultMaxAgeMs)
+	s := New("password", "service", &maxAge)
+	encrypted, err := s.Encrypt([]byte("authenticated version"))
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+	// Change version byte to the other valid version: dispatch changes and the
+	// MAC (over version || ...) must reject either way.
+	encrypted[0] = VersionKey
+	if _, err := s.Decrypt(encrypted); err == nil {
+		t.Errorf("tampered version byte must fail, got nil error")
+	}
+}
+
+// CR-3: dispatch is on the version byte; an unknown version is rejected.
+func TestUnknownVersionRejected(t *testing.T) {
+	maxAge := int64(DefaultMaxAgeMs)
+	s := New("password", "service", &maxAge)
+	encrypted, err := s.Encrypt([]byte("x"))
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+	encrypted[0] = 0x7F
+	if _, err := s.Decrypt(encrypted); err == nil {
+		t.Errorf("unknown version byte must be rejected")
+	}
+}
+
+// A pre-shared-key instance must not silently accept a password-mode ciphertext.
+func TestKeyModeRejectsPasswordCiphertext(t *testing.T) {
+	maxAge := int64(DefaultMaxAgeMs)
+	pw := New("password", "service", &maxAge)
+	encrypted, err := pw.Encrypt([]byte("pw secret"))
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+	key := make([]byte, KeySize)
+	ks, _ := WithKey(key)
+	if _, err := ks.Decrypt(encrypted); err == nil {
+		t.Errorf("pre-shared-key instance must not decrypt a password-mode ciphertext")
+	}
+}
+
 func TestShieldWithKey(t *testing.T) {
 	key := make([]byte, KeySize)
 	for i := range key {
@@ -178,38 +336,21 @@ func TestV2LengthVariation(t *testing.T) {
 	}
 }
 
-func TestV1BackwardCompatibility(t *testing.T) {
+// Clean break: legacy decode has been removed. A ciphertext whose leading
+// byte is neither 0x03 nor 0x13 must be rejected outright (no heuristic
+// fallback to an unauthenticated format).
+func TestNoLegacyFallback(t *testing.T) {
 	maxAge := int64(60000)
 	s := New("password", "service", &maxAge)
-	plaintext := []byte("v1 message")
-
-	// Manually create v1 ciphertext using DecryptV1WithKey logic
-	// For simplicity, use the old EncryptWithKey format (before v2)
-	// Since we've modified EncryptWithKey to v2, we need to manually create v1
-
-	// This test validates that v1 detection works
-	// In real scenario, we'd have saved v1 ciphertext
-	encrypted, _ := s.Encrypt(plaintext) // v2 format
-	decrypted, err := s.Decrypt(encrypted)
+	encrypted, err := s.Encrypt([]byte("modern message"))
 	if err != nil {
-		t.Fatalf("Decrypt failed: %v", err)
+		t.Fatalf("Encrypt failed: %v", err)
 	}
-
-	if !bytes.Equal(plaintext, decrypted) {
-		t.Errorf("Decrypted != plaintext")
+	// Strip the version+salt header to simulate an old headerless ciphertext.
+	legacy := encrypted[1+SaltSize:]
+	if _, err := s.Decrypt(legacy); err == nil {
+		t.Errorf("legacy headerless ciphertext must not decrypt")
 	}
-}
-
-func TestDecryptV1Explicit(t *testing.T) {
-	key := make([]byte, KeySize)
-	s, _ := WithKey(key)
-
-	// For this test to work properly, we'd need actual v1 ciphertext
-	// For now, verify DecryptV1 exists and can be called
-	encrypted, _ := s.Encrypt([]byte("test"))
-	_, err := s.DecryptV1(encrypted)
-	// May fail since encrypted is v2, but method exists
-	_ = err
 }
 
 func TestNoFallbackOnExpiredV2(t *testing.T) {

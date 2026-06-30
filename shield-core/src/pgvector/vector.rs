@@ -2,7 +2,6 @@
 
 use super::error::{PgVectorError, Result};
 use crate::Shield;
-use ring::digest;
 use serde::{Deserialize, Serialize};
 
 /// Encrypted vector with deterministic encryption for searchability
@@ -24,8 +23,8 @@ impl EncryptedVector {
     /// Uses content-based nonce derivation to ensure same vector
     /// always produces same ciphertext (required for pgvector indexing)
     pub fn encrypt(shield: &Shield, vector: &[f32]) -> Result<Self> {
-        // Derive deterministic nonce from vector content
-        let nonce = Self::derive_nonce(vector);
+        // Derive deterministic, key-bound nonce from vector content
+        let nonce = Self::derive_nonce(shield, vector);
 
         // Encrypt each component deterministically
         let encrypted_data = Self::encrypt_components(shield, vector, &nonce);
@@ -59,24 +58,35 @@ impl EncryptedVector {
         ))
     }
 
-    /// Derive deterministic nonce from vector content
+    /// Derive a deterministic, key-bound nonce from vector content.
     ///
-    /// Uses SHA256 hash of vector bytes to create a deterministic
-    /// 16-byte nonce. This ensures same vector always gets same nonce.
-    fn derive_nonce(vector: &[f32]) -> Vec<u8> {
+    /// Uses HMAC-SHA256 keyed by the Shield master key (an SIV-style synthetic
+    /// IV) over a domain-separation tag plus the vector bytes. This keeps the
+    /// nonce deterministic *per key* (same vector under the same key always
+    /// gets the same nonce, which pgvector indexing relies on) while making it
+    /// infeasible to compute without the key. An unkeyed plaintext hash, by
+    /// contrast, let anyone who saw the stored nonce confirm a guessed vector
+    /// offline.
+    ///
+    /// Note: deterministic encryption inherently reveals plaintext *equality*
+    /// (identical vectors produce identical ciphertext); that is the documented
+    /// trade-off required for searchable indexing and is unrelated to the key.
+    fn derive_nonce(shield: &Shield, vector: &[f32]) -> Vec<u8> {
+        use ring::hmac;
+
         // Serialize vector to bytes
         let mut bytes = Vec::with_capacity(vector.len() * 4);
         for &value in vector {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
 
-        // Hash with salt to derive nonce
-        let salt = b"shield-pgvector-deterministic-v1";
-        let mut input = salt.to_vec();
+        // SIV-style: HMAC-SHA256(master_key, domain || vector_bytes), truncated.
+        let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, shield.master_key());
+        let mut input = b"shield-pgvector-deterministic-v2".to_vec();
         input.extend_from_slice(&bytes);
 
-        let hash = digest::digest(&digest::SHA256, &input);
-        hash.as_ref()[..16].to_vec()
+        let tag = hmac::sign(&hmac_key, &input);
+        tag.as_ref()[..16].to_vec()
     }
 
     /// Encrypt vector components deterministically
@@ -198,6 +208,26 @@ mod tests {
         // Different vectors should produce different ciphertext
         assert_ne!(encrypted1.nonce, encrypted2.nonce);
         assert_ne!(encrypted1.encrypted_data, encrypted2.encrypted_data);
+    }
+
+    #[test]
+    fn test_nonce_is_keyed_not_plaintext_only() {
+        // Same vector encrypted under two different master keys must produce
+        // different nonces. An unkeyed plaintext-hash nonce would be identical
+        // across keys, letting an attacker who sees the stored nonce confirm a
+        // guessed plaintext offline. A keyed (SIV-style) nonce prevents this
+        // while staying deterministic per key (required for pgvector indexing).
+        let shield_a = Shield::new("password-a", "pgvector.test");
+        let shield_b = Shield::new("password-b", "pgvector.test");
+        let vector = vec![0.1, 0.2, 0.3, 0.4, 0.5];
+
+        let enc_a = EncryptedVector::encrypt(&shield_a, &vector).unwrap();
+        let enc_b = EncryptedVector::encrypt(&shield_b, &vector).unwrap();
+
+        assert_ne!(
+            enc_a.nonce, enc_b.nonce,
+            "nonce must depend on the key, not just the plaintext"
+        );
     }
 
     #[test]

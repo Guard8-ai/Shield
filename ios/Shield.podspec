@@ -1,10 +1,10 @@
 Pod::Spec.new do |s|
   s.name             = 'Shield'
   s.version          = '2.2.0'
-  s.summary          = 'EXPTIME-secure symmetric encryption for iOS/macOS'
+  s.summary          = 'Authenticated symmetric encryption for iOS/macOS'
   s.description      = <<-DESC
-    Shield provides symmetric cryptography with proven exponential-time security.
-    Breaking requires 2^256 operations - no shortcut exists.
+    Shield provides symmetric authenticated encryption with 256-bit keys (~128-bit post-quantum security).
+    Brute-forcing a full 256-bit key requires 2^256 operations; this relies on the standard assumption that SHA-256/HMAC have no exploitable structure (an assumption, not a mathematical proof).
 
     Features:
     - Password-based encryption (PBKDF2-SHA256)

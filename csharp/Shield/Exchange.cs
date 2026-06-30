@@ -11,21 +11,29 @@ namespace Dikestra.Shield
     /// Key Exchange - Key exchange without public-key crypto.
     ///
     /// Methods:
-    /// 1. PAKE: Password-Authenticated Key Exchange
+    /// 1. PAKE: pre-shared-key handshake (NOT a true PAKE; see PAKE below)
     /// 2. QR: QR codes, base64 for manual exchange
     /// 3. Key Splitting: XOR-based secret sharing
     /// </summary>
     public static class Exchange
     {
         /// <summary>
-        /// Password-Authenticated Key Exchange.
+        /// Pre-shared-key handshake (NOT a true PAKE despite the name).
         ///
-        /// Both parties derive a shared key from a common password.
-        /// Uses role binding to prevent reflection attacks.
+        /// Both parties derive a shared key from a common pre-shared secret,
+        /// with role binding to prevent reflection attacks.
+        ///
+        /// SECURITY: The handshake contribution HMAC(PBKDF2(secret, salt), role)
+        /// is sent on the wire together with the salt, so a recorded handshake
+        /// permits an OFFLINE DICTIONARY ATTACK against a low-entropy secret
+        /// (PBKDF2 iterations only slow each guess). Safe ONLY with a
+        /// high-entropy shared secret (&gt;=128 bits). For password-based or
+        /// forward-secret key establishment, use the X25519 + ML-KEM-768 hybrid
+        /// KEX (pqhybrid) instead. Type name retained for API compatibility.
         /// </summary>
         public static class PAKE
         {
-            public const int DefaultIterations = 200000;
+            public const int DefaultIterations = 600000; // CR-2: OWASP 2023 floor
 
             /// <summary>
             /// Derive key contribution from password.
@@ -33,9 +41,9 @@ namespace Dikestra.Shield
             /// <param name="password">Shared password between parties</param>
             /// <param name="salt">Public salt (can be exchanged openly)</param>
             /// <param name="role">Role identifier ('alice', 'bob', 'initiator', etc.)</param>
-            /// <param name="iterations">PBKDF2 iterations (default: 200000)</param>
+            /// <param name="iterations">PBKDF2 iterations (default: 600000)</param>
             /// <returns>32-byte key contribution</returns>
-            public static byte[] Derive(string password, byte[] salt, string role, int iterations = 200000)
+            public static byte[] Derive(string password, byte[] salt, string role, int iterations = 600000)
             {
                 using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, iterations, HashAlgorithmName.SHA256);
                 byte[] baseKey = pbkdf2.GetBytes(32);

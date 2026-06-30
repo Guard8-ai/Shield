@@ -149,7 +149,7 @@ def main(argv: Optional[list] = None) -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
         prog="shield",
-        description="Shield - EXPTIME-Secure Encryption",
+        description="Shield - Authenticated Symmetric Encryption",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(

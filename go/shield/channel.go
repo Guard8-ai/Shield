@@ -27,10 +27,10 @@ const (
 
 // Channel errors
 var (
-	ErrInvalidHandshake  = errors.New("shield: invalid handshake")
+	ErrInvalidHandshake   = errors.New("shield: invalid handshake")
 	ErrUnsupportedVersion = errors.New("shield: unsupported protocol version")
-	ErrMessageTooLarge   = errors.New("shield: message too large")
-	ErrConnectionClosed  = errors.New("shield: connection closed")
+	ErrMessageTooLarge    = errors.New("shield: message too large")
+	ErrConnectionClosed   = errors.New("shield: connection closed")
 )
 
 // ChannelConfig holds channel configuration.
@@ -46,7 +46,7 @@ func NewChannelConfig(password, service string) *ChannelConfig {
 	return &ChannelConfig{
 		Password:           password,
 		Service:            service,
-		Iterations:         200000,
+		Iterations:         600000,
 		HandshakeTimeoutMs: 30000,
 	}
 }
@@ -70,7 +70,14 @@ type ShieldChannel struct {
 	service string
 }
 
-// Connect initiates a client connection with PAKE handshake.
+// Connect initiates a client connection with the pre-shared-key handshake.
+//
+// SECURITY: The handshake is NOT a true PAKE. Each party's contribution
+// HMAC(PBKDF2(secret, salt), role) is sent on the wire with the salt, so a
+// recorded handshake permits an OFFLINE DICTIONARY ATTACK against a low-entropy
+// secret. Safe ONLY with a high-entropy shared secret (>=128 bits); for
+// password-based or forward-secret setup use the X25519 + ML-KEM-768 hybrid KEX
+// (pqhybrid) instead.
 func Connect(conn io.ReadWriteCloser, config *ChannelConfig) (*ShieldChannel, error) {
 	ch := &ShieldChannel{conn: conn, service: config.Service}
 
@@ -121,7 +128,14 @@ func Connect(conn io.ReadWriteCloser, config *ChannelConfig) (*ShieldChannel, er
 	return ch, nil
 }
 
-// Accept waits for a client connection with PAKE handshake.
+// Accept waits for a client connection with the pre-shared-key handshake.
+//
+// SECURITY: The handshake is NOT a true PAKE. Each party's contribution
+// HMAC(PBKDF2(secret, salt), role) is sent on the wire with the salt, so a
+// recorded handshake permits an OFFLINE DICTIONARY ATTACK against a low-entropy
+// secret. Safe ONLY with a high-entropy shared secret (>=128 bits); for
+// password-based or forward-secret setup use the X25519 + ML-KEM-768 hybrid KEX
+// (pqhybrid) instead.
 func Accept(conn io.ReadWriteCloser, config *ChannelConfig) (*ShieldChannel, error) {
 	ch := &ShieldChannel{conn: conn, service: config.Service}
 
@@ -232,14 +246,26 @@ func (ch *ShieldChannel) Close() error {
 
 func (ch *ShieldChannel) computeSessionKey(config *ChannelConfig, salt, localContribution, remoteContribution []byte) []byte {
 	baseKey := PAKECombine(localContribution, remoteContribution)
-	passwordKey := PAKEDerive(config.Password, salt, "session", config.Iterations)
+	// PBKDF2-derived secret (not exchanged): already a 32-byte key stretched
+	// from the password via PBKDF2 (600k), not the raw password.
+	derivedKey := PAKEDerive(config.Password, salt, "session", config.Iterations)
 
-	combined := make([]byte, 64)
-	copy(combined[:32], baseKey)
-	copy(combined[32:], passwordKey)
+	// Final session key = HMAC-SHA256(base_key, derived_key || service).
+	// Binding the service identifier provides domain separation: the same
+	// shared secret used for two different services derives two different
+	// session keys, so a credential provisioned for one service cannot
+	// establish a channel for another. derived_key is a fixed 32 bytes,
+	// so the concatenation is unambiguous across implementations.
+	// Keyed HMAC (not SHA256(key || data)) avoids length-extension and
+	// matches the Rust source of truth byte-for-byte.
+	serviceBytes := []byte(config.Service)
+	macInput := make([]byte, 0, len(derivedKey)+len(serviceBytes))
+	macInput = append(macInput, derivedKey...)
+	macInput = append(macInput, serviceBytes...)
 
-	h := sha256.Sum256(combined)
-	return h[:]
+	mac := hmac.New(sha256.New, baseKey)
+	mac.Write(macInput)
+	return mac.Sum(nil)
 }
 
 func (ch *ShieldChannel) sendHandshake(msgType byte, data []byte) error {

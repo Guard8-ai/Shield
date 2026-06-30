@@ -1,15 +1,15 @@
-# Shield - EXPTIME-Secure Encryption (Kotlin)
+# Shield - Authenticated Symmetric Encryption (Kotlin)
 
 [![Maven Central](https://img.shields.io/maven-central/v/ai.dikestra/shield-kotlin.svg)](https://search.maven.org/artifact/ai.dikestra/shield-kotlin)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Symmetric cryptography with proven exponential-time security.
+Symmetric authenticated encryption with 256-bit keys (~128-bit post-quantum security).
 
 ## Why Shield?
 
-Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Breaking requires 2^256 operations - no shortcut exists:
+Shield builds on well-established symmetric primitives (SHA-256, HMAC-SHA256, PBKDF2). A 256-bit key gives 256-bit classical and ~128-bit post-quantum brute-force resistance, assuming these primitives are secure:
 
-- **PBKDF2-SHA256** for key derivation (100,000 iterations)
+- **PBKDF2-SHA256** for key derivation (600,000 iterations)
 - **SHA256-based stream cipher** (AES-256-CTR equivalent)
 - **HMAC-SHA256** for authentication
 
@@ -229,14 +229,14 @@ Shield Kotlin classes are **thread-safe**. A single `Shield` instance can be sha
 
 ## Security Model
 
-Shield uses only symmetric primitives with unconditional security:
+Shield builds on well-established symmetric primitives. Like all practical ciphers, their security is conjectural (it relies on standard assumptions), not unconditional:
 
 - **Symmetric encryption** (AES-256 equivalent)
 - **Hash functions** (SHA-256)
 - **HMAC authentication**
 - **Key derivation** (PBKDF2)
 
-Breaking requires 2^256 operations - no shortcut exists.
+Brute-forcing a full 256-bit key requires 2^256 operations; this relies on the standard assumption that SHA-256/HMAC have no exploitable structure (an assumption, not a mathematical proof).
 
 ## Cross-Language Compatibility
 

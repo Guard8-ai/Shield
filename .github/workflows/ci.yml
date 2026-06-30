@@ -45,10 +45,13 @@ jobs:
         run: cd shield-core && cargo clippy --all-features -- -D warnings
 
       - name: Run tests
-        run: cd shield-core && cargo test --features async --verbose
+        run: cd shield-core && cargo test --features "async pq" --verbose
 
       - name: Run tests (no default features)
         run: cd shield-core && cargo test --no-default-features --verbose
+
+      - name: Post-quantum hybrid KEX conformance vectors
+        run: cd shield-core && cargo test --features pq pqhybrid --verbose
 
   # Device Fingerprint CLI
   fingerprint:
@@ -166,7 +169,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go: ['1.24']
+        go: ['1.25']
     steps:
       - uses: actions/checkout@v6
 
@@ -203,16 +206,41 @@ jobs:
 
   # C Tests
   c:
-    name: C (GCC)
+    # v4 C uses the Windows CNG (BCrypt) AES-256-GCM backend; the POSIX/OpenSSL
+    # EVP backend is not yet implemented (src/shield.c #errors on non-Windows),
+    # so C is exercised on Windows until the OpenSSL backend lands.
+    name: C (Windows CNG)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build and test
+        shell: bash
+        run: |
+          cd c
+          clang -O2 -Wall -Wextra -I./include \
+            src/shield.c tests/test_shield.c \
+            -lbcrypt -ladvapi32 -o test_shield.exe
+          ./test_shield.exe
+
+  c-pq:
+    # The C post-quantum hybrid KEX (X25519 + ML-KEM-768) targets POSIX hosts:
+    # ML-KEM-768 via liboqs, X25519 + HKDF via OpenSSL >= 3.0. Verified
+    # byte-identical against the shared tests/pq_kex_vectors.json.
+    name: C post-quantum (Linux, liboqs)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential cmake ninja-build pkg-config libssl-dev git
 
-      - name: Build and test
-        run: cd c && make test
+      - name: Build C PQ and run conformance vectors
+        run: |
+          chmod +x c/scripts/build_and_test_pq.sh
+          SUDO=sudo c/scripts/build_and_test_pq.sh
 
   # Android Tests
   android:
@@ -308,7 +336,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
+          go-version: '1.25'
           cache-dependency-path: go/go.sum
 
       - name: Install Rust
@@ -407,7 +435,13 @@ jobs:
       - name: Run cargo audit
         run: |
           cargo install cargo-audit
-          cd shield-core && cargo audit
+          # RUSTSEC-2023-0071 (Marvin timing attack on the `rsa` crate) is a
+          # side-channel in RSA *private-key* operations. `rsa` is pulled in only
+          # transitively via dcap-qvl, which uses it solely to VERIFY Intel's PCK
+          # certificate-chain signatures (public-key verification). Shield never
+          # performs RSA private-key operations, so the advisory does not apply.
+          # No fixed version of `rsa` is available. Tracked; revisit on upstream fix.
+          cd shield-core && cargo audit --ignore RUSTSEC-2023-0071
 
       - name: Check for secrets
         uses: trufflesecurity/trufflehog@main

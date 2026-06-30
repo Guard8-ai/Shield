@@ -55,8 +55,10 @@ func GenerateSymmetricSignature() (*SymmetricSignature, error) {
 
 // SymmetricSignatureFromPassword derives signature from password and identity.
 func SymmetricSignatureFromPassword(password, identity string) *SymmetricSignature {
+	// Deterministic by design: the same password+identity must reproduce the
+	// same signing key on any device. CR-2: 600,000 iterations (OWASP 2023 floor).
 	salt := sha256.Sum256([]byte("sign:" + identity))
-	key := pbkdf2.Key([]byte(password), salt[:], 100000, KeySize, sha256.New)
+	key := pbkdf2.Key([]byte(password), salt[:], 600000, KeySize, sha256.New)
 
 	ss := &SymmetricSignature{}
 	copy(ss.signingKey[:], key)

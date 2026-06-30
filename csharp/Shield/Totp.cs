@@ -47,14 +47,24 @@ namespace Dikestra.Shield
             if (window <= 0)
                 window = 1;
 
+            byte[] codeBytes = Encoding.UTF8.GetBytes(code);
             for (int i = 0; i <= window; i++)
             {
-                if (Generate(timestamp - i * _interval) == code)
+                if (FixedTimeEquals(Generate(timestamp - i * _interval), codeBytes))
                     return true;
-                if (i > 0 && Generate(timestamp + i * _interval) == code)
+                if (i > 0 && FixedTimeEquals(Generate(timestamp + i * _interval), codeBytes))
                     return true;
             }
             return false;
+        }
+
+        // Constant-time comparison of a generated code against the supplied code
+        // bytes. CryptographicOperations.FixedTimeEquals does not leak content
+        // timing; a length mismatch (length is not secret) returns false.
+        private static bool FixedTimeEquals(string generated, byte[] codeBytes)
+        {
+            byte[] generatedBytes = Encoding.UTF8.GetBytes(generated);
+            return CryptographicOperations.FixedTimeEquals(generatedBytes, codeBytes);
         }
 
         private string GenerateHotp(long counter)

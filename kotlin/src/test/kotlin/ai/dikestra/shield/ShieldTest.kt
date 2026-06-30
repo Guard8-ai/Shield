@@ -52,7 +52,9 @@ class ShieldTest {
         Shield.create("password", "service").use { shield ->
             val encrypted = shield.encrypt("test".toByteArray())
             encrypted[encrypted.size - 1] = (encrypted.last().toInt() xor 0xFF).toByte()
-            assertThrows<IllegalArgumentException> {
+            // A tampered ciphertext is an authentication failure, so decrypt
+            // throws SecurityException (not IllegalArgumentException).
+            assertThrows<SecurityException> {
                 shield.decrypt(encrypted)
             }
         }

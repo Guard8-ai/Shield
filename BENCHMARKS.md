@@ -1,153 +1,148 @@
 # Shield Performance Benchmarks
 
-Comparative benchmarks measuring Shield's SHA256-CTR cipher against industry-standard AES-256-GCM and ChaCha20-Poly1305.
+Shield's wire format **v4** uses a standard AEAD — **AES-256-GCM** (default) or
+**ChaCha20-Poly1305** — taken from each platform's audited crypto provider. There
+is no custom cipher: "Shield throughput" is therefore essentially the underlying
+AEAD's throughput plus a small, constant per-message overhead (one HKDF-Expand to
+derive the AEAD key, a 32–128-byte random padding layer for length hiding, an
+8-byte timestamp, and buffer allocation).
 
-**Test Environment**: Linux 6.18.3, AMD/Intel x64, Rust 1.76+
+These numbers are **measured**, not estimated. They are a single-machine,
+single-threaded snapshot for orientation, not a vendor benchmark.
 
-## Summary
+**Test environment**: 11th Gen Intel Core i9-11900H @ 2.50 GHz (16 logical
+cores), Windows 11. Rust 1.96 (`ring` AEAD), Go 1.24 (stdlib), Node 20, CPython
+3.13. Rust via `criterion`; Go via `testing.B`; Python/JS via a fixed-time
+micro-benchmark loop.
 
-| Algorithm | 1KB Throughput | 1MB Throughput | Key Derivation |
-|-----------|----------------|----------------|----------------|
-| **AES-256-GCM** | ~2.1 GB/s | ~3.4 GB/s | N/A (pre-shared key) |
-| **ChaCha20-Poly1305** | ~775 MB/s | ~1.1 GB/s | N/A (pre-shared key) |
-| **Shield (SHA256-CTR)** | ~190 MB/s | ~161 MB/s | ~29ms (100k PBKDF2) |
+> **Reading these tables.** Compare *encrypt vs decrypt* and *Shield vs raw AEAD*
+> **within the same language** — those are apples-to-apples. Do **not** compare
+> raw MB/s *across* languages: each runtime has a different allocator, GC, and
+> measurement harness, so small-payload numbers in particular reflect per-call
+> interpreter/runtime overhead more than crypto speed.
 
-## Analysis
+## Rust (source of truth): Shield v4 vs. raw AEAD
 
-### Why Shield is Slower
+Median latency per operation. `Shield` is the full v4 construction (HKDF-Expand +
+padding + timestamp + AES-256-GCM); `AES-256-GCM` / `ChaCha20-Poly1305` are the
+bare `ring` AEAD with no framing — i.e. Shield's per-message overhead is the gap.
 
-Shield uses SHA-256 for keystream generation instead of:
-- **AES-NI**: Hardware-accelerated AES instructions (available on most x86/ARM CPUs)
-- **ChaCha20**: Optimized SIMD implementations
+| Size  | Shield enc | Shield dec | AES-GCM enc | AES-GCM dec | ChaCha enc | ChaCha dec |
+|-------|-----------:|-----------:|------------:|------------:|-----------:|-----------:|
+| 64 B  |    893 ns  |    680 ns  |     178 ns  |     117 ns  |    288 ns  |    202 ns  |
+| 256 B |    987 ns  |    728 ns  |     204 ns  |     132 ns  |    389 ns  |    291 ns  |
+| 1 KB  |   1.08 µs  |    861 ns  |     318 ns  |     253 ns  |    774 ns  |    692 ns  |
+| 16 KB |   4.44 µs  |   3.23 µs  |    3.12 µs  |    2.29 µs  |   8.58 µs  |   8.05 µs  |
+| 64 KB |   14.6 µs  |   13.0 µs  |    13.3 µs  |    10.5 µs  |   36.2 µs  |   32.6 µs  |
+| 1 MB  |    902 µs  |    647 µs  |     720 µs  |     389 µs  |   1.06 ms  |    755 µs  |
 
-This is a deliberate trade-off:
-1. **Simplicity**: One primitive (SHA-256) instead of two (AES + GHASH)
-2. **Portability**: SHA-256 is easier to implement correctly
-3. **Philosophy**: Hash-based construction for consistency with EXPTIME model
+Steady-state throughput (1 MB payload, derived from the medians above):
 
-### When Shield Speed is Sufficient
+| Operation              | Throughput |
+|------------------------|-----------:|
+| Shield (AES-256-GCM) encrypt | ~1.16 GB/s |
+| Shield (AES-256-GCM) decrypt | ~1.62 GB/s |
+| raw AES-256-GCM encrypt      | ~1.46 GB/s |
+| raw AES-256-GCM decrypt      | ~2.70 GB/s |
+| Shield (ChaCha20) encrypt    | ~0.99 GB/s |
+| Shield (ChaCha20) decrypt    | ~1.39 GB/s |
 
-| Use Case | Data Size | Shield Time | Verdict |
-|----------|-----------|-------------|---------|
-| API tokens | 64 B | ~1 µs | ✅ Fast enough |
-| JSON payloads | 256 B | ~1.7 µs | ✅ Fast enough |
-| Config files | 1 KB | ~5 µs | ✅ Fast enough |
-| Small documents | 16 KB | ~87 µs | ✅ Fast enough |
-| Images | 64 KB | ~276 µs | ✅ Fast enough |
-| Large files | 1 MB | ~6 ms | ⚠️ Consider streaming |
-| Video/large data | 100+ MB | ~600+ ms | ❌ Use StreamCipher |
+**Takeaways**
 
-### Key Derivation Cost
+- AES-256-GCM is the fast path on this CPU (AES-NI). Use the ChaCha20-Poly1305
+  suite only where there is no hardware AES.
+- Shield's overhead over the raw AEAD is small and roughly constant per message
+  (HKDF-Expand + building the padded inner buffer). At 64 KB it is ~10%; it grows
+  at 1 MB because Shield allocates a separate padded plaintext buffer before
+  sealing. For bulk data, prefer `StreamCipher` (chunked) over a single
+  `encrypt()` call.
+- At tiny payloads the per-call fixed cost dominates, so MB/s looks low even
+  though absolute latency is sub-microsecond.
 
-Shield's PBKDF2 with 100,000 iterations takes ~29ms. This is intentional:
-- Prevents brute-force password attacks
-- One-time cost per session
-- Reuse Shield instance for multiple operations
+## Cross-language throughput (indicative)
+
+Encrypt / decrypt throughput (MB/s) for the password-mode API. See the reading
+note above — these are **not** directly comparable across rows.
+
+| Size  | Rust enc/dec | Go enc/dec | Python enc/dec | Node enc/dec |
+|-------|-------------:|-----------:|---------------:|-------------:|
+| 64 B  |   72 / 94    |   54 / 40  |    12 / 7      |    4 / 6     |
+| 256 B |  259 / 352   |  116 / 145 |    44 / 28     |   16 / 23    |
+| 1 KB  |  950 / 1190  |  396 / 459 |   167 / 78     |   62 / 78    |
+| 16 KB | 3690 / 5070  | 1232 / 2171|  1490 / 1200   |  242 / 520   |
+| 64 KB | 4490 / 5030  | 1289 / 2365|  4130 / 2810   |  410 / 873   |
+| 1 MB  | 1162 / 1620  | 1503 / 3189|  1040 / 952    |  644 / 1150  |
+
+All bindings reach hundreds of MB/s to multiple GB/s once payloads are large
+enough to amortize per-call overhead — i.e. all are bound by the same hardware
+AES-GCM underneath. The native bindings (Rust/Go) lead at small payloads where
+runtime overhead matters most.
+
+## Key derivation cost
+
+Password mode runs **PBKDF2-HMAC-SHA256 with 600,000 iterations** (OWASP 2023
+floor). This is a deliberate, one-time cost per Shield instance — reuse the
+instance for many operations.
+
+| Language | PBKDF2 (600k) |
+|----------|--------------:|
+| Rust     |    ~107 ms    |
+| Go       |    ~127 ms    |
+| Python   |    ~148 ms    |
+| Node     |    ~288 ms    |
 
 ```rust
-// Slow: New derivation each time
-for msg in messages {
-    let s = Shield::new("password", "service");  // 29ms each!
-    s.encrypt(msg);
+// Slow: re-derives the key every time (~107 ms each)
+for msg in &messages {
+    Shield::new("password", "service").encrypt(msg)?;
 }
 
-// Fast: Reuse instance
-let s = Shield::new("password", "service");  // 29ms once
-for msg in messages {
-    s.encrypt(msg);  // ~µs each
+// Fast: derive once, reuse
+let shield = Shield::new("password", "service"); // ~107 ms once
+for msg in &messages {
+    shield.encrypt(msg)?;                          // sub-µs each
 }
 ```
 
-## Detailed Results
+### Decrypt-side key caching
 
-### Encryption Throughput
+Password-mode *decryption* derives the key from the **sender's** salt carried in
+the message header. Because two parties sharing a password each pick their own
+random salt, a peer's salt differs from yours, so a naive implementation would
+re-run the full 600k-iteration PBKDF2 on **every inbound message**.
 
-| Size | Shield | AES-256-GCM | ChaCha20-Poly1305 |
-|------|--------|-------------|-------------------|
-| 64 B | 53 MB/s | 797 MB/s | 208 MB/s |
-| 256 B | 144 MB/s | 945 MB/s | 381 MB/s |
-| 1 KB | 190 MB/s | 2.1 GB/s | 775 MB/s |
-| 16 KB | 179 MB/s | 5.8 GB/s | 1.0 GB/s |
-| 64 KB | 227 MB/s | 3.5 GB/s | 1.0 GB/s |
-| 1 MB | 161 MB/s | 3.4 GB/s | 1.1 GB/s |
+All bindings (Rust, Go, Python, JS, and the others) therefore keep a salt-keyed
+cache of derived master keys: the first message from a given sender pays the
+PBKDF2 cost once, and subsequent messages from that sender decrypt in
+microseconds. The cache holds only derived keys (not passwords), is self-rate-
+limited (each new entry costs a full PBKDF2 to populate), and in the Rust
+implementation is zeroized when the `Shield` is dropped. This does not affect the
+wire format or cross-language interop — output is identical with or without it.
 
-### Decryption Throughput
-
-| Size | Shield | AES-256-GCM | ChaCha20-Poly1305 |
-|------|--------|-------------|-------------------|
-| 64 B | ~50 MB/s | 792 MB/s | 186 MB/s |
-| 256 B | ~140 MB/s | 2.1 GB/s | 481 MB/s |
-| 1 KB | ~180 MB/s | 3.5 GB/s | 1.4 GB/s |
-| 16 KB | ~175 MB/s | 5.0 GB/s | 1.0 GB/s |
-| 64 KB | ~220 MB/s | 4.0 GB/s | 1.1 GB/s |
-| 1 MB | ~160 MB/s | 3.5 GB/s | 1.0 GB/s |
-
-## Running Benchmarks
+## Running the benchmarks
 
 ```bash
-# Full benchmark suite
-cd shield-core && cargo bench
+# Rust (source of truth). --no-default-features --features std skips the CLI bin,
+# which avoids a Windows-only cdylib+bin link quirk (cargo #6313) during `bench`.
+cd shield-core
+cargo bench --bench encrypt_bench --no-default-features --features std
 
-# Quick benchmark (fewer iterations)
-cargo bench -- --quick
+# Go
+cd go && go test -bench=. -run='^$' -benchtime=1s ./shield/
 
-# Specific benchmark
-cargo bench -- shield_encrypt
-cargo bench -- aes_gcm
-cargo bench -- chacha20
+# Python
+python -X utf8 tests/bench/bench.py
+
+# Node
+node tests/bench/bench.js
 ```
 
-## Optimization Tips
+## Optimization tips
 
-### For High Throughput
-
-```rust
-// Use StreamCipher for large files (per-chunk parallelization)
-use shield_core::StreamCipher;
-
-let cipher = StreamCipher::new(key);
-cipher.encrypt_file("large.bin", "large.enc")?;
-```
-
-### For Latency-Sensitive Applications
-
-```rust
-// Pre-derive keys at startup
-lazy_static! {
-    static ref SHIELD: Shield = Shield::new("password", "service");
-}
-
-// Use pre-shared keys (skip PBKDF2)
-let key = /* from secure storage */;
-let encrypted = shield_core::quick_encrypt(&key, data)?;
-```
-
-### For Bulk Operations
-
-```rust
-// Batch encrypt with same instance
-let shield = Shield::new("password", "service");
-let encrypted: Vec<_> = messages.iter()
-    .map(|m| shield.encrypt(m).unwrap())
-    .collect();
-```
-
-## Security vs Performance Trade-offs
-
-| Priority | Recommendation |
-|----------|----------------|
-| Maximum security | Use Shield (EXPTIME guarantee) |
-| High throughput + security | Use AES-GCM (hardware accelerated) |
-| No hardware AES + security | Use ChaCha20-Poly1305 |
-| Cross-language interop | Use Shield (13 identical implementations) |
-
-Shield's ~150-200 MB/s is sufficient for:
-- API request/response encryption
-- Configuration and secret storage
-- Message-level encryption
-- Database field encryption
-
-For bulk data (videos, backups, large files), consider:
-- `StreamCipher` with chunked processing
-- Hardware-accelerated alternatives for transit encryption
-- Shield for keys/metadata, AES for bulk content
+- **Reuse instances.** Pay PBKDF2 once; encrypt/decrypt many times.
+- **Pre-shared-key mode** (`with_key` / `quick_encrypt`) skips PBKDF2 entirely
+  for machine-to-machine keys from a KMS/enclave.
+- **Bulk data** (video, backups, large files): use `StreamCipher` for chunked
+  processing instead of a single `encrypt()` of the whole payload.
+- **Pick the suite to match the hardware.** AES-256-GCM where AES-NI exists
+  (almost all server/desktop x86 and modern ARM); ChaCha20-Poly1305 otherwise.

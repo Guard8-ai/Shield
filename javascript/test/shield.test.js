@@ -6,7 +6,17 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
 
-const { Shield, quickEncrypt, quickDecrypt } = require('../src/shield');
+const {
+    Shield,
+    quickEncrypt,
+    quickDecrypt,
+    PBKDF2_ITERATIONS,
+    VERSION_PASSWORD,
+    VERSION_KEY,
+    SALT_SIZE,
+    NONCE_SIZE,
+    _sealDeterministic
+} = require('../src/shield');
 const { StreamCipher } = require('../src/stream');
 const { RatchetSession } = require('../src/ratchet');
 const { TOTP, RecoveryCodes } = require('../src/totp');
@@ -14,6 +24,15 @@ const { TOTP, RecoveryCodes } = require('../src/totp');
 // ============================================================================
 // Shield Core Tests
 // ============================================================================
+
+// Helper: build a v4 password-mode (0x03) ciphertext with an explicit inner
+// timestamp via the deterministic AEAD seal, so a chosen (old) timestamp can be
+// embedded to exercise the freshness window.
+function buildPasswordCiphertext(s, plaintext, timestampMs, padLen = 32) {
+    const nonce = crypto.randomBytes(NONCE_SIZE);
+    const padding = crypto.randomBytes(padLen);
+    return _sealDeterministic(s._aeadKey, s._suite, s._salt, nonce, timestampMs, padLen, padding, plaintext);
+}
 
 describe('Shield', () => {
     test('encrypt and decrypt', () => {
@@ -34,6 +53,8 @@ describe('Shield', () => {
     });
 
     test('wrong password fails', () => {
+        // CR-1: with random per-instance salts, the recipient still re-derives
+        // from the header salt, so a wrong password must fail authentication.
         const s1 = new Shield('correct', 'service');
         const s2 = new Shield('wrong', 'service');
         const encrypted = s1.encrypt(Buffer.from('secret'));
@@ -41,13 +62,28 @@ describe('Shield', () => {
         assert.equal(decrypted, null);
     });
 
-    test('tampered ciphertext fails', () => {
+    test('tampered ciphertext fails (every byte, incl. version + salt)', () => {
+        // Mirrors Python test_tamper_detection: flipping ANY byte fails auth.
         const s = new Shield('password', 'service');
-        const encrypted = s.encrypt(Buffer.from('secret'));
-        // Tamper with ciphertext
-        encrypted[20] ^= 0xFF;
-        const decrypted = s.decrypt(encrypted);
-        assert.equal(decrypted, null);
+        const ct = s.encrypt(Buffer.from('secret payload'));
+
+        // Sanity: untampered decrypts.
+        assert.deepEqual(s.decrypt(ct), Buffer.from('secret payload'));
+
+        for (let i = 0; i < ct.length; i++) {
+            const tampered = Buffer.from(ct);
+            tampered[i] ^= 0xFF;
+            assert.equal(s.decrypt(tampered), null, `tamper at byte ${i} not detected`);
+        }
+
+        // Explicitly check the version byte (index 0) and a salt byte (index 2,
+        // after version + suite).
+        const flipVersion = Buffer.from(ct);
+        flipVersion[0] ^= 0xFF;
+        assert.equal(s.decrypt(flipVersion), null);
+        const flipSalt = Buffer.from(ct);
+        flipSalt[2] ^= 0xFF;
+        assert.equal(s.decrypt(flipSalt), null);
     });
 
     test('withKey creates instance from raw key', () => {
@@ -63,64 +99,83 @@ describe('Shield', () => {
         assert.throws(() => Shield.withKey(Buffer.from('short')));
     });
 
-    test('same password/service produces same key', () => {
-        const s1 = new Shield('password', 'service');
-        const s2 = new Shield('password', 'service');
-        assert.deepEqual(s1.key, s2.key);
+    // CR-1: same password+service must now yield DIFFERENT keys (random salt).
+    // This replaces the old (insecure) "same password/service produces same key"
+    // assertion, which encoded the deterministic-key bug being fixed here.
+    test('same password+service produces different keys (random salt)', () => {
+        const a = new Shield('hunter2', 'github.com');
+        const b = new Shield('hunter2', 'github.com');
+
+        const ca = a.encrypt(Buffer.from('identical plaintext'));
+        const cb = b.encrypt(Buffer.from('identical plaintext'));
+
+        // Salts live at bytes [2:18] of a v4 password-mode ciphertext
+        // (after version + suite).
+        const saltA = ca.slice(2, 2 + SALT_SIZE);
+        const saltB = cb.slice(2, 2 + SALT_SIZE);
+        assert.notDeepEqual(saltA, saltB);
+
+        // And the derived master keys differ.
+        assert.notDeepEqual(a.key, b.key);
     });
 
-    test('v2 roundtrip', () => {
+    // CR-1: a different instance (different random salt) but same password+service
+    // re-derives the key from the header salt and decrypts successfully.
+    test('cross-instance roundtrip', () => {
+        const alice = new Shield('correct horse battery staple', 'service.example');
+        const bob = new Shield('correct horse battery staple', 'service.example');
+        const msg = Buffer.from('hello from alice');
+        assert.deepEqual(bob.decrypt(alice.encrypt(msg)), msg);
+    });
+
+    // CR-2: iteration count raised to 600,000.
+    test('PBKDF2 iterations is 600000', () => {
+        assert.equal(PBKDF2_ITERATIONS, 600000);
+    });
+
+    // v4: version bytes are explicit and authenticated (0x03 / 0x13).
+    test('version bytes', () => {
+        const pwCt = new Shield('pw', 'svc').encrypt(Buffer.from('x'));
+        assert.equal(pwCt[0], VERSION_PASSWORD);
+        assert.equal(VERSION_PASSWORD, 0x03);
+
+        const key = crypto.randomBytes(32);
+        const quickCt = quickEncrypt(key, Buffer.from('x'));
+        assert.equal(quickCt[0], VERSION_KEY);
+        assert.equal(VERSION_KEY, 0x13);
+
+        const keyedCt = Shield.withKey(key).encrypt(Buffer.from('x'));
+        assert.equal(keyedCt[0], VERSION_KEY);
+    });
+
+    // CR-1: explicit salt is honored and stored in the header.
+    test('explicit salt is honored and stored', () => {
+        const salt = crypto.randomBytes(SALT_SIZE);
+        const a = new Shield('pw', 'svc', { salt });
+        const b = new Shield('pw', 'svc', { salt });
+        assert.deepEqual(a.key, b.key); // same salt -> same key
+
+        const ct = a.encrypt(Buffer.from('data'));
+        assert.deepEqual(ct.slice(2, 2 + SALT_SIZE), salt);
+        assert.deepEqual(b.decrypt(ct), Buffer.from('data'));
+    });
+
+    test('roundtrip with explicit maxAge', () => {
         const s = new Shield('password', 'service', { maxAgeMs: 60000 });
-        const plaintext = Buffer.from('Test v2 message');
+        const plaintext = Buffer.from('Test message');
         const encrypted = s.encrypt(plaintext);
         const decrypted = s.decrypt(encrypted);
         assert.deepEqual(decrypted, plaintext);
     });
 
-    test('v2 replay protection fresh', () => {
-        const s = new Shield('password', 'service', { maxAgeMs: 60000 });
-        const plaintext = Buffer.from('Fresh message');
-        const encrypted = s.encrypt(plaintext);
-        const decrypted = s.decrypt(encrypted);
-        assert.deepEqual(decrypted, plaintext);
-    });
-
-    test('v2 replay protection expired', () => {
+    test('replay/freshness window rejects expired message', () => {
         const s = new Shield('password', 'service', { maxAgeMs: 1000 });
-        const plaintext = Buffer.from('Old message');
-
-        // Manually create expired message (2 seconds old)
-        const nonce = crypto.randomBytes(16);
-        const counterBytes = Buffer.alloc(8);
-        counterBytes.writeBigUInt64LE(BigInt(0));
-        const oldTimestampMs = Date.now() - 2000;
-        const timestampBytes = Buffer.alloc(8);
-        timestampBytes.writeBigUInt64LE(BigInt(oldTimestampMs));
-        const padLen = 32;
-        const padLenByte = Buffer.alloc(1);
-        padLenByte[0] = padLen;
-        const padding = crypto.randomBytes(padLen);
-
-        const data = Buffer.concat([counterBytes, timestampBytes, padLenByte, padding, plaintext]);
-
-        const { _generateKeystream: generateKeystream } = require('../src/shield');
-        const keystream = generateKeystream(s._encKey, nonce, data.length);
-        const ciphertext = Buffer.alloc(data.length);
-        for (let i = 0; i < data.length; i++) {
-            ciphertext[i] = data[i] ^ keystream[i];
-        }
-        const mac = crypto.createHmac('sha256', s._macKey)
-            .update(Buffer.concat([nonce, ciphertext]))
-            .digest()
-            .slice(0, 16);
-        const encrypted = Buffer.concat([nonce, ciphertext, mac]);
-
-        // Should reject expired message
-        const decrypted = s.decrypt(encrypted);
-        assert.equal(decrypted, null);
+        // Manually build an expired (2s old) password-mode ciphertext.
+        const encrypted = buildPasswordCiphertext(s, Buffer.from('Old message'), Date.now() - 2000);
+        assert.equal(s.decrypt(encrypted), null);
     });
 
-    test('v2 length variation', () => {
+    test('length variation from random padding', () => {
         const s = new Shield('password', 'service');
         const plaintext = Buffer.from('Same message');
 
@@ -134,128 +189,19 @@ describe('Shield', () => {
         assert.ok(lengths.size > 1);
     });
 
-    test('v1 backward compatibility', () => {
+    test('unknown version byte is rejected', () => {
         const s = new Shield('password', 'service');
-        const plaintext = Buffer.from('v1 message');
-
-        // Manually create v1 ciphertext: counter(8) || plaintext
-        const nonce = crypto.randomBytes(16);
-        const counterBytes = Buffer.alloc(8);
-        counterBytes.writeBigUInt64LE(BigInt(0));
-        const data = Buffer.concat([counterBytes, plaintext]);
-
-        const { _generateKeystream: generateKeystream } = require('../src/shield');
-        const keystream = generateKeystream(s._encKey, nonce, data.length);
-        const ciphertext = Buffer.alloc(data.length);
-        for (let i = 0; i < data.length; i++) {
-            ciphertext[i] = data[i] ^ keystream[i];
-        }
-        const mac = crypto.createHmac('sha256', s._macKey)
-            .update(Buffer.concat([nonce, ciphertext]))
-            .digest()
-            .slice(0, 16);
-        const encrypted = Buffer.concat([nonce, ciphertext, mac]);
-
-        // Should auto-detect and decrypt as v1
-        const decrypted = s.decrypt(encrypted);
-        assert.deepEqual(decrypted, plaintext);
+        const ct = s.encrypt(Buffer.from('secret'));
+        const bad = Buffer.from(ct);
+        bad[0] = 0x99; // not 0x03 or 0x13
+        assert.equal(s.decrypt(bad), null);
     });
 
-    test('decrypt v1 explicit', () => {
-        const s = new Shield('password', 'service');
-        const plaintext = Buffer.from('v1 explicit');
-
-        // Create v1 ciphertext
-        const nonce = crypto.randomBytes(16);
-        const counterBytes = Buffer.alloc(8);
-        counterBytes.writeBigUInt64LE(BigInt(0));
-        const data = Buffer.concat([counterBytes, plaintext]);
-
-        const { _generateKeystream: generateKeystream } = require('../src/shield');
-        const keystream = generateKeystream(s._encKey, nonce, data.length);
-        const ciphertext = Buffer.alloc(data.length);
-        for (let i = 0; i < data.length; i++) {
-            ciphertext[i] = data[i] ^ keystream[i];
-        }
-        const mac = crypto.createHmac('sha256', s._macKey)
-            .update(Buffer.concat([nonce, ciphertext]))
-            .digest()
-            .slice(0, 16);
-        const encrypted = Buffer.concat([nonce, ciphertext, mac]);
-
-        // Decrypt using explicit v1 method
-        const decrypted = s.decryptV1(encrypted);
-        assert.deepEqual(decrypted, plaintext);
-    });
-
-    test('no fallback on expired v2', () => {
-        const s = new Shield('password', 'service', { maxAgeMs: 500 });
-        const plaintext = Buffer.from('expired v2');
-
-        // Create expired v2 message (2 seconds old)
-        const oldTimestampMs = Date.now() - 2000;
-        const nonce = crypto.randomBytes(16);
-        const counterBytes = Buffer.alloc(8);
-        counterBytes.writeBigUInt64LE(BigInt(0));
-        const timestampBytes = Buffer.alloc(8);
-        timestampBytes.writeBigUInt64LE(BigInt(oldTimestampMs));
-        const padLen = 32;
-        const padLenByte = Buffer.alloc(1);
-        padLenByte[0] = padLen;
-        const padding = crypto.randomBytes(padLen);
-
-        const data = Buffer.concat([counterBytes, timestampBytes, padLenByte, padding, plaintext]);
-
-        const { _generateKeystream: generateKeystream } = require('../src/shield');
-        const keystream = generateKeystream(s._encKey, nonce, data.length);
-        const ciphertext = Buffer.alloc(data.length);
-        for (let i = 0; i < data.length; i++) {
-            ciphertext[i] = data[i] ^ keystream[i];
-        }
-        const mac = crypto.createHmac('sha256', s._macKey)
-            .update(Buffer.concat([nonce, ciphertext]))
-            .digest()
-            .slice(0, 16);
-        const encrypted = Buffer.concat([nonce, ciphertext, mac]);
-
-        // Should reject (not fallback to v1)
-        const decrypted = s.decrypt(encrypted);
-        assert.equal(decrypted, null);
-    });
-
-    test('v2 disabled replay protection', () => {
+    test('disabled freshness window accepts old message', () => {
         const s = new Shield('password', 'service', { maxAgeMs: null });
-        const plaintext = Buffer.from('old but valid');
-
-        // Create message with very old timestamp
-        const oldTimestampMs = Date.now() - 100000;
-        const nonce = crypto.randomBytes(16);
-        const counterBytes = Buffer.alloc(8);
-        counterBytes.writeBigUInt64LE(BigInt(0));
-        const timestampBytes = Buffer.alloc(8);
-        timestampBytes.writeBigUInt64LE(BigInt(oldTimestampMs));
-        const padLen = 32;
-        const padLenByte = Buffer.alloc(1);
-        padLenByte[0] = padLen;
-        const padding = crypto.randomBytes(padLen);
-
-        const data = Buffer.concat([counterBytes, timestampBytes, padLenByte, padding, plaintext]);
-
-        const { _generateKeystream: generateKeystream } = require('../src/shield');
-        const keystream = generateKeystream(s._encKey, nonce, data.length);
-        const ciphertext = Buffer.alloc(data.length);
-        for (let i = 0; i < data.length; i++) {
-            ciphertext[i] = data[i] ^ keystream[i];
-        }
-        const mac = crypto.createHmac('sha256', s._macKey)
-            .update(Buffer.concat([nonce, ciphertext]))
-            .digest()
-            .slice(0, 16);
-        const encrypted = Buffer.concat([nonce, ciphertext, mac]);
-
-        // Should decrypt successfully (no age check)
-        const decrypted = s.decrypt(encrypted);
-        assert.deepEqual(decrypted, plaintext);
+        // Very old timestamp; with maxAgeMs disabled it must still decrypt.
+        const encrypted = buildPasswordCiphertext(s, Buffer.from('old but valid'), Date.now() - 100000);
+        assert.deepEqual(s.decrypt(encrypted), Buffer.from('old but valid'));
     });
 });
 
@@ -1006,6 +952,16 @@ describe('SecureSession', () => {
         encrypted[20] ^= 0xFF;
         const result = session.decrypt(encrypted);
         assert.equal(result, null);
+    });
+
+    test('uses standard AEAD format', () => {
+        // 4-byte LE version, then AEAD version byte 0x13 + AES-256-GCM suite 0x01.
+        const session = new SecureSession(Buffer.alloc(32, 7));
+        const encrypted = session.encrypt(Buffer.from('session data'));
+        assert.equal(encrypted.readUInt32LE(0), 1); // initial version
+        assert.equal(encrypted[4], 0x13);           // VERSION_KEY
+        assert.equal(encrypted[5], 0x01);           // SUITE_AES_256_GCM
+        assert.ok(!encrypted.equals(session.encrypt(Buffer.from('session data'))));
     });
 
     test('auto rotation', async () => {

@@ -291,13 +291,20 @@ const sig = lamport.sign(Buffer.from('message'));
 const valid = LamportSignature.verify(Buffer.from('message'), sig, lamport.publicKey);
 ```
 
-## Key Exchange (PAKE)
+## Key Exchange (pre-shared-key handshake)
+
+> ⚠️ **`PAKEExchange` is NOT a true PAKE.** It sends a deterministic,
+> password-derived contribution on the wire, so a recorded handshake permits an
+> **offline dictionary attack** against a low-entropy secret. Use it **only with
+> a high-entropy shared secret** (≥128 bits). For password-based or
+> forward-secret key establishment, use the X25519 + ML-KEM-768 hybrid KEX
+> (`pqhybrid` / `pq` feature).
 
 ### Python
 ```python
 from shield.exchange import PAKEExchange, KeySplitter
 
-# Password-authenticated key exchange
+# Pre-shared-key handshake (high-entropy secret only — not a true PAKE)
 salt = PAKEExchange.generate_salt()
 client_key = PAKEExchange.derive("shared_password", salt, "client")
 server_key = PAKEExchange.derive("shared_password", salt, "server")
@@ -313,7 +320,7 @@ recovered = KeySplitter.combine(shares)
 ```javascript
 const { PAKEExchange, KeySplitter } = require('@dikestra/shield');
 
-// PAKE
+// Pre-shared-key handshake (high-entropy secret only — not a true PAKE)
 const salt = PAKEExchange.generateSalt();
 const clientKey = PAKEExchange.derive('password', salt, 'client');
 const serverKey = PAKEExchange.derive('password', salt, 'server');
@@ -357,7 +364,13 @@ manager.decrypt(encryptedV2);  // Works
 
 ## Secure Channel (Rust-only)
 
-TLS-like encrypted transport using PAKE + RatchetSession.
+TLS-like encrypted transport using a pre-shared-key handshake + RatchetSession.
+
+> ⚠️ The handshake is **not a true PAKE** — supply a **high-entropy** shared
+> secret (the `"shared-secret"` literals below are illustrative; a real
+> deployment must use ≥128-bit entropy). A recorded handshake otherwise permits
+> an offline dictionary attack. For password-based key establishment, derive the
+> channel secret from the X25519 + ML-KEM-768 hybrid KEX (`pq` feature).
 
 ### Rust (Sync)
 ```rust
@@ -390,7 +403,7 @@ use shield_core::{AsyncShieldChannel, ChannelConfig};
 use tokio::net::TcpStream;
 
 let config = ChannelConfig::new("shared-secret", "my-service")
-    .with_iterations(100_000)
+    .with_iterations(600_000)
     .with_timeout(5_000);
 
 // Client
@@ -406,8 +419,8 @@ println!("Service: {}", channel.service());
 ```
 
 ### Features
-- PAKE handshake (no certificates needed)
-- Forward secrecy via key ratcheting
+- Pre-shared-key handshake, no certificates needed (high-entropy secret only — not a true PAKE)
+- Forward secrecy of per-message keys via key ratcheting
 - Message authentication (HMAC)
 - Replay protection (counters)
 - Wrong password = authentication failure
@@ -651,28 +664,27 @@ if result.level in (StrengthLevel.Critical, StrengthLevel.Weak):
 
 | Parameter | Value |
 |-----------|-------|
-| Key derivation | PBKDF2-SHA256 |
-| Iterations | 100,000 |
+| Key derivation | PBKDF2-HMAC-SHA256 |
+| Iterations | 600,000 |
 | Key size | 256 bits |
-| Nonce size | 128 bits |
-| MAC size | 128 bits |
-| Stream cipher | SHA256-CTR |
-| Authentication | HMAC-SHA256 |
+| Nonce size | 96 bits |
+| Auth tag size | 128 bits |
+| AEAD cipher | AES-256-GCM (default) / ChaCha20-Poly1305 |
+| AEAD-key derivation | HKDF-SHA256-Expand |
 
-## Why EXPTIME-Ready?
+## Why Symmetric-Only?
 
-Shield uses only proven symmetric primitives with unconditional security bounds.
+Shield builds on well-established symmetric primitives. Like all practical ciphers, their security is conjectural (it relies on standard assumptions), not unconditional.
 
 **Shield remains secure because:**
-- 256-bit symmetric keys require 2^256 operations to break
-- This is EXPTIME-hard (exponential in key size)
+- 256-bit symmetric keys require 2^256 operations to brute-force
 - Quantum computers only halve this to 2^128 (Grover's)
-- No mathematical shortcut exists or can exist
+- No practical shortcut is known (relies on standard assumptions about SHA-256)
 
-**Shield uses only proven EXPTIME primitives:**
-- SHA-256 (hash) - 2^256 preimage resistance
-- HMAC-SHA256 (MAC) - 2^256 forgery resistance
-- PBKDF2 (KDF) - 2^256 * iterations key space
+**Shield uses only well-established symmetric primitives:**
+- SHA-256 - 256-bit preimage / 128-bit collision resistance
+- HMAC-SHA256 (MAC, truncated to 128 bits) - 128-bit forgery resistance
+- PBKDF2 (KDF) - stretches passwords against brute-force
 - Lamport signatures - hash-based, quantum-safe
 
 ## Browser SDK

@@ -1,16 +1,40 @@
-# Shield - EXPTIME-Secure Encryption (C)
+# Shield - Authenticated Symmetric Encryption (C)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Symmetric cryptography with proven exponential-time security.
+Symmetric authenticated encryption with 256-bit keys (~128-bit post-quantum security).
 
 ## Why Shield?
 
-Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Breaking requires 2^256 operations - no shortcut exists:
+Shield builds on well-established symmetric primitives (SHA-256, HMAC-SHA256, PBKDF2). A 256-bit key gives 256-bit classical and ~128-bit post-quantum brute-force resistance, assuming these primitives are secure:
 
-- **PBKDF2-SHA256** for key derivation (100,000 iterations)
+- **PBKDF2-SHA256** for key derivation (600,000 iterations, per-instance random salt)
 - **SHA256-based stream cipher** (AES-256-CTR equivalent)
-- **HMAC-SHA256** for authentication
+- **HMAC-SHA256** for authentication (over an authenticated version byte and salt)
+
+### Wire format
+
+Every ciphertext begins with a single authenticated version byte:
+
+```
+password mode (0x02):  version(1) || salt(16) || nonce(16) || ciphertext || mac(16)
+key mode      (0x12):  version(1) ||           nonce(16) || ciphertext || mac(16)
+```
+
+- The MAC = `HMAC-SHA256(mac_key, version || [salt] || nonce || ciphertext)` truncated
+  to 16 bytes, so the version and salt are authenticated.
+- Inner (XOR-encrypted) layout is unchanged: `counter(8) || timestamp_ms(8) ||
+  pad_len(1) || random_padding(32-128) || plaintext`.
+- Fixed overhead beyond the inner layout: **35 bytes** in password mode
+  (1 version + 16 salt + 16 nonce + 16 mac) and **33 bytes** in key mode
+  (1 version + 16 nonce + 16 mac). Total ciphertext size =
+  `overhead + 17 (inner header) + pad_len(32-128) + plaintext_len`.
+
+Decryption dispatches on the version byte and hard-rejects any value other than
+`0x02`/`0x12` (`SHIELD_ERR_INVALID_VERSION`); there is no legacy v1/v2 heuristic.
+In password mode the salt is read from the header and the key is re-derived, so a
+recipient with the same password+service decrypts a sender even though each
+instance uses its own random salt.
 
 ## Installation
 
@@ -233,14 +257,14 @@ Shield C library is **NOT** thread-safe by default. Use separate `shield_t` inst
 
 ## Security Model
 
-Shield uses only symmetric primitives with unconditional security:
+Shield builds on well-established symmetric primitives. Like all practical ciphers, their security is conjectural (it relies on standard assumptions), not unconditional:
 
 - **Symmetric encryption** (AES-256 equivalent)
 - **Hash functions** (SHA-256)
 - **HMAC authentication**
 - **Key derivation** (PBKDF2)
 
-Breaking requires 2^256 operations - no shortcut exists.
+Brute-forcing a full 256-bit key requires 2^256 operations; this relies on the standard assumption that SHA-256/HMAC have no exploitable structure (an assumption, not a mathematical proof).
 
 ## Dependencies
 

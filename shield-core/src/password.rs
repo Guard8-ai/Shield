@@ -1,7 +1,7 @@
 //! Password strength analysis and validation.
 //!
 //! Provides entropy calculation and feedback to prevent users from
-//! undermining Shield's EXPTIME security with weak passwords.
+//! undermining Shield's security with weak passwords.
 //!
 //! # Example
 //!
@@ -255,12 +255,12 @@ pub const fn get_strength_level(entropy: f64) -> StrengthLevel {
 
 /// Estimate time to crack password via brute force.
 ///
-/// Assumes 10 billion guesses/second GPU, reduced by PBKDF2 100k iterations.
+/// Assumes 10 billion guesses/second GPU, reduced by PBKDF2 600k iterations.
 #[must_use]
 pub fn estimate_crack_time(entropy: f64) -> f64 {
     let keyspace = 2.0_f64.powf(entropy);
-    // 10B guesses/sec GPU, but PBKDF2 100k iterations slows to ~100k/sec
-    let effective_rate: f64 = 1e10 / 100_000.0;
+    // 10B guesses/sec GPU, but PBKDF2 600k iterations slows to ~16.7k/sec
+    let effective_rate: f64 = 1e10 / 600_000.0;
     (keyspace / 2.0) / effective_rate.max(1.0)
 }
 

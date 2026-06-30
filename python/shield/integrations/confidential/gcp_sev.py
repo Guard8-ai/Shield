@@ -35,10 +35,12 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 from shield.integrations.confidential.base import (
+    ATTESTATION_NOT_VERIFIED_MESSAGE,
     AttestationError,
     AttestationProvider,
     AttestationResult,
     TEEType,
+    warn_insecure_attestation_demo,
 )
 
 GCP_METADATA_URL = "http://metadata.google.internal/computeMetadata/v1"
@@ -70,12 +72,16 @@ class SEVAttestationProvider(AttestationProvider):
         verify_signature: bool = True,
         allowed_zones: Optional[List[str]] = None,
         audience: Optional[str] = None,
+        allow_insecure_demo: bool = False,
     ):
         self.project_id = project_id
         self.expected_measurements = expected_measurements or {}
         self.verify_signature = verify_signature
         self.allowed_zones = allowed_zones
         self.audience = audience or "shield-attestation"
+        self.allow_insecure_demo = allow_insecure_demo
+        if allow_insecure_demo:
+            warn_insecure_attestation_demo("GCP SEV-SNP")
 
     @property
     def tee_type(self) -> TEEType:
@@ -212,6 +218,18 @@ class SEVAttestationProvider(AttestationProvider):
                     error=f"Measurement {name} mismatch",
                     raw_evidence=evidence,
                 )
+
+        # FAIL-CLOSED: the JWS signature (parts[2]) is never verified here, so we
+        # must not claim verified=True from unverified evidence (RT2-4).
+        if not self.allow_insecure_demo:
+            return AttestationResult(
+                verified=False,
+                tee_type=self.tee_type,
+                measurements=measurements,
+                claims=claims,
+                error=ATTESTATION_NOT_VERIFIED_MESSAGE.format(tee="GCP SEV-SNP"),
+                raw_evidence=evidence,
+            )
 
         return AttestationResult(
             verified=True,

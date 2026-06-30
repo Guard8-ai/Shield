@@ -2,9 +2,16 @@
 Shield Secure Channel - TLS/SSH-like secure transport using symmetric crypto.
 
 Provides encrypted bidirectional communication with:
-- PAKE-based handshake (no certificates needed)
+- Pre-shared-key handshake (no certificates needed; NOT a true PAKE)
 - Forward secrecy via key ratcheting
 - Message authentication and replay protection
+
+SECURITY: The handshake is a pre-shared-key exchange, NOT a true PAKE. Each
+party's contribution HMAC(PBKDF2(secret, salt), role) is sent on the wire with
+the salt, so a recorded handshake permits an OFFLINE DICTIONARY ATTACK against a
+low-entropy secret. Safe ONLY with a high-entropy shared secret (>=128 bits);
+for password-based or forward-secret setup use the X25519 + ML-KEM-768 hybrid
+KEX (pqhybrid) instead.
 
 Example:
     >>> from shield.channel import ShieldChannel, ChannelConfig
@@ -49,7 +56,7 @@ class ChannelConfig:
     """Channel configuration."""
     password: str
     service: str
-    iterations: int = 200000
+    iterations: int = 600000
     handshake_timeout_ms: int = 30000
 
     def with_iterations(self, iterations: int) -> 'ChannelConfig':
@@ -68,7 +75,9 @@ class ShieldChannel:
     Shield secure channel for encrypted communication.
 
     Provides TLS-like security using only symmetric cryptography:
-    - PAKE handshake establishes shared key from password
+    - Pre-shared-key handshake (NOT a true PAKE) establishes shared key from
+      the pre-shared secret; safe ONLY with a high-entropy secret (>=128 bits),
+      since a recorded handshake allows an offline dictionary attack
     - RatchetSession provides forward secrecy
     - All messages authenticated with HMAC
     """
@@ -237,14 +246,23 @@ class ShieldChannel:
         # Combine contributions
         base_key = PAKEExchange.combine(local_contribution, remote_contribution)
 
-        # Mix in password-derived secret (not exchanged)
-        password_key = PAKEExchange.derive(
+        # Mix in the PBKDF2-derived secret (not exchanged). This is already a
+        # 32-byte key stretched from the password via PBKDF2 (600k); it is not
+        # the raw password.
+        derived_key = PAKEExchange.derive(
             config.password, salt, "session", config.iterations
         )
 
-        # Final session key = hash(base_key || password_key)
-        combined = base_key + password_key
-        return hashlib.sha256(combined).digest()
+        # Final session key = HMAC-SHA256(base_key, derived_key || service).
+        # Binding the service identifier provides domain separation: the same
+        # shared secret used for two different services derives two different
+        # session keys, so a credential provisioned for one service cannot
+        # establish a channel for another. derived_key is a fixed 32 bytes,
+        # so the concatenation is unambiguous across implementations.
+        # Keyed HMAC (not SHA256(key || data)) avoids length-extension and
+        # matches the Rust source of truth byte-for-byte.
+        mac_input = derived_key + config.service.encode()
+        return hmac.new(base_key, mac_input, hashlib.sha256).digest()
 
     @classmethod
     def _send_handshake(cls, stream: BinaryIO, msg_type: int, data: bytes) -> None:

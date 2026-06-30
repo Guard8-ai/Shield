@@ -8,8 +8,8 @@ name = "shield-core"
 version = "2.2.0"
 edition = "2021"
 authors = ["Eliran Sabag"]
-description = "EXPTIME-secure encryption library - Rust core implementation"
-license = "CC0-1.0"
+description = "Authenticated symmetric encryption library - Rust core implementation"
+license = "MIT"
 repository = "https://github.com/Dikestra.ai/Shield"
 keywords = ["cryptography", "encryption", "security", "post-quantum"]
 categories = ["cryptography", "no-std"]
@@ -23,10 +23,12 @@ std = []
 cli = ["dep:rpassword", "dep:getrandom"]
 wasm = ["dep:wasm-bindgen", "dep:getrandom", "getrandom/js"]
 async = ["dep:tokio", "dep:reqwest"]
-confidential = ["async", "dep:ciborium", "dep:async-trait"]
+confidential = ["async", "dep:ciborium", "dep:async-trait", "dep:jsonwebtoken", "dep:dcap-qvl"]
 openapi = ["confidential", "dep:utoipa"]
-fido2 = ["std", "dep:webauthn-rs", "dep:webauthn-rs-proto"]
+fido2 = ["std"]
 pgvector = ["async", "dep:tokio-postgres", "dep:postgres-types", "dep:chrono"]
+# Post-quantum hybrid key exchange (X25519 + ML-KEM-768). Optional, off by default.
+pq = ["dep:ml-kem", "dep:x25519-dalek", "dep:hkdf", "dep:sha2"]
 
 [[bin]]
 name = "shield"
@@ -59,18 +61,25 @@ serde_json = "1.0"
 # Confidential Computing dependencies
 ciborium = { version = "0.2", optional = true }
 async-trait = { version = "0.1", optional = true }
+# JWT/JWS signature verification for SEV/MAA attestation tokens (audited, ring-backed)
+jsonwebtoken = { version = "9", optional = true }
+# Intel SGX DCAP quote verification (pure-Rust). AWS Nitro COSE Sign1 + the X.509
+# chain are verified with `ring` (ECDSA P-384), so no separate COSE/x509 crates.
+dcap-qvl = { version = "0.5", optional = true }
 reqwest = { version = "0.11", features = ["json"], optional = true }
 # OpenAPI/Swagger support
 utoipa = { version = "4.2", features = ["chrono"], optional = true }
-# FIDO2/WebAuthn dependencies
-webauthn-rs = { version = "0.4", optional = true }
-webauthn-rs-proto = { version = "0.4", optional = true }
 # pgvector dependencies
 tokio-postgres = { version = "0.7", optional = true }
 postgres-types = { version = "0.2", optional = true }
 chrono = { version = "0.4", optional = true }
 # Hardware fingerprinting (v2.1)
 md5 = "0.7"
+# Post-quantum hybrid KEX primitives (optional `pq` feature; audited RustCrypto crates)
+ml-kem = { version = "0.2", features = ["deterministic"], optional = true }
+x25519-dalek = { version = "2", features = ["static_secrets"], optional = true }
+hkdf = { version = "0.12", optional = true }
+sha2 = { version = "0.10", optional = true }
 
 # YOU ARE NOT ALLOWED TO CHANGE THIS FILE UNLESS EXPLICITLY ASKED.
 [dev-dependencies]

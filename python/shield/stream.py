@@ -20,9 +20,29 @@ from typing import Iterator, Optional
 # Default chunk size: 64KB
 DEFAULT_CHUNK_SIZE = 64 * 1024
 
+# Domain-separation label for the authenticated end-of-stream key.
+_EOF_LABEL = b"shield-stream-eof"
 
-def _derive_key(password: str, salt: bytes, iterations: int = 100_000) -> bytes:
-    """Derive key from password using PBKDF2."""
+
+def _compute_eof_tag(master_key: bytes, stream_salt: bytes, chunk_count: int) -> bytes:
+    """Compute the authenticated end-of-stream tag.
+
+    The tag commits to the stream salt and the total number of data chunks (a
+    length commitment). A stream truncated at a chunk boundary has a different
+    chunk count, and an attacker cannot forge a matching tag without the master
+    key, so truncation -- including re-appending a bare zero-length end marker --
+    is detected.
+
+    eof_key = HMAC_SHA256(master_key, "shield-stream-eof")
+    eof_tag = HMAC_SHA256(eof_key, stream_salt || chunk_count as u64 LE)
+    """
+    eof_key = hmac.new(master_key, _EOF_LABEL, hashlib.sha256).digest()
+    message = stream_salt + struct.pack("<Q", chunk_count)
+    return hmac.new(eof_key, message, hashlib.sha256).digest()
+
+
+def _derive_key(password: str, salt: bytes, iterations: int = 600_000) -> bytes:
+    """Derive key from password using PBKDF2 (CR-2: OWASP 2023 floor)."""
     return hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
 
 
@@ -140,8 +160,11 @@ class StreamCipher:
             yield struct.pack("<I", len(encrypted)) + encrypted
             chunk_num += 1
 
-        # End marker
-        yield struct.pack("<I", 0)
+        # Authenticated end-of-stream trailer: the zero-length marker followed by
+        # a tag committing to the total chunk count, so a truncated stream (with
+        # or without a forged bare marker) is detectable.
+        eof_tag = _compute_eof_tag(self.key, stream_salt, chunk_num)
+        yield struct.pack("<I", 0) + eof_tag
 
     def decrypt_stream(self, enc_iter: Iterator[bytes]) -> Iterator[bytes]:
         """
@@ -163,14 +186,24 @@ class StreamCipher:
 
         chunk_num = 0
         buffer = b""
+        saw_end_marker = False
 
         for data in enc_iter:
             buffer += data
 
-            while len(buffer) >= 4:
+            while not saw_end_marker and len(buffer) >= 4:
                 enc_len = struct.unpack("<I", buffer[:4])[0]
-                if enc_len == 0:  # End marker
-                    return
+                if enc_len == 0:  # Authenticated end-of-stream marker
+                    # Require the 32-byte end-of-stream tag to follow.
+                    if len(buffer) < 4 + 32:
+                        break  # wait for more data
+                    tag = buffer[4 : 4 + 32]
+                    expected = _compute_eof_tag(self.key, stream_salt, chunk_num)
+                    if not hmac.compare_digest(tag, expected):
+                        raise ValueError("end-of-stream tag verification failed")
+                    saw_end_marker = True
+                    buffer = buffer[4 + 32 :]
+                    break
 
                 if len(buffer) < 4 + enc_len:
                     break
@@ -190,6 +223,14 @@ class StreamCipher:
 
                 yield decrypted
                 chunk_num += 1
+
+            if saw_end_marker:
+                break
+
+        # A stream that ends without the authenticated marker has been truncated
+        # (the trailing chunks and the end-of-stream tag were dropped).
+        if not saw_end_marker:
+            raise ValueError("stream truncated: missing end-of-stream marker")
 
     def encrypt_file(self, in_path: str, out_path: str) -> None:
         """

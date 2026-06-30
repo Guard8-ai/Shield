@@ -4,24 +4,24 @@ Shield's threat model, guarantees, and limitations.
 
 ---
 
-## The EXPTIME Guarantee
+## Security Model
 
-Shield provides **EXPTIME security**: breaking the encryption requires exponential time in the key size, regardless of any mathematical breakthroughs.
+Shield is authenticated symmetric encryption: with a full-entropy 256-bit key, brute force requires 2^256 operations, assuming the underlying primitives (SHA-256, HMAC, PBKDF2) are secure.
 
 ### What This Means
 
 | Attack | Required Operations | Feasibility |
 |--------|---------------------|-------------|
-| Brute force 256-bit key | 2^256 | Impossible (more than atoms in universe) |
-| Quantum computer (Grover) | 2^128 | Still impossible for foreseeable future |
-| P=NP proven | Still 2^256 | No polynomial shortcut exists |
-| New math discovered | Still 2^256 | Symmetric crypto has unconditional bounds |
+| Brute force 256-bit key | 2^256 | Computationally infeasible with current and foreseeable technology |
+| Quantum computer (Grover) | 2^128 | ~128-bit post-quantum; infeasible for the foreseeable future |
+| P=NP proven | Still ~2^256 | A random symmetric key has no structure for a polynomial algorithm to exploit |
+| New cryptanalysis of SHA-256 | Could reduce cost | Security rests on standard assumptions about SHA-256/HMAC, not a proof |
 
 ### Why Shield Uses Symmetric Cryptography
 
-RSA, ECDSA, and similar schemes rely on computational assumptions that may be broken by future discoveries.
+RSA, ECDSA, and similar schemes rely on number-theoretic assumptions that asymmetric-specific attacks (and large quantum computers) can break.
 
-Shield uses **no computational assumptions**. The 2^256 bound is a mathematical fact, not a belief.
+Shield uses only symmetric primitives, which are not affected by those attacks. Brute-forcing a full 256-bit key is infeasible; note this assumes the primitives are secure and applies to full-entropy keys, not password-derived keys.
 
 ---
 
@@ -33,8 +33,8 @@ Shield uses **no computational assumptions**. The 2^256 bound is a mathematical 
 |--------|------------|-----|
 | Passive eavesdropper | Encryption | Cannot read ciphertext without key |
 | Active attacker | Authentication | HMAC detects any tampering |
-| Replay attacks | Ratcheting | Counter prevents message reuse |
-| Password guessing | PBKDF2 | 100,000 iterations = ~200ms per guess |
+| Replay attacks | RatchetSession | Per-message counters reject reused/out-of-order messages. The base API only enforces a timestamp freshness window (not full replay protection) |
+| Password guessing | PBKDF2 | 600,000 iterations = ~200ms per guess |
 | Quantum computer | 256-bit keys | Grover only halves effective key size |
 | P=NP proof | Symmetric only | No asymmetric assumptions to break |
 | Key compromise (past) | Ratcheting | Forward secrecy protects old messages |
@@ -57,19 +57,23 @@ All primitives are NIST-approved and battle-tested:
 
 | Primitive | Standard | Security Level |
 |-----------|----------|----------------|
-| SHA-256 | FIPS 180-4 | 256-bit preimage |
-| HMAC-SHA256 | RFC 2104 | 256-bit MAC |
-| PBKDF2-SHA256 | RFC 8018 | Key stretching |
-| SHA256-CTR | Custom | 256-bit stream cipher |
+| AES-256-GCM | NIST SP 800-38D / FIPS 197 | 256-bit AEAD (default) |
+| ChaCha20-Poly1305 | RFC 8439 | 256-bit AEAD (optional suite) |
+| PBKDF2-HMAC-SHA256 | RFC 8018 | Key stretching (600k iterations) |
+| HKDF-SHA256 | RFC 5869 | AEAD-key derivation (domain separation) |
 
-### Why SHA256-CTR Instead of AES?
+### Why a standard AEAD? (wire format v4)
 
-Shield uses a SHA256-based counter mode instead of AES for philosophical consistency:
+Shield's data-encryption step is a **standard, audited, hardware-accelerated
+AEAD** — AES-256-GCM by default, ChaCha20-Poly1305 where there is no hardware
+AES. No cryptography is hand-rolled; each binding uses its platform's vetted
+crypto provider (`ring`, OpenSSL, Go stdlib, .NET BCL, JCE, Windows CNG, Apple
+CryptoKit).
 
-1. **Same security**: Both are 256-bit symmetric ciphers
-2. **Simpler**: One primitive (SHA256) instead of two
-3. **Portable**: SHA256 is easier to implement correctly
-4. **Future-proof**: Hash functions are more quantum-resistant
+Earlier versions (≤ v3) used a custom SHA-256 keystream + HMAC construction. That
+was replaced precisely because a non-standard primitive is a liability under
+expert review and offers no advantage over AES-GCM/ChaCha20-Poly1305 — which are
+faster, formally analyzed, and FIPS/RFC-standardized.
 
 ---
 
@@ -78,14 +82,16 @@ Shield uses a SHA256-based counter mode instead of AES for philosophical consist
 ### How Passwords Become Keys
 
 ```
-master_key = PBKDF2(password, SHA256(service), 100,000) → 256-bit key
+master_key = PBKDF2-HMAC-SHA256(password, random_salt(16) || service, 600,000) → 256-bit key
 
-# v2.1: Key separation via HMAC domain labels
-enc_key = HMAC-SHA256(master_key, "shield-encrypt")
-mac_key = HMAC-SHA256(master_key, "shield-authenticate")
+# v4: AEAD key derived from the master key via HKDF-Expand (domain separation)
+aead_key = HKDF-SHA256-Expand(master_key, info="shield/aead/v4", L=32)
 ```
 
-Key separation prevents cross-protocol key reuse (CWE-323). The `enc_key` is used for keystream generation and the `mac_key` for HMAC authentication.
+The AEAD provides both confidentiality and integrity in one primitive, so there
+is no separate MAC key. Deriving `aead_key` via HKDF-Expand gives domain
+separation and prevents the master key from being used directly as a cipher key
+(CWE-323).
 
 ### Password Recommendations
 
@@ -110,15 +116,20 @@ The `service` parameter prevents key reuse across applications:
 ## Message Format
 
 ```
-+----------+------------+--------+
-|  Nonce   | Ciphertext |  MAC   |
-| 16 bytes |  N bytes   | 16 bytes|
-+----------+------------+--------+
+Password mode (0x03):
++---------+-------+--------+---------+------------------------+
+| version | suite |  salt  |  nonce  |  ciphertext || tag     |
+| 1 byte  | 1 byte| 16 byte| 12 byte |  N + 16 bytes (AEAD)   |
++---------+-------+--------+---------+------------------------+
+
+Pre-shared-key mode (0x13): same layout without the salt field.
 ```
 
-- **Nonce**: Random, unique per message
-- **Ciphertext**: XOR of plaintext with SHA256-CTR keystream
-- **MAC**: HMAC-SHA256(key, nonce || ciphertext), truncated to 128 bits
+- **version || suite || [salt]**: authenticated as the AEAD's associated data (AAD).
+- **Nonce**: 96-bit random value, unique per message.
+- **Ciphertext || tag**: output of `AEAD_Seal(aead_key, nonce, inner, aad)`, where
+  the 128-bit tag provides integrity. The `inner` plaintext is
+  `timestamp(8) || pad_len(1) || padding(32–128) || message`.
 
 ### Security Properties
 
@@ -257,7 +268,7 @@ Test count: 121 tests (106 unit + 7 interop + 8 doc-tests), clippy clean with `-
 | Feature | Shield | libsodium | OpenSSL | GPG |
 |---------|--------|-----------|---------|-----|
 | Post-quantum ready | Yes | Partial | No | No |
-| P=NP safe | Yes | Partial | No | No |
+| Symmetric-only (no RSA/ECC) | Yes | Partial | No | No |
 | Zero dependencies | Yes | No | No | No |
 | Cross-language | 13 platforms | Many | C only | CLI |
 | Forward secrecy | Built-in | External | External | No |

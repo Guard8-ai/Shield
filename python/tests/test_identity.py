@@ -17,6 +17,22 @@ class TestIdentityProvider:
         assert identity.user_id == "alice"
         assert identity.display_name == "Alice Smith"
         assert len(identity.verification_key) == 32
+        assert len(identity.salt) == 16  # CR-1: per-user random salt
+
+    def test_same_password_yields_different_salt_and_key(self):
+        """CR-1: two identities with the same password must not share a salt or
+        verification key (random per-user salt, not a hash of the user id)."""
+        p1 = IdentityProvider(os.urandom(32))
+        p2 = IdentityProvider(os.urandom(32))
+        a = p1.register("alice", "same-password", "Alice")
+        b = p2.register("alice", "same-password", "Alice")
+
+        assert a.salt != b.salt
+        assert a.verification_key != b.verification_key
+        # ...yet each still authenticates against its own stored salt.
+        assert p1.authenticate("alice", "same-password") is not None
+        assert p2.authenticate("alice", "same-password") is not None
+        assert p1.authenticate("alice", "wrong") is None
 
     def test_register_duplicate_fails(self):
         """Cannot register duplicate user."""
@@ -192,3 +208,15 @@ class TestSecureSession:
 
         result = session.decrypt(bytes(encrypted))
         assert result is None
+
+    def test_uses_standard_aead_format(self):
+        """Session payloads are the standard v4 key-mode AEAD, not a bespoke
+        keystream: 4-byte LE version, then AEAD version byte 0x13 and the
+        AES-256-GCM suite byte 0x01. Two encryptions of the same input differ
+        (random nonce + length obfuscation)."""
+        session = SecureSession(b"\x07" * 32)
+        encrypted = session.encrypt(b"session data")
+        assert encrypted[:4] == (0).to_bytes(4, "little")  # initial version
+        assert encrypted[4] == 0x13  # VERSION_KEY
+        assert encrypted[5] == 0x01  # SUITE_AES_256_GCM
+        assert session.encrypt(b"session data") != encrypted

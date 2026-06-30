@@ -32,7 +32,7 @@ public class StreamCipher {
 
     /// Create StreamCipher from password.
     public static func fromPassword(_ password: String, salt: [UInt8], chunkSize: Int = defaultChunkSize) throws -> StreamCipher {
-        let key = Shield.pbkdf2(password: password, salt: salt, iterations: 100_000, keyLength: 32)
+        let key = Shield.pbkdf2(password: password, salt: salt, iterations: 600_000, keyLength: 32)
         return try StreamCipher(key: key, chunkSize: chunkSize)
     }
 
@@ -70,8 +70,11 @@ public class StreamCipher {
             chunkNum += 1
         }
 
-        // End marker
+        // Authenticated end-of-stream trailer: zero-length marker followed by a
+        // tag committing to the total chunk count, so a truncated stream (even
+        // with a re-appended zero marker) fails verification.
         output.append(contentsOf: withUnsafeBytes(of: UInt32(0).littleEndian) { Array($0) })
+        output.append(contentsOf: computeEofTag(key: key, streamSalt: streamSalt, chunkCount: chunkNum))
 
         return output
     }
@@ -95,6 +98,7 @@ public class StreamCipher {
         pos += 16
 
         var chunkNum: UInt64 = 0
+        var sawEndMarker = false
 
         while pos + 4 <= encrypted.count {
             let encLen = encrypted.withUnsafeBytes { buffer in
@@ -103,7 +107,19 @@ public class StreamCipher {
             pos += 4
 
             if encLen == 0 {
-                break // End marker
+                // Authenticated end-of-stream marker: require the tag and verify
+                // it commits to the number of chunks actually seen.
+                guard pos + 32 <= encrypted.count else {
+                    throw ShieldError.streamTruncated
+                }
+                let tag = Array(encrypted[pos..<pos + 32])
+                pos += 32
+                let expected = computeEofTag(key: key, streamSalt: streamSalt, chunkCount: chunkNum)
+                guard Shield.constantTimeEquals(tag, expected) else {
+                    throw ShieldError.authenticationFailed
+                }
+                sawEndMarker = true
+                break
             }
 
             guard pos + Int(encLen) <= encrypted.count else {
@@ -123,6 +139,11 @@ public class StreamCipher {
 
             output.append(contentsOf: decrypted)
             chunkNum += 1
+        }
+
+        // A stream that ends without the authenticated marker has been truncated.
+        guard sawEndMarker else {
+            throw ShieldError.streamTruncated
         }
 
         return output
@@ -153,6 +174,21 @@ public class StreamCipher {
         var data = key + salt
         data.append(contentsOf: withUnsafeBytes(of: chunkNum.littleEndian) { Array($0) })
         return Shield.sha256(data)
+    }
+
+    // Domain-separated end-of-stream key derived from the master key.
+    private func deriveEofKey(key: [UInt8]) -> [UInt8] {
+        return Shield.hmacSha256(key: key, data: Array("shield-stream-eof".utf8))
+    }
+
+    // Authenticated end-of-stream tag committing to the stream salt and the total
+    // number of data chunks (length commitment). Full 32-byte HMAC output.
+    private func computeEofTag(key: [UInt8], streamSalt: [UInt8], chunkCount: UInt64) -> [UInt8] {
+        let eofKey = deriveEofKey(key: key)
+        var input = streamSalt
+        // chunk_count as unsigned 64-bit little-endian.
+        input.append(contentsOf: withUnsafeBytes(of: chunkCount.littleEndian) { Array($0) })
+        return Shield.hmacSha256(key: eofKey, data: input)
     }
 
     private func encryptBlock(key: [UInt8], data: [UInt8]) throws -> [UInt8] {

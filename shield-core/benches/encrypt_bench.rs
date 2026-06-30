@@ -15,10 +15,10 @@ const MB: usize = 1024 * KB;
 const SIZES: &[usize] = &[
     64,      // Tiny: API token
     256,     // Small: JSON payload
-    1 * KB,  // 1 KB: Config file
+    KB,      // 1 KB: Config file
     16 * KB, // 16 KB: Small document
     64 * KB, // 64 KB: Image thumbnail
-    1 * MB,  // 1 MB: Document
+    MB,      // 1 MB: Document
 ];
 
 fn generate_data(size: usize) -> Vec<u8> {

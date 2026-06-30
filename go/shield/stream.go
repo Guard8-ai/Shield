@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/binary"
+	"errors"
 	"io"
 
 	"golang.org/x/crypto/pbkdf2"
@@ -14,7 +15,19 @@ import (
 const (
 	// DefaultChunkSize is the default streaming chunk size.
 	DefaultChunkSize = 64 * 1024
+
+	// streamSaltSize is the size of the per-stream salt in the header.
+	streamSaltSize = 16
+	// eofTagSize is the size of the authenticated end-of-stream tag.
+	eofTagSize = 32
+	// eofLabel is the domain-separation label for the end-of-stream key.
+	eofLabel = "shield-stream-eof"
 )
+
+// ErrStreamTruncated indicates a stream that is missing its authenticated
+// end-of-stream marker (the trailing chunks and/or the end-of-stream tag were
+// dropped), which signals truncation.
+var ErrStreamTruncated = errors.New("shield: stream truncated: missing end-of-stream marker")
 
 // StreamCipher provides streaming encryption for large data.
 type StreamCipher struct {
@@ -47,19 +60,30 @@ func StreamCipherFromPassword(password string, salt []byte, chunkSize int) *Stre
 }
 
 // Encrypt encrypts data in chunks.
+//
+// Wire format:
+//
+//	header: chunk_size(u32 LE, 4) || stream_salt(16)
+//	frame:  chunk_len(u32 LE, 4) || nonce(16) || ciphertext || mac(16)   (repeated)
+//	trailer: u32 LE 0 || eof_tag(32)
+//
+// The trailer is an authenticated, length-committing end-of-stream marker, so a
+// stream truncated at a chunk boundary (with or without a re-appended bare zero
+// marker) is detected on decrypt.
 func (sc *StreamCipher) Encrypt(plaintext []byte) ([]byte, error) {
-	if len(plaintext) == 0 {
-		return []byte{}, nil
+	// Header: chunk_size(4 LE) || stream_salt(16)
+	streamSalt := make([]byte, streamSaltSize)
+	if _, err := rand.Read(streamSalt); err != nil {
+		return nil, err
 	}
 
-	var result []byte
-	numChunks := (len(plaintext) + sc.chunkSize - 1) / sc.chunkSize
-
-	// Write chunk count header
-	header := make([]byte, 4)
-	binary.LittleEndian.PutUint32(header, uint32(numChunks))
+	result := make([]byte, 0, 20+len(plaintext))
+	header := make([]byte, 20)
+	binary.LittleEndian.PutUint32(header[:4], uint32(sc.chunkSize))
+	copy(header[4:], streamSalt)
 	result = append(result, header...)
 
+	var chunkNum uint64
 	for i := 0; i < len(plaintext); i += sc.chunkSize {
 		end := i + sc.chunkSize
 		if end > len(plaintext) {
@@ -67,7 +91,8 @@ func (sc *StreamCipher) Encrypt(plaintext []byte) ([]byte, error) {
 		}
 		chunk := plaintext[i:end]
 
-		encryptedChunk, err := sc.encryptChunk(chunk)
+		chunkKey := sc.deriveChunkKey(streamSalt, chunkNum)
+		encryptedChunk, err := encryptChunk(chunkKey, chunk)
 		if err != nil {
 			return nil, err
 		}
@@ -77,29 +102,47 @@ func (sc *StreamCipher) Encrypt(plaintext []byte) ([]byte, error) {
 		binary.LittleEndian.PutUint32(lenBuf, uint32(len(encryptedChunk)))
 		result = append(result, lenBuf...)
 		result = append(result, encryptedChunk...)
+		chunkNum++
 	}
+
+	// Authenticated end-of-stream trailer: zero marker || eof_tag.
+	eofTag := computeEofTag(sc.key[:], streamSalt, chunkNum)
+	result = append(result, 0, 0, 0, 0)
+	result = append(result, eofTag...)
 
 	return result, nil
 }
 
-// Decrypt decrypts chunked data.
+// Decrypt decrypts chunked data, requiring the authenticated end-of-stream tag.
 func (sc *StreamCipher) Decrypt(ciphertext []byte) ([]byte, error) {
-	if len(ciphertext) < 4 {
+	if len(ciphertext) < 20 {
 		return nil, ErrCiphertextTooShort
 	}
 
-	numChunks := binary.LittleEndian.Uint32(ciphertext[:4])
-	offset := 4
+	streamSalt := ciphertext[4:20]
+	offset := 20
+	var chunkNum uint64
+	sawEndMarker := false
 
 	var result []byte
-	for i := uint32(0); i < numChunks; i++ {
-		if offset+4 > len(ciphertext) {
-			return nil, ErrCiphertextTooShort
+	for offset+4 <= len(ciphertext) {
+		chunkLen := binary.LittleEndian.Uint32(ciphertext[offset : offset+4])
+
+		if chunkLen == 0 {
+			// Authenticated end-of-stream marker: require the 32-byte tag.
+			if offset+4+eofTagSize > len(ciphertext) {
+				return nil, ErrStreamTruncated
+			}
+			tag := ciphertext[offset+4 : offset+4+eofTagSize]
+			expected := computeEofTag(sc.key[:], streamSalt, chunkNum)
+			if subtle.ConstantTimeCompare(tag, expected) != 1 {
+				return nil, ErrAuthenticationFailed
+			}
+			sawEndMarker = true
+			break
 		}
 
-		chunkLen := binary.LittleEndian.Uint32(ciphertext[offset : offset+4])
 		offset += 4
-
 		if offset+int(chunkLen) > len(ciphertext) {
 			return nil, ErrCiphertextTooShort
 		}
@@ -107,29 +150,69 @@ func (sc *StreamCipher) Decrypt(ciphertext []byte) ([]byte, error) {
 		chunk := ciphertext[offset : offset+int(chunkLen)]
 		offset += int(chunkLen)
 
-		decrypted, err := sc.decryptChunk(chunk)
+		chunkKey := sc.deriveChunkKey(streamSalt, chunkNum)
+		decrypted, err := decryptChunk(chunkKey, chunk)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, decrypted...)
+		chunkNum++
+	}
+
+	// A stream that ends without the authenticated marker has been truncated.
+	if !sawEndMarker {
+		return nil, ErrStreamTruncated
 	}
 
 	return result, nil
 }
 
-func (sc *StreamCipher) encryptChunk(data []byte) ([]byte, error) {
+// deriveChunkKey derives the per-chunk key from the master key, stream salt and
+// chunk number: SHA256(key || stream_salt || chunk_num as u64 LE).
+func (sc *StreamCipher) deriveChunkKey(streamSalt []byte, chunkNum uint64) []byte {
+	h := sha256.New()
+	h.Write(sc.key[:])
+	h.Write(streamSalt)
+	var numBuf [8]byte
+	binary.LittleEndian.PutUint64(numBuf[:], chunkNum)
+	h.Write(numBuf[:])
+	return h.Sum(nil)
+}
+
+// computeEofTag computes the authenticated end-of-stream tag.
+//
+//	eof_key = HMAC_SHA256(master_key, "shield-stream-eof")
+//	eof_tag = HMAC_SHA256(eof_key, stream_salt || chunk_count as u64 LE)
+//
+// The tag commits to the stream salt and total chunk count (a length
+// commitment); an attacker cannot forge a matching tag without the master key,
+// so truncation -- including re-appending a bare zero marker -- is detected.
+func computeEofTag(masterKey, streamSalt []byte, chunkCount uint64) []byte {
+	ek := hmac.New(sha256.New, masterKey)
+	ek.Write([]byte(eofLabel))
+	eofKey := ek.Sum(nil)
+
+	t := hmac.New(sha256.New, eofKey)
+	t.Write(streamSalt)
+	var countBuf [8]byte
+	binary.LittleEndian.PutUint64(countBuf[:], chunkCount)
+	t.Write(countBuf[:])
+	return t.Sum(nil)
+}
+
+func encryptChunk(key, data []byte) ([]byte, error) {
 	nonce := make([]byte, NonceSize)
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
 
-	keystream := generateKeystream(sc.key[:], nonce, len(data))
+	keystream := generateKeystream(key, nonce, len(data))
 	ciphertext := make([]byte, len(data))
 	for i := range data {
 		ciphertext[i] = data[i] ^ keystream[i]
 	}
 
-	mac := hmac.New(sha256.New, sc.key[:])
+	mac := hmac.New(sha256.New, key)
 	mac.Write(nonce)
 	mac.Write(ciphertext)
 	tag := mac.Sum(nil)[:MACSize]
@@ -142,7 +225,7 @@ func (sc *StreamCipher) encryptChunk(data []byte) ([]byte, error) {
 	return result, nil
 }
 
-func (sc *StreamCipher) decryptChunk(encrypted []byte) ([]byte, error) {
+func decryptChunk(key, encrypted []byte) ([]byte, error) {
 	if len(encrypted) < NonceSize+MACSize {
 		return nil, ErrCiphertextTooShort
 	}
@@ -151,7 +234,7 @@ func (sc *StreamCipher) decryptChunk(encrypted []byte) ([]byte, error) {
 	ciphertext := encrypted[NonceSize : len(encrypted)-MACSize]
 	receivedMAC := encrypted[len(encrypted)-MACSize:]
 
-	mac := hmac.New(sha256.New, sc.key[:])
+	mac := hmac.New(sha256.New, key)
 	mac.Write(nonce)
 	mac.Write(ciphertext)
 	expectedMAC := mac.Sum(nil)[:MACSize]
@@ -160,7 +243,7 @@ func (sc *StreamCipher) decryptChunk(encrypted []byte) ([]byte, error) {
 		return nil, ErrAuthenticationFailed
 	}
 
-	keystream := generateKeystream(sc.key[:], nonce, len(ciphertext))
+	keystream := generateKeystream(key, nonce, len(ciphertext))
 	plaintext := make([]byte, len(ciphertext))
 	for i := range ciphertext {
 		plaintext[i] = ciphertext[i] ^ keystream[i]

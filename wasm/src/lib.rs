@@ -1,7 +1,7 @@
 //! Shield WebAssembly Module
 //!
-//! EXPTIME-secure encryption for browsers and any WebAssembly runtime.
-//! Breaking requires 2^256 operations - no shortcut exists.
+//! Authenticated symmetric encryption for browsers and any WebAssembly runtime.
+//! Brute-forcing a full 256-bit key requires 2^256 operations; this relies on the standard assumption that SHA-256/HMAC have no exploitable structure (an assumption, not a mathematical proof).
 //!
 //! This crate re-exports the WASM bindings from `shield-core`, providing
 //! a single source of truth for all Shield cryptographic implementations.

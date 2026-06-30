@@ -3,7 +3,7 @@
 import os
 import tempfile
 import pytest
-from shield.stream import StreamCipher
+from shield.stream import StreamCipher, _compute_eof_tag
 
 
 class TestStreamCipher:
@@ -116,3 +116,42 @@ class TestStreamCipher:
 
         with pytest.raises(ValueError):
             cipher.decrypt(tampered)
+
+
+class TestEndOfStreamTag:
+    """Tests for the authenticated end-of-stream trailer (anti-truncation)."""
+
+    GOLDEN_HEX = "52d4dfbeccc364bd69a2f232aa460bd1eb79b0c93903f344dd7b937703918431"
+
+    def test_eof_tag_conformance_vector(self):
+        """eof_tag for the cross-language golden inputs matches the fixed hex."""
+        tag = _compute_eof_tag(b"\x42" * 32, b"\x01" * 16, 3)
+        assert tag.hex() == self.GOLDEN_HEX
+
+    def _frames(self, key, data, chunk_size):
+        cipher = StreamCipher(key, chunk_size=chunk_size)
+        return cipher, list(cipher.encrypt_stream(iter([data])))
+
+    def test_truncation_rejected(self):
+        """Dropping trailing chunks and the trailer must fail decryption."""
+        key = os.urandom(32)
+        cipher = StreamCipher(key, chunk_size=16)
+        encrypted = cipher.encrypt(os.urandom(64))  # 4 chunks
+
+        # Header (20) + 1 framed chunk (4 + 48 = 52) per chunk.
+        truncated = encrypted[: 20 + 2 * 52]  # header + first two chunk frames
+        assert len(truncated) < len(encrypted)
+
+        with pytest.raises(ValueError):
+            cipher.decrypt(truncated)
+
+    def test_forged_marker_rejected(self):
+        """A re-appended bare zero marker (no valid tag) must fail decryption."""
+        key = os.urandom(32)
+        cipher = StreamCipher(key, chunk_size=16)
+        encrypted = cipher.encrypt(os.urandom(64))  # 4 chunks
+
+        forged = encrypted[: 20 + 2 * 52] + b"\x00\x00\x00\x00"
+
+        with pytest.raises(ValueError):
+            cipher.decrypt(forged)

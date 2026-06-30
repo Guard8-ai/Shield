@@ -208,7 +208,7 @@ public final class SecureKeychain {
                     saltBytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
                     salt.count,
                     CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
-                    100_000,
+                    600_000, // CR-2: OWASP 2023 floor
                     &derivedKey,
                     32
                 )

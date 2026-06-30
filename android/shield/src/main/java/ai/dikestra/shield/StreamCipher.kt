@@ -51,7 +51,7 @@ class StreamCipher private constructor(
         }
 
         private fun deriveKey(password: String, salt: ByteArray): ByteArray {
-            val spec = PBEKeySpec(password.toCharArray(), salt, 100_000, 256)
+            val spec = PBEKeySpec(password.toCharArray(), salt, 600_000, 256)
             val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
             return factory.generateSecret(spec).encoded
         }
@@ -62,6 +62,21 @@ class StreamCipher private constructor(
             data.put(salt)
             data.putLong(chunkNum)
             return sha256(data.array())
+        }
+
+        // Domain-separated end-of-stream key derived from the master key.
+        private fun deriveEofKey(masterKey: ByteArray): ByteArray {
+            return hmacSha256(masterKey, "shield-stream-eof".toByteArray(Charsets.US_ASCII))
+        }
+
+        // Authenticated end-of-stream tag committing to the stream salt and the
+        // total number of data chunks (length commitment). Full 32-byte HMAC.
+        private fun computeEofTag(masterKey: ByteArray, streamSalt: ByteArray, chunkCount: Long): ByteArray {
+            val eofKey = deriveEofKey(masterKey)
+            val input = ByteBuffer.allocate(16 + 8).order(ByteOrder.LITTLE_ENDIAN)
+            input.put(streamSalt)
+            input.putLong(chunkCount) // chunk_count as unsigned 64-bit little-endian
+            return hmacSha256(eofKey, input.array())
         }
 
         private fun encryptBlock(key: ByteArray, data: ByteArray): ByteArray {
@@ -178,10 +193,13 @@ class StreamCipher private constructor(
             chunkNum++
         }
 
-        // End marker
+        // Authenticated end-of-stream trailer: zero-length marker followed by a
+        // tag committing to the total chunk count, so a truncated stream (even
+        // with a re-appended zero marker) fails verification.
         val endMarker = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
         endMarker.putInt(0)
         output.addAll(endMarker.array().toList())
+        output.addAll(computeEofTag(key, streamSalt, chunkNum).toList())
 
         return output.toByteArray()
     }
@@ -201,10 +219,23 @@ class StreamCipher private constructor(
         buf.get(streamSalt)
 
         var chunkNum = 0L
+        var sawEndMarker = false
 
         while (buf.remaining() >= 4) {
             val encLen = buf.int
-            if (encLen == 0) break // End marker
+            if (encLen == 0) {
+                // Authenticated end-of-stream marker: require the tag and verify
+                // it commits to the number of chunks actually seen.
+                if (buf.remaining() < 32) throw SecurityException("missing end-of-stream tag")
+                val tag = ByteArray(32)
+                buf.get(tag)
+                val expected = computeEofTag(key, streamSalt, chunkNum)
+                if (!MessageDigest.isEqual(tag, expected)) {
+                    throw SecurityException("end-of-stream authentication failed")
+                }
+                sawEndMarker = true
+                break
+            }
 
             require(buf.remaining() >= encLen) { "Incomplete chunk" }
 
@@ -220,6 +251,11 @@ class StreamCipher private constructor(
 
             output.addAll(decrypted.toList())
             chunkNum++
+        }
+
+        // A stream that ends without the authenticated marker has been truncated.
+        if (!sawEndMarker) {
+            throw SecurityException("stream truncated: missing end-of-stream marker")
         }
 
         return output.toByteArray()
@@ -256,10 +292,11 @@ class StreamCipher private constructor(
                     chunkNum++
                 }
 
-                // End marker
+                // Authenticated end-of-stream trailer.
                 val endMarker = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
                 endMarker.putInt(0)
                 output.write(endMarker.array())
+                output.write(computeEofTag(key, streamSalt, chunkNum))
             }
         }
     }
@@ -281,13 +318,23 @@ class StreamCipher private constructor(
 
                 val lenBytes = ByteArray(4)
                 var chunkNum = 0L
+                var sawEndMarker = false
 
-                while (input.read(lenBytes) == 4) {
+                while (readFully(input, lenBytes) == 4) {
                     val encLen = ByteBuffer.wrap(lenBytes).order(ByteOrder.LITTLE_ENDIAN).int
-                    if (encLen == 0) break
+                    if (encLen == 0) {
+                        val tag = ByteArray(32)
+                        if (readFully(input, tag) != 32) throw SecurityException("missing end-of-stream tag")
+                        val expected = computeEofTag(key, streamSalt, chunkNum)
+                        if (!MessageDigest.isEqual(tag, expected)) {
+                            throw SecurityException("end-of-stream authentication failed")
+                        }
+                        sawEndMarker = true
+                        break
+                    }
 
                     val encrypted = ByteArray(encLen)
-                    require(input.read(encrypted) == encLen) { "Incomplete chunk" }
+                    require(readFully(input, encrypted) == encLen) { "Incomplete chunk" }
 
                     val chunkKey = deriveChunkKey(key, streamSalt, chunkNum)
                     val decrypted = decryptBlock(chunkKey, encrypted)
@@ -296,8 +343,22 @@ class StreamCipher private constructor(
                     output.write(decrypted)
                     chunkNum++
                 }
+
+                if (!sawEndMarker) {
+                    throw SecurityException("stream truncated: missing end-of-stream marker")
+                }
             }
         }
+    }
+
+    private fun readFully(input: java.io.InputStream, buf: ByteArray): Int {
+        var total = 0
+        while (total < buf.size) {
+            val n = input.read(buf, total, buf.size - total)
+            if (n < 0) break
+            total += n
+        }
+        return total
     }
 
     override fun close() {

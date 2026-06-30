@@ -4,9 +4,9 @@
 
 # Shield
 
-**EXPTIME-ready encryption that survives P=NP and quantum computers.**
+**Misuse-resistant authenticated encryption on a standard AEAD core (AES-256-GCM / ChaCha20-Poly1305), byte-identical across 12 language bindings, with an optional post-quantum hybrid key exchange (X25519 + ML-KEM-768, FIPS 203). The symmetric core uses no RSA/ECC, so it is unaffected by attacks on asymmetric crypto; 256-bit keys give ~128-bit post-quantum security.**
 
-[![CI](https://github.com/Dikestra-ai/Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/Dikestra-ai/Shield/actions/workflows/ci.yml)
+[![CI](https://github.com/llamaboi55/Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/llamaboi55/Shield/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Crates.io](https://img.shields.io/crates/v/shield-core.svg)](https://crates.io/crates/shield-core)
 [![npm](https://img.shields.io/npm/v/@dikestra/shield.svg)](https://www.npmjs.com/package/@dikestra/shield)
@@ -14,7 +14,6 @@
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](python/)
 [![JavaScript](https://img.shields.io/badge/JavaScript-ES6+-yellow.svg)](javascript/)
 [![Go](https://img.shields.io/badge/Go-1.19+-00ADD8.svg)](go/)
-[![Security](https://img.shields.io/badge/Security-Audited-green.svg)](SECURITY_AUDIT.md)
 [![Clippy](https://img.shields.io/badge/Clippy-0%20warnings-brightgreen.svg)](shield-core/)
 
 ```bash
@@ -46,12 +45,12 @@ That's it. No keys to manage. No certificates. No configuration.
 
 | Threat | RSA/ECDSA | Shield |
 |--------|-----------|--------|
-| P=NP proven | Broken | Safe |
-| Quantum computer | Broken | Safe |
-| 2^128 brute force | Broken | Safe |
-| 2^256 brute force | Broken | **Still safe** |
+| P=NP proven | Broken | Not directly helped (no asymmetric structure to exploit) |
+| Quantum computer | Broken | ~128-bit post-quantum (Grover halves the key) |
+| 2^128 brute force | Broken | Infeasible |
+| 2^256 brute force | Broken | **Infeasible** |
 
-Shield uses only symmetric cryptography with 256-bit keys. Breaking it requires 2^256 operations - more than atoms in the observable universe - regardless of any mathematical breakthrough.
+Shield uses only symmetric cryptography with 256-bit keys. P=NP would break RSA/ECDSA, but brute-forcing a random 256-bit symmetric key has no structure for a polynomial algorithm to exploit, so a P=NP result would not directly help. Brute force requires 2^256 operations — note this is a claim that rests on standard assumptions about SHA-256/HMAC, not a mathematical proof.
 
 ---
 
@@ -148,6 +147,7 @@ code := totp.Generate(time.Now().Unix())
 | `RecoveryCodes` | Backup 2FA codes | Account recovery |
 | `SymmetricSignature` | HMAC signatures | API authentication |
 | `LamportSignature` | Quantum-safe signatures | Long-term documents |
+| Post-quantum hybrid KEX | X25519 + ML-KEM-768 (FIPS 203) key agreement | Post-quantum key exchange |
 | `KeyRotationManager` | Key versioning | Zero-downtime rotation |
 | `GroupEncryption` | Multi-recipient | Team messaging |
 | `IdentityProvider` | Token-based auth | SSO systems |
@@ -194,10 +194,18 @@ Not all features are available in all languages. Here's what's supported:
 | `GroupEncryption` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
 | `KeyRotationManager` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
 | `IdentityProvider` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
-| `PAKEExchange` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
+| `PAKEExchange`¹ | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
 | `QRExchange` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
 | `KeySplitter` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
 | `check_password` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
+
+> ¹ `PAKEExchange` / `ShieldChannel` is a **pre-shared-key handshake, not a true
+> PAKE** despite the name. It sends a deterministic, password-derived
+> contribution on the wire, so a recorded handshake permits an **offline
+> dictionary attack** against a low-entropy secret. Use it **only with a
+> high-entropy shared secret**. For password-based or forward-secret key
+> establishment, use the X25519 + ML-KEM-768 hybrid KEX (`pq` feature). See
+> [`PROTOCOL.md` §3.2](PROTOCOL.md).
 
 ### Platform-Specific Features
 
@@ -285,26 +293,25 @@ const decrypted = new Shield('pw', 'app').decrypt(encrypted);
 
 | Parameter | Value | Why |
 |-----------|-------|-----|
-| Key derivation | PBKDF2-SHA256 | Proven, NIST-approved |
-| Iterations | 100,000 | ~200ms on modern hardware |
+| Key derivation | PBKDF2-HMAC-SHA256 | Proven, NIST-approved |
+| Iterations | 600,000 | OWASP 2023 floor (~107–290ms depending on language) |
 | Key size | 256 bits | 2^256 brute-force resistance |
-| Nonce | 128 bits random | Unique per encryption |
-| MAC | HMAC-SHA256 (128-bit) | Tamper detection |
-| Stream cipher | SHA256-CTR | Symmetric, EXPTIME-hard |
-| Key separation | HMAC domain labels | Separate enc/mac subkeys |
-| Replay protection | Timestamp validation | 60-second default window |
+| AEAD cipher | AES-256-GCM (default) or ChaCha20-Poly1305 | Standard, audited, hardware-accelerated (wire format v4) |
+| Nonce | 96 bits random | Per-message, standard AEAD nonce size |
+| Auth tag | 128-bit AEAD tag | Tamper detection (built into the AEAD) |
+| Key separation | HKDF-SHA256-Expand | Derives the AEAD key from the master key (domain separation) |
+| Freshness window | Timestamp-based | Rejects messages older than the window (60s default); NOT full replay protection — the base API does not track seen nonces, so identical ciphertext can be replayed within the window. Use RatchetSession for per-message counters |
 | Length obfuscation | Random padding (32-128 bytes) | Hides message size |
 
 ---
 
 ## What Shield Protects Against
 
-- **Brute force** - 100,000 PBKDF2 iterations slow attackers
-- **Tampering** - HMAC-SHA256 detects any modification
-- **Replay attacks** - Ratcheting with message counters
-- **Quantum computers** - 256-bit symmetric = 128-bit post-quantum
-- **P=NP proofs** - No asymmetric crypto to break
-- **Future math** - EXPTIME hardness is unconditional
+- **Brute force** - 600,000 PBKDF2 iterations slow attackers
+- **Tampering** - the AEAD authentication tag (AES-GCM / ChaCha20-Poly1305) detects any modification
+- **Replay attacks** - Use RatchetSession (per-message counters); the base API only enforces a timestamp freshness window
+- **Quantum computers** - 256-bit symmetric = ~128-bit post-quantum; plus an optional hybrid X25519 + ML-KEM-768 key exchange for post-quantum key agreement
+- **P=NP proofs** - No asymmetric crypto in the symmetric core to break
 
 ## What Shield Does NOT Protect Against
 
@@ -349,44 +356,49 @@ Shield/
 
 | Operation | Speed | Notes |
 |-----------|-------|-------|
-| Key derivation | ~29ms | Intentional (anti-brute-force) |
-| Encryption | ~160 MB/s | SHA256-CTR (see [BENCHMARKS.md](BENCHMARKS.md)) |
+| Key derivation | ~107ms (Rust) | PBKDF2 600k, intentional (anti-brute-force); one-time per instance |
+| Encryption | ~1.2 GB/s (1MB, Rust) | AES-256-GCM (see [BENCHMARKS.md](BENCHMARKS.md)) |
+| Decryption | ~1.6 GB/s (1MB, Rust) | AES-256-GCM |
 | TOTP generation | <1ms | |
 | Lamport signing | ~10ms | 8KB signature |
 
-For comparison: AES-256-GCM achieves ~3.4 GB/s with hardware acceleration. Shield prioritizes simplicity and EXPTIME security over raw speed.
+Shield v4 encrypts with a standard, hardware-accelerated AEAD (AES-256-GCM by
+default, ChaCha20-Poly1305 optional), so throughput tracks the underlying AEAD
+plus a small constant framing overhead. See [BENCHMARKS.md](BENCHMARKS.md) for
+the full per-language tables and methodology.
 
 ---
 
 ## Tests
 
+All 12 language bindings build and pass their test suites on hosted CI
+(Linux, Windows, and real Apple-hardware macOS runners). The GitHub Actions
+matrix is the authoritative, always-current source of truth — see the
+**Actions** tab / CI badge above.
+
 ```bash
-# Rust core (121 tests: 106 unit + 7 interop + 8 doc-tests)
-cd shield-core && cargo test
+# Rust core (97 lib tests + interop + doc-tests; clippy clean)
+cd shield-core && cargo test && cargo clippy --all-targets
 
-# Shield Proxy (33 tests)
-cd shield-proxy && cargo test
-
-# Python (161 tests)
+# Python (209 tests)
 cd python && python -m pytest
 
-# JavaScript (89 tests)
-cd javascript && npm test
+# JavaScript (119 tests)
+cd javascript && node --test test/
 
-# Go (39 tests)
+# Go
 cd go && go test ./...
 
-# C (21 tests)
+# C (34 tests; + post-quantum vectors on Linux via c/scripts/build_and_test_pq.sh)
 cd c && make test
 
-# Java (19 tests)
-cd java && gradle test
-
-# WebAssembly (uses shield-core)
-cd wasm && cargo test
+# Java / Kotlin / C# / Android — gradle test / dotnet test
+# WebAssembly — wasm-pack build (re-exports shield-core)
 ```
 
-**Total: 493+ tests across all implementations**
+Cross-language conformance (byte-identical output) is enforced by shared
+vector files (`tests/v4_test_vectors.json`, `tests/pq_kex_vectors.json`) that
+every binding must reproduce.
 
 ---
 

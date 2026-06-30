@@ -25,6 +25,37 @@ TEST_PLAINTEXT = b"Hello from Shield cross-language test!"
 TEST_KEY = bytes.fromhex("0102030405060708091011121314151617181920212223242526272829303132")
 
 
+def _run_go(go_code):
+    """Write a Go snippet to go/, run it, return (returncode, stdout, stderr).
+
+    On Windows a NamedTemporaryFile left open while `go run` executes causes a
+    PermissionError on cleanup (the file is locked) and can also block the Go
+    toolchain from reading it. So we write+close the file first, then run, then
+    remove it with a best-effort retry.
+    """
+    go_dir = os.path.join(os.path.dirname(__file__), '..', 'go')
+    fd, path = tempfile.mkstemp(suffix='.go', dir=go_dir)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(go_code)
+        result = subprocess.run(
+            ['go', 'run', path],
+            cwd=go_dir,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        return result.returncode, result.stdout, result.stderr
+    finally:
+        for _ in range(5):
+            try:
+                os.unlink(path)
+                break
+            except (PermissionError, OSError):
+                import time as _t
+                _t.sleep(0.2)
+
+
 def python_encrypt_shield():
     """Generate Shield ciphertext from Python."""
     s = Shield(TEST_PASSWORD, TEST_SERVICE)
@@ -173,28 +204,13 @@ func main() {{
     fmt.Print(string(decrypted))
 }}
 '''
-    # Run Go code from the go/ directory where go.mod lives
-    go_dir = os.path.join(os.path.dirname(__file__), '..', 'go')
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.go', delete=False, dir=go_dir) as f:
-        f.write(go_code)
-        f.flush()
-        try:
-            result = subprocess.run(
-                ['go', 'run', f.name],
-                cwd=go_dir,
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            if result.returncode != 0:
-                print(f"Go decrypt error: {result.stderr}")
-                return None
-            output = result.stdout
-            if output == 'DECRYPT_FAILED':
-                return None
-            return output.encode('utf8')
-        finally:
-            os.unlink(f.name)
+    returncode, stdout, stderr = _run_go(go_code)
+    if returncode != 0:
+        print(f"Go decrypt error: {stderr}")
+        return None
+    if stdout == 'DECRYPT_FAILED':
+        return None
+    return stdout.encode('utf8')
 
 
 def go_encrypt_shield():
@@ -224,6 +240,9 @@ func main() {{
     with tempfile.NamedTemporaryFile(mode='w', suffix='.go', delete=False, dir=go_dir) as f:
         f.write(go_code)
         f.flush()
+        # Close our handle before `go run` reads it; Windows forbids unlinking
+        # a file that still has an open handle in this process.
+        f.close()
         try:
             result = subprocess.run(
                 ['go', 'run', f.name],
@@ -270,6 +289,9 @@ func main() {{
     with tempfile.NamedTemporaryFile(mode='w', suffix='.go', delete=False, dir=go_dir) as f:
         f.write(go_code)
         f.flush()
+        # Close our handle before `go run` reads it; Windows forbids unlinking
+        # a file that still has an open handle in this process.
+        f.close()
         try:
             result = subprocess.run(
                 ['go', 'run', f.name],
@@ -317,6 +339,9 @@ func main() {{
     with tempfile.NamedTemporaryFile(mode='w', suffix='.go', delete=False, dir=go_dir) as f:
         f.write(go_code)
         f.flush()
+        # Close our handle before `go run` reads it; Windows forbids unlinking
+        # a file that still has an open handle in this process.
+        f.close()
         try:
             result = subprocess.run(
                 ['go', 'run', f.name],
@@ -439,16 +464,29 @@ class TestCrossLanguage:
         print("✓ Go → JavaScript (quickEncrypt)")
 
 
+# Fixed, explicit salt for the key-derivation-consistency check.
+# In the new format the salt is RANDOM per instance (and travels in the header),
+# so two independent Shield(password, service) instances no longer derive the
+# same key. To compare raw derived keys we must pin the SAME salt in each
+# implementation. Python and JavaScript both accept an explicit salt; Go's
+# public New() does not, so Go's key compatibility is covered instead by the
+# encrypt/decrypt cross-language round-trips below (the salt in the header lets
+# Go re-derive and decrypt Python/JS ciphertext, which is the real guarantee).
+TEST_SALT = bytes(range(16))
+
+
 def test_key_derivation_consistency():
-    """Verify all implementations derive the same key from password/service."""
-    # Python key derivation
-    s_py = Shield(TEST_PASSWORD, TEST_SERVICE)
+    """Verify Python and JS derive the same key from password/service/salt."""
+    # Python key derivation (explicit salt)
+    s_py = Shield(TEST_PASSWORD, TEST_SERVICE, salt=TEST_SALT)
     py_key = s_py._key.hex()
 
-    # JavaScript key derivation
+    # JavaScript key derivation (explicit salt via options)
+    salt_hex = TEST_SALT.hex()
     js_code = f'''
 const {{ Shield }} = require('./src/shield.js');
-const s = new Shield('{TEST_PASSWORD}', '{TEST_SERVICE}');
+const salt = Buffer.from('{salt_hex}', 'hex');
+const s = new Shield('{TEST_PASSWORD}', '{TEST_SERVICE}', {{ salt }});
 console.log(s.key.toString('hex'));
 '''
     js_dir = os.path.join(os.path.dirname(__file__), '..', 'javascript')
@@ -461,40 +499,9 @@ console.log(s.key.toString('hex'));
     )
     js_key = result.stdout.strip()
 
-    # Go key derivation
-    go_code = f'''
-package main
-
-import (
-    "encoding/hex"
-    "fmt"
-    "github.com/Dikestra-ai/shield/shield"
-)
-
-func main() {{
-    s := shield.New("{TEST_PASSWORD}", "{TEST_SERVICE}", nil)
-    fmt.Print(hex.EncodeToString(s.DerivedKey()))
-}}
-'''
-    go_dir = os.path.join(os.path.dirname(__file__), '..', 'go')
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.go', delete=False, dir=go_dir) as f:
-        f.write(go_code)
-        f.flush()
-        try:
-            result = subprocess.run(
-                ['go', 'run', f.name],
-                cwd=go_dir,
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            go_key = result.stdout.strip()
-        finally:
-            os.unlink(f.name)
-
     assert py_key == js_key, f"Python key {py_key} != JavaScript key {js_key}"
-    assert py_key == go_key, f"Python key {py_key} != Go key {go_key}"
-    print(f"✓ Key derivation consistent: {py_key[:16]}...")
+    print(f"✓ Key derivation consistent (Python/JS, pinned salt): {py_key[:16]}...")
+    print("  (Go key compatibility is verified via the decrypt round-trips below)")
 
 
 def main():

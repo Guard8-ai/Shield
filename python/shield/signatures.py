@@ -64,8 +64,14 @@ class SymmetricSignature:
         Returns:
             SymmetricSignature instance
         """
+        # This derivation is intentionally deterministic: the same
+        # (password, identity) must reproduce the same signing key on any
+        # device, so a stored random salt is not an option here. The salt is
+        # therefore a domain-separated hash of the (public) identity, and
+        # security rests on password entropy plus the iteration cost.
+        # CR-2: 600,000 PBKDF2-HMAC-SHA256 iterations (OWASP 2023 floor).
         salt = hashlib.sha256(f"sign:{identity}".encode()).digest()
-        key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+        key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 600_000)
         return cls(key)
 
     def sign(self, message: bytes, include_timestamp: bool = True) -> bytes:

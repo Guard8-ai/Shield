@@ -180,9 +180,9 @@ Share the password securely (in person, encrypted chat, etc.), then share the en
 ### "Is this secure?"
 
 Yes. Shield uses:
-- 256-bit keys (unbreakable by any known method)
+- 256-bit keys (computationally infeasible to brute-force with current and foreseeable technology)
 - HMAC authentication (detects any tampering)
-- No asymmetric crypto (survives P=NP and quantum computers)
+- No asymmetric crypto (uses no RSA/ECC, so it is unaffected by attacks that break asymmetric crypto; 256-bit keys give ~128-bit post-quantum security)
 
 See [SECURITY.md](SECURITY.md) for the full threat model.
 

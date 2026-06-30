@@ -5,10 +5,21 @@
 const crypto = require('crypto');
 
 /**
- * Password-Authenticated Key Exchange.
+ * Pre-shared-key handshake (NOT a true PAKE despite the name).
+ *
+ * Both parties derive a shared key from a common pre-shared secret, with role
+ * binding to prevent reflection attacks.
+ *
+ * SECURITY: The handshake contribution HMAC(PBKDF2(secret, salt), role) is sent
+ * on the wire together with the salt, so a recorded handshake permits an OFFLINE
+ * DICTIONARY ATTACK against a low-entropy secret (PBKDF2 iterations only slow
+ * each guess). Safe ONLY with a high-entropy shared secret (>=128 bits). For
+ * password-based or forward-secret key establishment, use the X25519 +
+ * ML-KEM-768 hybrid KEX (pqhybrid) instead. Type name retained for API
+ * compatibility.
  */
 class PAKEExchange {
-    static ITERATIONS = 200000;
+    static ITERATIONS = 600000;
 
     /**
      * Derive key contribution from password.

@@ -1,17 +1,17 @@
-# Shield - EXPTIME-Secure Encryption (iOS/macOS)
+# Shield - Authenticated Symmetric Encryption (iOS/macOS)
 
 [![CocoaPods](https://img.shields.io/cocoapods/v/Shield.svg)](https://cocoapods.org/pods/Shield)
 [![Swift Package Manager](https://img.shields.io/badge/SPM-compatible-brightgreen.svg)](https://swift.org/package-manager/)
 [![Platform](https://img.shields.io/badge/platform-iOS%2013%2B%20%7C%20macOS%2010.15%2B-blue.svg)](https://developer.apple.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Symmetric cryptography with proven exponential-time security for Apple platforms.
+Symmetric authenticated encryption with 256-bit keys (~128-bit post-quantum security) for Apple platforms.
 
 ## Why Shield?
 
-Shield uses only symmetric primitives with EXPTIME-hard security guarantees. Breaking requires 2^256 operations - no shortcut exists:
+Shield builds on well-established symmetric primitives (SHA-256, HMAC-SHA256, PBKDF2). A 256-bit key gives 256-bit classical and ~128-bit post-quantum brute-force resistance, assuming these primitives are secure:
 
-- **PBKDF2-SHA256** for key derivation (100,000 iterations)
+- **PBKDF2-SHA256** for key derivation (600,000 iterations, OWASP 2023 floor)
 - **SHA256-based stream cipher** (AES-256-CTR equivalent)
 - **HMAC-SHA256** for authentication
 - **iOS Keychain** for secure key storage
@@ -118,7 +118,7 @@ if let key = try keychain.retrieve(for: "biometric_key") {
 
 ```swift
 // Create from password
-init(password: String, service: String, iterations: UInt32 = 100_000)
+init(password: String, service: String, iterations: UInt32 = 600_000)
 
 // Create from pre-shared key
 init(key: [UInt8]) throws

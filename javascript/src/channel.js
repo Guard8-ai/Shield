@@ -2,9 +2,16 @@
  * Shield Secure Channel - TLS/SSH-like secure transport using symmetric crypto.
  *
  * Provides encrypted bidirectional communication with:
- * - PAKE-based handshake (no certificates needed)
+ * - Pre-shared-key handshake (no certificates needed; NOT a true PAKE)
  * - Forward secrecy via key ratcheting
  * - Message authentication and replay protection
+ *
+ * SECURITY: The handshake is a pre-shared-key exchange, NOT a true PAKE. Each
+ * party's contribution HMAC(PBKDF2(secret, salt), role) is sent on the wire
+ * with the salt, so a recorded handshake permits an OFFLINE DICTIONARY ATTACK
+ * against a low-entropy secret. Safe ONLY with a high-entropy shared secret
+ * (>=128 bits); for password-based or forward-secret setup use the X25519 +
+ * ML-KEM-768 hybrid KEX (pqhybrid) instead.
  *
  * @example
  * const { ShieldChannel, ChannelConfig } = require('@dikestra/shield');
@@ -40,10 +47,10 @@ class ChannelConfig {
      * Create channel configuration.
      * @param {string} password - Shared password for PAKE
      * @param {string} service - Service identifier for domain separation
-     * @param {number} iterations - PBKDF2 iterations (default: 200000)
+     * @param {number} iterations - PBKDF2 iterations (default: 600000)
      * @param {number} handshakeTimeoutMs - Handshake timeout (default: 30000)
      */
-    constructor(password, service, iterations = 200000, handshakeTimeoutMs = 30000) {
+    constructor(password, service, iterations = 600000, handshakeTimeoutMs = 30000) {
         this.password = password;
         this.service = service;
         this.iterations = iterations;
@@ -240,12 +247,25 @@ class ShieldChannel {
 
     _computeSessionKey(config, salt, localContribution, remoteContribution) {
         const baseKey = PAKEExchange.combine(localContribution, remoteContribution);
-        const passwordKey = PAKEExchange.derive(
+        // PBKDF2-derived secret (not exchanged): already a 32-byte key stretched
+        // from the password via PBKDF2 (600k), not the raw password.
+        const derivedKey = PAKEExchange.derive(
             config.password, salt, 'session', config.iterations
         );
 
-        const combined = Buffer.concat([baseKey, passwordKey]);
-        return crypto.createHash('sha256').update(combined).digest();
+        // Final session key = HMAC-SHA256(baseKey, derivedKey || service).
+        // Binding the service identifier provides domain separation: the same
+        // shared secret used for two different services derives two different
+        // session keys, so a credential provisioned for one service cannot
+        // establish a channel for another. derivedKey is a fixed 32 bytes,
+        // so the concatenation is unambiguous across implementations.
+        // Keyed HMAC (not SHA256(key || data)) avoids length-extension and
+        // matches the Rust source of truth byte-for-byte.
+        const macInput = Buffer.concat([
+            derivedKey,
+            Buffer.from(config.service, 'utf8'),
+        ]);
+        return crypto.createHmac('sha256', baseKey).update(macInput).digest();
     }
 
     async _sendHandshake(msgType, data) {
