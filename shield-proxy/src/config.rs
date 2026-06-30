@@ -304,10 +304,10 @@ format = "json"
 
     #[test]
     fn test_validation_zero_max_connections() {
-        let toml = r#"
+        let toml = r"
 [proxy]
 max_connections = 0
-"#;
+";
         let result = ProxyConfig::from_toml(toml);
         assert!(result.is_err());
     }

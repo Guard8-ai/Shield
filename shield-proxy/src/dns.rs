@@ -134,14 +134,40 @@ async fn forward_query(
 }
 
 /// Try forwarding a query to a single resolver with timeout.
+///
+/// Hardened against off-path DNS spoofing (RT2-5):
+/// - the reply socket is `connect()`ed to the upstream so the kernel drops
+///   datagrams from any other source address, and
+/// - the reply's DNS transaction ID must match the query's; replies with a
+///   mismatched ID are ignored until the (single, bounded) timeout elapses.
 async fn try_resolver(query: &[u8], addr: &str, timeout_ms: u64) -> Option<Vec<u8>> {
     let socket = UdpSocket::bind("0.0.0.0:0").await.ok()?;
-    socket.send_to(query, addr).await.ok()?;
+    // Connecting filters the receive path to this upstream only.
+    socket.connect(addr).await.ok()?;
+    socket.send(query).await.ok()?;
 
     let mut buf = [0u8; MAX_DNS_PACKET];
-    match time::timeout(Duration::from_millis(timeout_ms), socket.recv_from(&mut buf)).await {
-        Ok(Ok((len, _))) => Some(buf[..len].to_vec()),
-        _ => None,
+    let deadline = time::Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        let remaining = deadline.saturating_duration_since(time::Instant::now());
+        if remaining.is_zero() {
+            return None;
+        }
+        match time::timeout(remaining, socket.recv(&mut buf)).await {
+            Ok(Ok(len)) => {
+                let response = &buf[..len];
+                // Require a full DNS header and a matching transaction ID.
+                if len >= 12
+                    && query.len() >= 2
+                    && response[0] == query[0]
+                    && response[1] == query[1]
+                {
+                    return Some(response.to_vec());
+                }
+                // Wrong/short reply: keep waiting until the deadline.
+            }
+            _ => return None,
+        }
     }
 }
 
@@ -229,5 +255,43 @@ mod tests {
         // Connect to a port that won't respond
         let result = try_resolver(HEALTH_CHECK_QUERY, "127.0.0.1:19998", 50).await;
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_try_resolver_rejects_wrong_transaction_id() {
+        // RT2-5: a reply whose DNS transaction ID does not match the query
+        // (an off-path spoofing attempt) must be rejected.
+        let upstream = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let upstream_addr = upstream.local_addr().unwrap().to_string();
+        tokio::spawn(async move {
+            let mut b = [0u8; 512];
+            if let Ok((n, src)) = upstream.recv_from(&mut b).await {
+                let mut resp = b[..n].to_vec();
+                resp[0] ^= 0xFF; // flip the transaction ID
+                let _ = upstream.send_to(&resp, src).await;
+            }
+        });
+        let result = try_resolver(HEALTH_CHECK_QUERY, &upstream_addr, 200).await;
+        assert!(result.is_none(), "reply with wrong transaction ID must be rejected");
+    }
+
+    #[tokio::test]
+    async fn test_try_resolver_accepts_matching_transaction_id() {
+        // A well-formed reply from the connected upstream with a matching
+        // transaction ID is accepted.
+        let upstream = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let upstream_addr = upstream.local_addr().unwrap().to_string();
+        tokio::spawn(async move {
+            let mut b = [0u8; 512];
+            if let Ok((n, src)) = upstream.recv_from(&mut b).await {
+                let mut resp = b[..n].to_vec();
+                if resp.len() < 12 {
+                    resp.resize(12, 0);
+                }
+                let _ = upstream.send_to(&resp, src).await;
+            }
+        });
+        let result = try_resolver(HEALTH_CHECK_QUERY, &upstream_addr, 200).await;
+        assert!(result.is_some(), "matching-transaction-ID reply must be accepted");
     }
 }
