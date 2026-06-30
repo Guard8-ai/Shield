@@ -280,9 +280,24 @@ Client                              Server
    |======= Encrypted Data ==========|
 ```
 
-### 3.2 PAKE Key Exchange
+### 3.2 Pre-Shared-Key Handshake
 
-Both parties derive a shared key from the password:
+> **Security note — this is NOT a true PAKE.** Despite the `PAKEExchange` type
+> name, this handshake does *not* provide the guarantee of a real
+> Password-Authenticated Key Exchange (SPAKE2/CPace/OPAQUE). Each party's
+> contribution is a deterministic function of the shared secret and a salt, and
+> both the salt and the contribution are sent in the clear. An attacker who
+> records one handshake can mount an **offline dictionary attack** against a
+> low-entropy secret (PBKDF2's 600 000 iterations only slow each guess). This
+> cannot be fixed in a symmetric-only design.
+>
+> **Use this handshake only with a high-entropy shared secret** (≥128 bits — a
+> random key or long diceware passphrase). For password-based or forward-secret
+> establishment, use the X25519 + ML-KEM-768 hybrid KEX (§5 / `pqhybrid`)
+> instead and feed its 32-byte output into the pre-shared-key path.
+
+Both parties derive a shared key from the shared secret (a deterministic
+pre-shared-key derivation, written `pake_key` below for historical reasons):
 
 ```
 pake_key = HMAC-SHA256(password, service || "pake")

@@ -95,6 +95,7 @@ From `THREAT_MODEL.md`:
 - **Ratchet/stream/group keystream** uses HMAC-SHA256 as a keyed PRF stream (encrypt-then-MAC), not an AEAD. Standard construction, but non-AEAD — flagged for explicit review.
 - **C base cipher is AES-256-GCM only** (Windows CNG lacks ChaCha20); C post-quantum is now implemented (liboqs + OpenSSL, POSIX).
 - **`SecureSession`** disables the freshness window (at-rest payloads) — intended; tag still provides integrity.
+- **`PAKEExchange` / `ShieldChannel` is a pre-shared-key handshake, NOT a true PAKE.** The handshake contribution `HMAC(PBKDF2(secret, salt), role)` is sent on the wire with the salt, so a recorded handshake permits an **offline dictionary attack** against a low-entropy secret (PBKDF2 600k only slows each guess). It is safe **only with a high-entropy shared secret**. A real DH-based PAKE (SPAKE2/CPace) is a tracked follow-up; for password/forward-secret use, the X25519+ML-KEM-768 hybrid KEX is the recommended path. The `PAKEExchange` type name is retained for API compatibility but the docs (exchange.rs, channel.rs, PROTOCOL.md §3.2, README, CHEATSHEET) disclose this explicitly.
 
 ---
 

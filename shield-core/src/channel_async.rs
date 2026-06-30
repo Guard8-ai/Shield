@@ -1,6 +1,10 @@
 //! Async Shield Channel - Tokio-based async secure transport.
 //!
-//! Provides the same security as [`crate::channel::ShieldChannel`] but with async I/O.
+//! Provides the same security — and the same limits — as
+//! [`crate::channel::ShieldChannel`] but with async I/O. In particular the
+//! handshake is a **pre-shared-key handshake, not a true PAKE**, and is safe
+//! only with a high-entropy shared secret; see the
+//! [security limits](crate::channel) on the sync channel.
 //!
 //! # Example
 //!
@@ -135,7 +139,8 @@ pub struct AsyncShieldChannel<S> {
 impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
     /// Connect as client (initiator).
     ///
-    /// Performs async PAKE handshake and establishes encrypted channel.
+    /// Performs the async pre-shared-key handshake and establishes an encrypted
+    /// channel (not a true PAKE — high-entropy shared secret only).
     /// Enforces the configured handshake timeout (default 30s).
     pub async fn connect(stream: S, config: &ChannelConfig) -> Result<Self> {
         let timeout_dur = std::time::Duration::from_millis(config.handshake_timeout_ms());

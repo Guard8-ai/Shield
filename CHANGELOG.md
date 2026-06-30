@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **`PAKEExchange` / `ShieldChannel` documented honestly as NOT a true PAKE.**
+  The handshake sends a deterministic, password-derived contribution on the
+  wire, so a recorded handshake permits an offline dictionary attack against a
+  low-entropy secret. Docs across all bindings now state it is a pre-shared-key
+  handshake safe **only with a high-entropy shared secret**, and point to the
+  X25519 + ML-KEM-768 hybrid KEX for the password / forward-secret case. No wire
+  or behavior change (type names retained); a real DH-based PAKE is tracked as a
+  follow-up.
 - **Per-instance random salt (CR-1).** Key derivation no longer uses a
   deterministic `SHA256(service)` salt. Each `Shield` created from a password
   now generates a cryptographically random 16-byte salt, stored in the

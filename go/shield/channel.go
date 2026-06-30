@@ -70,7 +70,14 @@ type ShieldChannel struct {
 	service string
 }
 
-// Connect initiates a client connection with PAKE handshake.
+// Connect initiates a client connection with the pre-shared-key handshake.
+//
+// SECURITY: The handshake is NOT a true PAKE. Each party's contribution
+// HMAC(PBKDF2(secret, salt), role) is sent on the wire with the salt, so a
+// recorded handshake permits an OFFLINE DICTIONARY ATTACK against a low-entropy
+// secret. Safe ONLY with a high-entropy shared secret (>=128 bits); for
+// password-based or forward-secret setup use the X25519 + ML-KEM-768 hybrid KEX
+// (pqhybrid) instead.
 func Connect(conn io.ReadWriteCloser, config *ChannelConfig) (*ShieldChannel, error) {
 	ch := &ShieldChannel{conn: conn, service: config.Service}
 
@@ -121,7 +128,14 @@ func Connect(conn io.ReadWriteCloser, config *ChannelConfig) (*ShieldChannel, er
 	return ch, nil
 }
 
-// Accept waits for a client connection with PAKE handshake.
+// Accept waits for a client connection with the pre-shared-key handshake.
+//
+// SECURITY: The handshake is NOT a true PAKE. Each party's contribution
+// HMAC(PBKDF2(secret, salt), role) is sent on the wire with the salt, so a
+// recorded handshake permits an OFFLINE DICTIONARY ATTACK against a low-entropy
+// secret. Safe ONLY with a high-entropy shared secret (>=128 bits); for
+// password-based or forward-secret setup use the X25519 + ML-KEM-768 hybrid KEX
+// (pqhybrid) instead.
 func Accept(conn io.ReadWriteCloser, config *ChannelConfig) (*ShieldChannel, error) {
 	ch := &ShieldChannel{conn: conn, service: config.Service}
 

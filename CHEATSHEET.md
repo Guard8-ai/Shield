@@ -291,13 +291,20 @@ const sig = lamport.sign(Buffer.from('message'));
 const valid = LamportSignature.verify(Buffer.from('message'), sig, lamport.publicKey);
 ```
 
-## Key Exchange (PAKE)
+## Key Exchange (pre-shared-key handshake)
+
+> ⚠️ **`PAKEExchange` is NOT a true PAKE.** It sends a deterministic,
+> password-derived contribution on the wire, so a recorded handshake permits an
+> **offline dictionary attack** against a low-entropy secret. Use it **only with
+> a high-entropy shared secret** (≥128 bits). For password-based or
+> forward-secret key establishment, use the X25519 + ML-KEM-768 hybrid KEX
+> (`pqhybrid` / `pq` feature).
 
 ### Python
 ```python
 from shield.exchange import PAKEExchange, KeySplitter
 
-# Password-authenticated key exchange
+# Pre-shared-key handshake (high-entropy secret only — not a true PAKE)
 salt = PAKEExchange.generate_salt()
 client_key = PAKEExchange.derive("shared_password", salt, "client")
 server_key = PAKEExchange.derive("shared_password", salt, "server")
@@ -313,7 +320,7 @@ recovered = KeySplitter.combine(shares)
 ```javascript
 const { PAKEExchange, KeySplitter } = require('@dikestra/shield');
 
-// PAKE
+// Pre-shared-key handshake (high-entropy secret only — not a true PAKE)
 const salt = PAKEExchange.generateSalt();
 const clientKey = PAKEExchange.derive('password', salt, 'client');
 const serverKey = PAKEExchange.derive('password', salt, 'server');
@@ -357,7 +364,13 @@ manager.decrypt(encryptedV2);  // Works
 
 ## Secure Channel (Rust-only)
 
-TLS-like encrypted transport using PAKE + RatchetSession.
+TLS-like encrypted transport using a pre-shared-key handshake + RatchetSession.
+
+> ⚠️ The handshake is **not a true PAKE** — supply a **high-entropy** shared
+> secret (the `"shared-secret"` literals below are illustrative; a real
+> deployment must use ≥128-bit entropy). A recorded handshake otherwise permits
+> an offline dictionary attack. For password-based key establishment, derive the
+> channel secret from the X25519 + ML-KEM-768 hybrid KEX (`pq` feature).
 
 ### Rust (Sync)
 ```rust
@@ -406,8 +419,8 @@ println!("Service: {}", channel.service());
 ```
 
 ### Features
-- PAKE handshake (no certificates needed)
-- Forward secrecy via key ratcheting
+- Pre-shared-key handshake, no certificates needed (high-entropy secret only — not a true PAKE)
+- Forward secrecy of per-message keys via key ratcheting
 - Message authentication (HMAC)
 - Replay protection (counters)
 - Wrong password = authentication failure

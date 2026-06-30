@@ -1,6 +1,40 @@
 //! Key exchange without public-key cryptography.
 //!
-//! Provides PAKE, QR exchange, and key splitting.
+//! Provides a pre-shared-key handshake helper ([`PAKEExchange`]), QR exchange,
+//! and key splitting.
+//!
+//! # Security note: this is NOT a true PAKE
+//!
+//! The type [`PAKEExchange`] is named for historical/API-compatibility reasons,
+//! but it does **not** provide the security guarantee of a real
+//! Password-Authenticated Key Exchange (such as `SPAKE2`, `CPace`, or `OPAQUE`). A true
+//! PAKE leaks *no* offline-checkable function of the password to a network
+//! observer, so a weak password stays safe even if the entire handshake is
+//! recorded.
+//!
+//! This helper instead derives each party's contribution as a *deterministic*
+//! function of the shared secret and a salt:
+//! `contribution = HMAC(PBKDF2(secret, salt), role)`. Both the salt and the
+//! contribution travel on the wire (see [`crate::channel`]). An eavesdropper who
+//! records a handshake can therefore mount an **offline dictionary attack**: for
+//! each guessed password they recompute the contribution and compare. PBKDF2
+//! (600 000 iterations) raises the cost per guess but does not remove the
+//! attack — it is fundamentally not preventable in a symmetric-only design.
+//!
+//! ## When this is safe to use
+//!
+//! Use [`PAKEExchange`] / [`crate::channel::ShieldChannel`] **only with a
+//! high-entropy shared secret** (for example a 256-bit random key, or a
+//! diceware passphrase with ≥128 bits of entropy). With a high-entropy secret
+//! the offline search is computationally infeasible and the handshake is sound.
+//!
+//! ## When NOT to use it
+//!
+//! Do **not** use it to bootstrap a session from a low-entropy human password,
+//! and do not rely on it for forward secrecy against compromise of the shared
+//! secret. For those cases use the X25519 + ML-KEM-768 hybrid key exchange
+//! (`pqhybrid`, behind the `pq` feature), which is a real asymmetric KEX and
+//! does not expose a password to offline guessing.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ring::hmac;
@@ -9,7 +43,14 @@ use std::num::NonZeroU32;
 
 use crate::error::{Result, ShieldError};
 
-/// Password-Authenticated Key Exchange.
+/// Pre-shared-key handshake helper.
+///
+/// **Not a true PAKE** despite the name. The contribution it derives,
+/// `HMAC(PBKDF2(secret, salt), role)`, is sent on the wire together with the
+/// salt, so a recorded handshake permits an offline dictionary attack against a
+/// low-entropy secret. Safe **only** with a high-entropy pre-shared secret. See
+/// the [module-level security note](crate::exchange) and use the `pqhybrid`
+/// X25519+ML-KEM KEX for the password / forward-secret case.
 pub struct PAKEExchange;
 
 impl PAKEExchange {

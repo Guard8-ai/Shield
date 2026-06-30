@@ -21,7 +21,16 @@ var (
 	ErrInvalidShareCount = errors.New("shield: invalid share count")
 )
 
-// PAKEExchange provides Password-Authenticated Key Exchange.
+// PAKEExchange is a pre-shared-key handshake helper (NOT a true PAKE despite
+// the name).
+//
+// SECURITY: This is not a true PAKE. The values exchanged are derived
+// deterministically from the shared secret via PBKDF2, so a recorded handshake
+// permits an OFFLINE DICTIONARY ATTACK against a low-entropy secret (PBKDF2
+// iterations only slow each guess). Safe ONLY with a high-entropy shared secret
+// (>=128 bits). For password-based or forward-secret key establishment, use the
+// X25519 + ML-KEM-768 hybrid KEX (pqhybrid) instead. Type name retained for API
+// compatibility.
 type PAKEExchange struct {
 	password     string
 	identity     string
@@ -102,8 +111,15 @@ func (pe *PAKEExchange) CreateProof(peerPublic []byte) []byte {
 	return mac.Sum(nil)
 }
 
-// PAKEDerive derives a PAKE contribution from password and salt.
+// PAKEDerive derives a handshake contribution from a shared secret and salt.
 // This is the static function used by ShieldChannel.
+//
+// SECURITY: NOT a true PAKE despite the name. The contribution
+// HMAC(PBKDF2(secret, salt), role) is sent on the wire together with the salt,
+// so a recorded handshake permits an OFFLINE DICTIONARY ATTACK against a
+// low-entropy secret (PBKDF2 iterations only slow each guess). Safe ONLY with a
+// high-entropy shared secret (>=128 bits). For password-based or forward-secret
+// key establishment, use the X25519 + ML-KEM-768 hybrid KEX (pqhybrid) instead.
 func PAKEDerive(password string, salt []byte, role string, iterations int) []byte {
 	context := []byte("SHIELD-PAKE-" + role)
 	fullSalt := append(salt, context...)

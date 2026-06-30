@@ -2,9 +2,16 @@
 Shield Secure Channel - TLS/SSH-like secure transport using symmetric crypto.
 
 Provides encrypted bidirectional communication with:
-- PAKE-based handshake (no certificates needed)
+- Pre-shared-key handshake (no certificates needed; NOT a true PAKE)
 - Forward secrecy via key ratcheting
 - Message authentication and replay protection
+
+SECURITY: The handshake is a pre-shared-key exchange, NOT a true PAKE. Each
+party's contribution HMAC(PBKDF2(secret, salt), role) is sent on the wire with
+the salt, so a recorded handshake permits an OFFLINE DICTIONARY ATTACK against a
+low-entropy secret. Safe ONLY with a high-entropy shared secret (>=128 bits);
+for password-based or forward-secret setup use the X25519 + ML-KEM-768 hybrid
+KEX (pqhybrid) instead.
 
 Example:
     >>> from shield.channel import ShieldChannel, ChannelConfig
@@ -68,7 +75,9 @@ class ShieldChannel:
     Shield secure channel for encrypted communication.
 
     Provides TLS-like security using only symmetric cryptography:
-    - PAKE handshake establishes shared key from password
+    - Pre-shared-key handshake (NOT a true PAKE) establishes shared key from
+      the pre-shared secret; safe ONLY with a high-entropy secret (>=128 bits),
+      since a recorded handshake allows an offline dictionary attack
     - RatchetSession provides forward secrecy
     - All messages authenticated with HMAC
     """

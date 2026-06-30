@@ -1,9 +1,34 @@
 //! Shield Secure Channel - TLS/SSH-like secure transport using symmetric crypto.
 //!
 //! Provides encrypted bidirectional communication with:
-//! - PAKE-based handshake (no certificates needed)
-//! - Forward secrecy via key ratcheting
+//! - Pre-shared-key handshake (no certificates needed)
+//! - Forward secrecy *of message keys* via key ratcheting (see limits below)
 //! - Message authentication and replay protection
+//!
+//! # Security limits — read before use
+//!
+//! The handshake is a **pre-shared-key** handshake, **not** a true PAKE
+//! (Password-Authenticated Key Exchange), even though it is built on the
+//! [`PAKEExchange`] helper. Each side's handshake contribution is a
+//! deterministic function of the shared secret, `HMAC(PBKDF2(secret, salt),
+//! role)`, and both the salt and the contribution are transmitted in the clear
+//! during `ClientHello`/`ServerHello`/`Finished`. An attacker who records one
+//! handshake can therefore run an **offline dictionary attack**: guess a
+//! password, recompute the contribution, and compare. The 600 000-iteration
+//! PBKDF2 only slows each guess.
+//!
+//! Consequences:
+//! - **Use a high-entropy shared secret only** (≥128 bits, e.g. a random key or
+//!   long diceware passphrase). With such a secret the offline search is
+//!   infeasible and the channel is sound.
+//! - **Do not** bootstrap a channel from a low-entropy human password.
+//! - The ratchet gives forward secrecy of *individual message keys* going
+//!   forward, but it does **not** protect against compromise of the long-term
+//!   shared secret: anyone who learns (or brute-forces) that secret can
+//!   re-derive the session from a recorded transcript. For real password-based
+//!   or asymmetric forward-secret establishment, use the X25519 + ML-KEM-768
+//!   hybrid KEX (`pqhybrid`, `pq` feature) and feed its output key here via the
+//!   pre-shared-key path.
 //!
 //! # Example
 //!
@@ -67,7 +92,7 @@ enum HandshakeType {
 /// Channel configuration.
 #[derive(Clone)]
 pub struct ChannelConfig {
-    /// Shared password for PAKE.
+    /// Shared secret for the pre-shared-key handshake (use high entropy).
     password: String,
     /// Service identifier (domain binding).
     service: String,
@@ -221,10 +246,15 @@ impl HandshakeState {
 
 /// Shield secure channel for encrypted communication.
 ///
-/// Provides TLS-like security using only symmetric cryptography:
-/// - PAKE handshake establishes shared key from password
-/// - `RatchetSession` provides forward secrecy
+/// Provides TLS-like transport using only symmetric cryptography:
+/// - Pre-shared-key handshake establishes a session key from the shared secret
+/// - `RatchetSession` provides forward secrecy of per-message keys
 /// - All messages authenticated with HMAC
+///
+/// **Security limit:** the handshake is not a true PAKE and exposes the shared
+/// secret to an offline dictionary attack from a recorded transcript. Supply a
+/// **high-entropy** secret only. See the [module-level security
+/// limits](crate::channel).
 pub struct ShieldChannel<S> {
     stream: S,
     session: RatchetSession,
@@ -235,7 +265,9 @@ pub struct ShieldChannel<S> {
 impl<S: Read + Write> ShieldChannel<S> {
     /// Connect as client (initiator).
     ///
-    /// Performs PAKE handshake and establishes encrypted channel.
+    /// Performs the pre-shared-key handshake and establishes an encrypted
+    /// channel. The shared secret must be high-entropy (see [security
+    /// limits](crate::channel)).
     ///
     /// # Arguments
     /// * `stream` - Underlying transport (TCP, etc.)

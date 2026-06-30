@@ -194,10 +194,18 @@ Not all features are available in all languages. Here's what's supported:
 | `GroupEncryption` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
 | `KeyRotationManager` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
 | `IdentityProvider` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
-| `PAKEExchange` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
+| `PAKEExchange`¹ | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
 | `QRExchange` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
 | `KeySplitter` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
 | `check_password` | ✅ | ✅ | ✅ | ✅ | - | - | - | - | - |
+
+> ¹ `PAKEExchange` / `ShieldChannel` is a **pre-shared-key handshake, not a true
+> PAKE** despite the name. It sends a deterministic, password-derived
+> contribution on the wire, so a recorded handshake permits an **offline
+> dictionary attack** against a low-entropy secret. Use it **only with a
+> high-entropy shared secret**. For password-based or forward-secret key
+> establishment, use the X25519 + ML-KEM-768 hybrid KEX (`pq` feature). See
+> [`PROTOCOL.md` §3.2](PROTOCOL.md).
 
 ### Platform-Specific Features
 
