@@ -437,6 +437,35 @@ Version = 0x0001
 Chunk Size = 65536 (default)
 ```
 
+### 4.3 Chunk Framing and Authenticated End-of-Stream
+
+On the wire each chunk is length-prefixed and the stream ends with an
+**authenticated** end-of-stream tag (a length commitment):
+
+```
+header   = chunk_size(u32 LE, 4) || stream_salt(16)
+chunk[i] = chunk_len(u32 LE, 4) || (nonce(16) || ciphertext || mac(16))
+trailer  = u32_LE(0) || eof_tag(32)
+
+eof_key  = HMAC-SHA256(master_key, "shield-stream-eof")
+eof_tag  = HMAC-SHA256(eof_key, stream_salt || chunk_count_u64_LE)
+```
+
+`chunk_count` is the total number of data chunks. The decryptor **requires** the
+zero-length marker followed by a valid `eof_tag`, verified in constant time
+against the number of chunks actually read.
+
+> **Why (truncation resistance):** without an authenticated terminator, an
+> attacker could drop trailing chunks (each remaining chunk's per-chunk MAC
+> still verifies) and the decryptor would silently return truncated plaintext —
+> even re-appending a bare zero marker would be accepted. Binding the chunk
+> count into a keyed tag means a truncated stream cannot produce a matching
+> `eof_tag` without the master key, and a stream that simply ends early (no
+> marker) is rejected. This tag is part of the cross-language wire format: every
+> binding derives the identical `eof_tag` (golden vector
+> `52d4dfbeccc364bd69a2f232aa460bd1eb79b0c93903f344dd7b937703918431` for
+> master_key=32×0x42, stream_salt=16×0x01, chunk_count=3).
+
 ## 5. TOTP Format
 
 ### 5.1 Secret Encoding

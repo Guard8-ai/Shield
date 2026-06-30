@@ -85,8 +85,12 @@ namespace Dikestra.Shield
                 chunkNum++;
             }
 
-            // End marker
+            // Authenticated end-of-stream trailer: zero-length marker followed by
+            // a tag committing to the total chunk count, so a truncated stream
+            // (even with a re-appended zero marker) fails verification.
             output.Write(BitConverter.GetBytes(0), 0, 4);
+            byte[] eofTag = ComputeEofTag(_key, streamSalt, (ulong)chunkNum);
+            output.Write(eofTag, 0, eofTag.Length);
 
             return output.ToArray();
         }
@@ -110,6 +114,7 @@ namespace Dikestra.Shield
             pos += 16;
 
             int chunkNum = 0;
+            bool sawEndMarker = false;
 
             while (pos + 4 <= encrypted.Length)
             {
@@ -117,7 +122,20 @@ namespace Dikestra.Shield
                 pos += 4;
 
                 if (encLen == 0)
-                    break; // End marker
+                {
+                    // Authenticated end-of-stream marker: require the tag and
+                    // verify it commits to the number of chunks actually seen.
+                    if (pos + 32 > encrypted.Length)
+                        throw new CryptographicException("missing end-of-stream tag");
+                    byte[] tag = new byte[32];
+                    Array.Copy(encrypted, pos, tag, 0, 32);
+                    pos += 32;
+                    byte[] expected = ComputeEofTag(_key, streamSalt, (ulong)chunkNum);
+                    if (!CryptographicOperations.FixedTimeEquals(tag, expected))
+                        throw new CryptographicException("end-of-stream authentication failed");
+                    sawEndMarker = true;
+                    break;
+                }
 
                 if (pos + encLen > encrypted.Length)
                     throw new ArgumentException("Incomplete chunk");
@@ -137,6 +155,10 @@ namespace Dikestra.Shield
                 output.Write(decrypted, 0, decrypted.Length);
                 chunkNum++;
             }
+
+            // A stream that ends without the authenticated marker has been truncated.
+            if (!sawEndMarker)
+                throw new CryptographicException("stream truncated: missing end-of-stream marker");
 
             return output.ToArray();
         }
@@ -171,8 +193,10 @@ namespace Dikestra.Shield
                 chunkNum++;
             }
 
-            // End marker
+            // Authenticated end-of-stream trailer.
             output.Write(BitConverter.GetBytes(0), 0, 4);
+            byte[] eofTag = ComputeEofTag(_key, streamSalt, (ulong)chunkNum);
+            output.Write(eofTag, 0, eofTag.Length);
         }
 
         /// <summary>
@@ -194,12 +218,22 @@ namespace Dikestra.Shield
 
             byte[] lenBytes = new byte[4];
             int chunkNum = 0;
+            bool sawEndMarker = false;
 
             while (input.Read(lenBytes, 0, 4) == 4)
             {
                 int encLen = BitConverter.ToInt32(lenBytes, 0);
                 if (encLen == 0)
+                {
+                    byte[] tag = new byte[32];
+                    if (input.Read(tag, 0, 32) != 32)
+                        throw new CryptographicException("missing end-of-stream tag");
+                    byte[] expected = ComputeEofTag(_key, streamSalt, (ulong)chunkNum);
+                    if (!CryptographicOperations.FixedTimeEquals(tag, expected))
+                        throw new CryptographicException("end-of-stream authentication failed");
+                    sawEndMarker = true;
                     break;
+                }
 
                 byte[] encrypted = new byte[encLen];
                 if (input.Read(encrypted, 0, encLen) != encLen)
@@ -213,6 +247,9 @@ namespace Dikestra.Shield
                 output.Write(decrypted, 0, decrypted.Length);
                 chunkNum++;
             }
+
+            if (!sawEndMarker)
+                throw new CryptographicException("stream truncated: missing end-of-stream marker");
         }
 
         // ============== Helper Methods ==============
@@ -230,6 +267,24 @@ namespace Dikestra.Shield
             Array.Copy(salt, 0, data, 32, 16);
             BitConverter.GetBytes(chunkNum).CopyTo(data, 48);
             return Shield.Sha256(data);
+        }
+
+        // Domain-separated end-of-stream key derived from the master key.
+        private static byte[] DeriveEofKey(byte[] masterKey)
+        {
+            return Shield.HmacSha256(masterKey, Encoding.ASCII.GetBytes("shield-stream-eof"));
+        }
+
+        // Authenticated end-of-stream tag committing to the stream salt and the
+        // total number of data chunks (length commitment). Full 32-byte HMAC.
+        private static byte[] ComputeEofTag(byte[] masterKey, byte[] streamSalt, ulong chunkCount)
+        {
+            byte[] eofKey = DeriveEofKey(masterKey);
+            byte[] input = new byte[16 + 8];
+            Array.Copy(streamSalt, 0, input, 0, 16);
+            // chunk_count as unsigned 64-bit little-endian.
+            BitConverter.GetBytes(chunkCount).CopyTo(input, 16);
+            return Shield.HmacSha256(eofKey, input);
         }
 
         private static byte[] EncryptBlock(byte[] key, byte[] data)

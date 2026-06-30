@@ -112,10 +112,14 @@ public class StreamCipher {
             chunkNum++;
         }
 
-        // End marker
+        // Authenticated end-of-stream trailer: zero-length marker followed by a
+        // tag committing to the total chunk count, so a truncated stream (even
+        // with a re-appended zero marker) fails verification.
         ByteBuffer endMarker = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
         endMarker.putInt(0);
         out.write(endMarker.array(), 0, 4);
+        byte[] eofTag = computeEofTag(key, streamSalt, chunkNum);
+        out.write(eofTag, 0, eofTag.length);
 
         return out.toByteArray();
     }
@@ -141,11 +145,24 @@ public class StreamCipher {
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         int chunkNum = 0;
+        boolean sawEndMarker = false;
 
         while (buf.remaining() >= 4) {
             int encLen = buf.getInt();
             if (encLen == 0) {
-                break; // End marker
+                // Authenticated end-of-stream marker: require the tag and verify
+                // it commits to the number of chunks actually seen.
+                if (buf.remaining() < 32) {
+                    throw new SecurityException("missing end-of-stream tag");
+                }
+                byte[] tag = new byte[32];
+                buf.get(tag);
+                byte[] expected = computeEofTag(key, streamSalt, chunkNum);
+                if (!MessageDigest.isEqual(tag, expected)) {
+                    throw new SecurityException("end-of-stream authentication failed");
+                }
+                sawEndMarker = true;
+                break;
             }
 
             if (buf.remaining() < encLen) {
@@ -166,6 +183,11 @@ public class StreamCipher {
 
             out.write(decrypted, 0, decrypted.length);
             chunkNum++;
+        }
+
+        // A stream that ends without the authenticated marker has been truncated.
+        if (!sawEndMarker) {
+            throw new SecurityException("stream truncated: missing end-of-stream marker");
         }
 
         return out.toByteArray();
@@ -209,10 +231,11 @@ public class StreamCipher {
                 chunkNum++;
             }
 
-            // End marker
+            // Authenticated end-of-stream trailer.
             ByteBuffer endMarker = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
             endMarker.putInt(0);
             out.write(endMarker.array());
+            out.write(computeEofTag(key, streamSalt, chunkNum));
         }
     }
 
@@ -241,15 +264,25 @@ public class StreamCipher {
 
             byte[] lenBytes = new byte[4];
             int chunkNum = 0;
+            boolean sawEndMarker = false;
 
             while (in.read(lenBytes) == 4) {
                 int encLen = ByteBuffer.wrap(lenBytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
                 if (encLen == 0) {
+                    byte[] tag = new byte[32];
+                    if (readFully(in, tag) != 32) {
+                        throw new SecurityException("missing end-of-stream tag");
+                    }
+                    byte[] expected = computeEofTag(key, streamSalt, chunkNum);
+                    if (!MessageDigest.isEqual(tag, expected)) {
+                        throw new SecurityException("end-of-stream authentication failed");
+                    }
+                    sawEndMarker = true;
                     break;
                 }
 
                 byte[] encrypted = new byte[encLen];
-                if (in.read(encrypted) != encLen) {
+                if (readFully(in, encrypted) != encLen) {
                     throw new IOException("Incomplete chunk");
                 }
 
@@ -262,7 +295,22 @@ public class StreamCipher {
                 out.write(decrypted);
                 chunkNum++;
             }
+
+            if (!sawEndMarker) {
+                throw new SecurityException("stream truncated: missing end-of-stream marker");
+            }
         }
+    }
+
+    /** Read exactly buf.length bytes (or fewer at EOF). Returns total read. */
+    private static int readFully(InputStream in, byte[] buf) throws IOException {
+        int total = 0;
+        while (total < buf.length) {
+            int n = in.read(buf, total, buf.length - total);
+            if (n < 0) break;
+            total += n;
+        }
+        return total;
     }
 
     // ============== Helper Methods ==============
@@ -283,6 +331,21 @@ public class StreamCipher {
         buf.put(salt);
         buf.putLong(chunkNum);
         return sha256(buf.array());
+    }
+
+    // Domain-separated end-of-stream key derived from the master key.
+    private static byte[] deriveEofKey(byte[] masterKey) {
+        return hmacSha256(masterKey, "shield-stream-eof".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+    }
+
+    // Authenticated end-of-stream tag committing to the stream salt and the total
+    // number of data chunks (length commitment). Full 32-byte HMAC output.
+    private static byte[] computeEofTag(byte[] masterKey, byte[] streamSalt, long chunkCount) {
+        byte[] eofKey = deriveEofKey(masterKey);
+        ByteBuffer input = ByteBuffer.allocate(16 + 8).order(ByteOrder.LITTLE_ENDIAN);
+        input.put(streamSalt);
+        input.putLong(chunkCount); // chunk_count as unsigned 64-bit little-endian
+        return hmacSha256(eofKey, input.array());
     }
 
     private static byte[] encryptBlock(byte[] key, byte[] data) {

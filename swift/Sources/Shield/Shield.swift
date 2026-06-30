@@ -436,6 +436,7 @@ public enum ShieldError: Error {
     case invalidKeySize
     case ciphertextTooShort
     case authenticationFailed
+    case streamTruncated
     case invalidVersion
     case randomGenerationFailed
     case lamportKeyUsed

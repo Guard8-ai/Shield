@@ -366,3 +366,27 @@ C#, Java, Kotlin, Android, C, Swift, iOS were not touched by this change (their 
   - Go / Python / JS: `SHA256(base_key || password_key || service)`, each with a `service`-dependence test.
 - **Discovered (separate, pre-existing): the channel derivations are NOT byte-compatible across bindings.** Rust uses HMAC-SHA256 for the contribution/combine/session steps while Go/Python/JS use plain SHA256, so a Rust channel peer never interoperated with a Go/Python/JS peer. This is unrelated to the service-binding fix above; unifying the four derivations (alongside a real DH-based PAKE) is folded into the existing tracked PAKE follow-up (Part 14). `PROTOCOL.md` §3.5 now discloses this status honestly. The service-binding domain separation is implemented in **all** bindings regardless.
 - **Verification (executed on this machine, 2026-06-30):** Rust `cargo test --all-features` (174+5+9 green) + `cargo clippy --all-features -- -D warnings` clean + `cargo fmt --check`; Python `pytest` 222 passed; Go `go vet` + `go test ./...` ok; JS `node --test` 122 pass. New tests: Rust `test_session_key_depends_on_service` (RED→GREEN), Rust/async conformance vectors, `python/tests/test_channel.py`, `go/shield/channel_test.go`, `javascript/test/channel.test.js`.
+
+---
+
+## Part 16 — Authenticated end-of-stream tag for StreamCipher (2026-06-30) ✅ DONE
+
+- **Finding (audit MEDIUM):** the `StreamCipher` wire format had no authenticated terminator. Each chunk carried its own MAC, but the decryptor stopped when it ran out of input or hit a bare zero-length end marker — it never *required* the marker and the marker was unauthenticated. An attacker could drop trailing chunks (every remaining chunk's MAC still verifies) and the decryptor silently returned **truncated plaintext**; re-appending a fake `00 00 00 00` marker was also accepted. THREAT_MODEL.md did not disclose this.
+- **Fix (all 9 stream bindings — Rust, Python, Go, JS, C#, Java, Kotlin, Android, Swift):** the bare zero marker is now followed by an authenticated, length-committing tag:
+  ```
+  eof_key = HMAC-SHA256(master_key, "shield-stream-eof")
+  eof_tag = HMAC-SHA256(eof_key, stream_salt || chunk_count_u64_LE)   # 32 bytes
+  trailer = u32_LE(0) || eof_tag
+  ```
+  The decryptor counts chunks, **requires** the marker + a valid 32-byte tag (verified in constant time against the chunk count actually read), and rejects a stream that ends without the marker. This detects silent truncation, a forged bare marker (no valid tag), and chunk-drop (the committed count no longer matches) — none forgeable without the master key.
+- **Cross-language conformance:** every binding reproduces the golden vector `eof_tag = 52d4dfbeccc364bd69a2f232aa460bd1eb79b0c93903f344dd7b937703918431` (master_key=32×0x42, stream_salt=16×0x01, chunk_count=3), so the EOF tag is byte-identical across languages. (The per-chunk *internals* still differ between bindings — Rust derives enc/mac subkeys, Python/Go/JS use the chunk key directly — so full stream interop remains a separate, pre-existing matter; the truncation fix and its tag are uniform.) The Go port additionally gained per-chunk key separation + a stream salt (it previously used the master key directly per chunk), aligning its framing with the others.
+- **Format note:** this is a stream-format change — streams written by the pre-fix code (bare marker, no tag) are rejected by the new decryptors, which is the intended fail-closed behavior. PROTOCOL.md §4.3 documents the new trailer.
+- **Verification (executed on this machine, 2026-06-30):** Rust `cargo test --all-features` (177+5+9) + clippy `-D warnings` + fmt; Python `pytest` 225; Go `go vet` + `go test ./...` ok; JS `node --test` 126; C# `dotnet test` 62/62. Java/Kotlin/Android: implementations compiled and executed via standalone harnesses (golden vector reproduced, truncation/forged-marker rejected); JUnit test files written for CI (no gradle on the dev host). Swift: edited + `swiftc -parse` clean (CommonCrypto requires macOS to execute). TDD: Rust truncation + forged-marker tests RED→GREEN before implementation.
+
+---
+
+## Part 17 — Fail closed on CSPRNG failure in salt init (2026-06-30) ✅ DONE
+
+- **Finding (audit MEDIUM, re-verification):** the password-mode initializers in **C, Swift, and iOS** fell back to an all-zero salt when the CSPRNG failed and then continued, deriving identical keys across every instance on the affected host (predictable salt → precomputation / cross-instance key collision). The C comment even claimed it "mirrors panic-on-failure in the Go reference" — but it silently used a zero salt instead of failing. (Rust returns `RandomFailed` and Go `panic`s; they were already fail-closed. The earlier "repo-wide zero-salt" note was therefore only partly stale — it was real in C/Swift/iOS.)
+- **Fix:** C `shield_init` now `abort()`s on `shield_random_bytes` failure (it returns void; abort is the panic analog); Swift/iOS convenience initializers `fatalError` on `SecRandomCopyBytes` failure instead of using a zero salt. Per-message nonce/padding paths in all three already failed closed.
+- **Verification:** C builds clean (clang + bcrypt + advapi32) and 35/35 tests pass; Swift/iOS `swiftc -parse` clean. The CSPRNG-failure branch is not unit-testable without RNG fault injection (unavailable on host); the success path is covered by existing different-salt/different-key tests.
