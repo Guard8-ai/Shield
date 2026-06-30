@@ -126,10 +126,20 @@ class ShieldMiddleware(BaseHTTPMiddleware if FASTAPI_AVAILABLE else object):
             "service": self.service,
         }).encode("utf-8")
 
+        # Strip framing headers from the original response (RT2-7): the encrypted
+        # body has a different length, so copying the original Content-Length
+        # (and Content-Type/Content-Encoding/Transfer-Encoding) would make the
+        # advertised length disagree with the body — truncation / desync, and a
+        # potential request-smuggling primitive. Let Response recompute them.
+        _stripped = {"content-length", "content-type", "content-encoding", "transfer-encoding"}
+        new_headers = {
+            k: v for k, v in response.headers.items() if k.lower() not in _stripped
+        }
+
         return Response(
             content=new_body,
             status_code=response.status_code,
-            headers=dict(response.headers),
+            headers=new_headers,
             media_type="application/json",
         )
 
