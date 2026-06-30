@@ -125,7 +125,9 @@ impl JwtVerifier {
     /// treat any error as a hard verification failure.
     pub fn verify<T: DeserializeOwned>(&self, token: &str) -> Result<T, String> {
         if self.trusted_keys.is_empty() {
-            return Err("No trusted signing key configured; refusing to verify (fail-closed)".into());
+            return Err(
+                "No trusted signing key configured; refusing to verify (fail-closed)".into(),
+            );
         }
         let header = decode_header(token).map_err(|e| format!("Invalid JWT header: {e}"))?;
 

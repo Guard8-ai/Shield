@@ -254,7 +254,13 @@ impl AttestationProvider for SEVAttestationProvider {
         // Challenge / freshness binding (anti-replay): the enclave must have
         // bound the fresh server-issued challenge into its SEV-SNP report-data.
         if let Some(challenge) = expected_report_data {
-            if !report_data_matches(payload.sev_snp.as_ref().and_then(|s| s.report_data.as_ref()), challenge) {
+            if !report_data_matches(
+                payload
+                    .sev_snp
+                    .as_ref()
+                    .and_then(|s| s.report_data.as_ref()),
+                challenge,
+            ) {
                 return Ok(AttestationResult::failure(
                     self.tee_type(),
                     "Report-data does not match challenge (possible replay)",
@@ -685,10 +691,7 @@ fn import_rsa_jwks(
             Ok(k) => k,
             Err(_) => continue,
         };
-        let kid = jwk
-            .get("kid")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+        let kid = jwk.get("kid").and_then(|v| v.as_str()).map(String::from);
         out.push(TrustedJwtKey {
             kid,
             alg: Algorithm::RS256,
@@ -761,7 +764,11 @@ mod tests {
         let provider = trusted_provider();
         let token = make_token(TRUSTED_PRIV_PEM, "shield-attestation", None, 3600);
         let result = provider.verify(token.as_bytes(), None).await.unwrap();
-        assert!(result.verified, "genuine signed token must verify: {:?}", result.error);
+        assert!(
+            result.verified,
+            "genuine signed token must verify: {:?}",
+            result.error
+        );
     }
 
     #[tokio::test]
@@ -770,7 +777,10 @@ mod tests {
         let provider = trusted_provider();
         let token = make_token(ATTACKER_PRIV_PEM, "shield-attestation", None, 3600);
         let result = provider.verify(token.as_bytes(), None).await.unwrap();
-        assert!(!result.verified, "token signed by untrusted key must be rejected");
+        assert!(
+            !result.verified,
+            "token signed by untrusted key must be rejected"
+        );
     }
 
     #[tokio::test]
@@ -821,17 +831,33 @@ mod tests {
         let token = make_token(TRUSTED_PRIV_PEM, "shield-attestation", Some(&rd_hex), 3600);
 
         // Correct challenge: accepted.
-        let ok = provider.verify(token.as_bytes(), Some(&challenge)).await.unwrap();
-        assert!(ok.verified, "matching challenge must verify: {:?}", ok.error);
+        let ok = provider
+            .verify(token.as_bytes(), Some(&challenge))
+            .await
+            .unwrap();
+        assert!(
+            ok.verified,
+            "matching challenge must verify: {:?}",
+            ok.error
+        );
 
         // Wrong challenge: rejected (replay protection).
         let wrong = [0x22u8; 32];
-        let bad = provider.verify(token.as_bytes(), Some(&wrong)).await.unwrap();
+        let bad = provider
+            .verify(token.as_bytes(), Some(&wrong))
+            .await
+            .unwrap();
         assert!(!bad.verified, "mismatched challenge must be rejected");
 
         // Missing report-data but challenge required: rejected.
         let token_no_rd = make_token(TRUSTED_PRIV_PEM, "shield-attestation", None, 3600);
-        let none = provider.verify(token_no_rd.as_bytes(), Some(&challenge)).await.unwrap();
-        assert!(!none.verified, "missing report-data must be rejected when challenge required");
+        let none = provider
+            .verify(token_no_rd.as_bytes(), Some(&challenge))
+            .await
+            .unwrap();
+        assert!(
+            !none.verified,
+            "missing report-data must be rejected when challenge required"
+        );
     }
 }

@@ -671,7 +671,11 @@ mod tests {
             .verify(token.as_bytes(), Some(&challenge))
             .await
             .unwrap();
-        assert!(ok.verified, "matching challenge must verify: {:?}", ok.error);
+        assert!(
+            ok.verified,
+            "matching challenge must verify: {:?}",
+            ok.error
+        );
 
         // Wrong challenge: rejected (replay protection).
         let wrong = [0x22u8; 32];

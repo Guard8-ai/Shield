@@ -398,7 +398,11 @@ fn build_sig_structure(protected: &[u8], payload: &[u8]) -> Result<Vec<u8>, Stri
 }
 
 /// Verify a COSE ES384 (ECDSA P-384 / SHA-384, fixed r||s) signature.
-fn verify_cose_signature(leaf_point: &[u8], message: &[u8], signature: &[u8]) -> Result<(), String> {
+fn verify_cose_signature(
+    leaf_point: &[u8],
+    message: &[u8],
+    signature: &[u8],
+) -> Result<(), String> {
     UnparsedPublicKey::new(&ECDSA_P384_SHA384_FIXED, leaf_point)
         .verify(message, signature)
         .map_err(|_| "COSE signature verification failed".to_string())
@@ -596,7 +600,10 @@ fn parse_asn1_time(tag: u8, body: &[u8]) -> Result<u64, String> {
                 .ok_or_else(|| "Short UTCTime".to_string())?
                 .parse()
                 .map_err(|_| "Bad year".to_string())?;
-            (if yy < 50 { 2000 + yy } else { 1900 + yy }, s.get(2..).unwrap_or(""))
+            (
+                if yy < 50 { 2000 + yy } else { 1900 + yy },
+                s.get(2..).unwrap_or(""),
+            )
         }
         0x18 => {
             let yyyy: i64 = s
@@ -1121,7 +1128,13 @@ mod tests {
         let leaf = gen_key(&ECDSA_P384_SHA384_FIXED_SIGNING, &rng);
         let ca_point = ca.public_key().as_ref().to_vec();
         let leaf_point = leaf.public_key().as_ref().to_vec();
-        let root_der = make_cert("aws.nitro-enclaves", "aws.nitro-enclaves", &ca_point, &ca, &rng);
+        let root_der = make_cert(
+            "aws.nitro-enclaves",
+            "aws.nitro-enclaves",
+            &ca_point,
+            &ca,
+            &rng,
+        );
         let leaf_der = make_cert("enclave-leaf", "aws.nitro-enclaves", &leaf_point, &ca, &rng);
         (rng, leaf, root_der, leaf_der)
     }
@@ -1161,7 +1174,13 @@ mod tests {
     fn test_genuine_document_verifies() {
         let (rng, leaf, root_der, leaf_der) = fixtures();
         let pcr0 = [0u8; 48];
-        let pb = payload_bytes(&pcr0, now_ms(), &leaf_der, std::slice::from_ref(&root_der), None);
+        let pb = payload_bytes(
+            &pcr0,
+            now_ms(),
+            &leaf_der,
+            std::slice::from_ref(&root_der),
+            None,
+        );
         let doc = assemble_cose(&pb, &pb, &leaf, &rng);
 
         let provider = NitroAttestationProvider::new().with_test_root(root_der);
@@ -1179,7 +1198,13 @@ mod tests {
     fn test_tampered_payload_rejected() {
         let (rng, leaf, root_der, leaf_der) = fixtures();
         let pcr0 = [0u8; 48];
-        let pb = payload_bytes(&pcr0, now_ms(), &leaf_der, std::slice::from_ref(&root_der), None);
+        let pb = payload_bytes(
+            &pcr0,
+            now_ms(),
+            &leaf_der,
+            std::slice::from_ref(&root_der),
+            None,
+        );
         // Flip a byte inside the "i-test-enclave" module_id text: CBOR still
         // parses, but the signature (made over the original) no longer matches.
         let mut tampered = pb.clone();
@@ -1198,7 +1223,13 @@ mod tests {
         let (_rng, leaf, root_der, leaf_der) = fixtures();
         let _ = &leaf;
         let pcr0 = [0u8; 48];
-        let pb = payload_bytes(&pcr0, now_ms(), &leaf_der, std::slice::from_ref(&root_der), None);
+        let pb = payload_bytes(
+            &pcr0,
+            now_ms(),
+            &leaf_der,
+            std::slice::from_ref(&root_der),
+            None,
+        );
         let doc = assemble_cose_raw(&protected_bytes(), &pb, &[0u8; 96]);
 
         let provider = NitroAttestationProvider::new().with_test_root(root_der);
@@ -1216,12 +1247,21 @@ mod tests {
         let leaf_point = leaf.public_key().as_ref().to_vec();
         let rogue_leaf = make_cert("enclave-leaf", "rogue", &leaf_point, &rogue_ca, &rng);
         let pcr0 = [0u8; 48];
-        let pb = payload_bytes(&pcr0, now_ms(), &rogue_leaf, std::slice::from_ref(&root_der), None);
+        let pb = payload_bytes(
+            &pcr0,
+            now_ms(),
+            &rogue_leaf,
+            std::slice::from_ref(&root_der),
+            None,
+        );
         let doc = assemble_cose(&pb, &pb, &leaf, &rng);
 
         let provider = NitroAttestationProvider::new().with_test_root(root_der);
         let res = block_on(provider.verify(&doc, None)).unwrap();
-        assert!(!res.verified, "leaf not signed by trust root must be rejected");
+        assert!(
+            !res.verified,
+            "leaf not signed by trust root must be rejected"
+        );
     }
 
     // --- (e) empty / missing cabundle is rejected ----------------------------
@@ -1245,7 +1285,13 @@ mod tests {
         let (rng, leaf, root_der, leaf_der) = fixtures();
         let pcr0 = [0u8; 48];
         let nonce = b"challenge-12345";
-        let pb = payload_bytes(&pcr0, now_ms(), &leaf_der, std::slice::from_ref(&root_der), Some(nonce));
+        let pb = payload_bytes(
+            &pcr0,
+            now_ms(),
+            &leaf_der,
+            std::slice::from_ref(&root_der),
+            Some(nonce),
+        );
         let doc = assemble_cose(&pb, &pb, &leaf, &rng);
 
         let provider = NitroAttestationProvider::new().with_test_root(root_der);
@@ -1256,6 +1302,10 @@ mod tests {
 
         // Correct nonce => accepted.
         let res = block_on(provider.verify(&doc, Some(nonce))).unwrap();
-        assert!(res.verified, "correct nonce should be accepted: {:?}", res.error);
+        assert!(
+            res.verified,
+            "correct nonce should be accepted: {:?}",
+            res.error
+        );
     }
 }

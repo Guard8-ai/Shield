@@ -403,8 +403,13 @@ mod tests {
         assert_eq!(auth_challenge.allowed_credentials.len(), 1);
 
         // Sign with the authenticator's private key (real ES256).
-        let signature =
-            compute_test_signature(&key_pair, &rng, &auth_challenge.challenge, &credential_id, 1);
+        let signature = compute_test_signature(
+            &key_pair,
+            &rng,
+            &auth_challenge.challenge,
+            &credential_id,
+            1,
+        );
 
         let result = manager
             .verify_authentication(&auth_challenge.challenge, &credential_id, &signature, 1)
@@ -506,16 +511,26 @@ mod tests {
 
         // First authentication with valid signature
         let auth_challenge = manager.generate_authentication_challenge(user_id).unwrap();
-        let sig1 =
-            compute_test_signature(&key_pair, &rng, &auth_challenge.challenge, &credential_id, 1);
+        let sig1 = compute_test_signature(
+            &key_pair,
+            &rng,
+            &auth_challenge.challenge,
+            &credential_id,
+            1,
+        );
         manager
             .verify_authentication(&auth_challenge.challenge, &credential_id, &sig1, 1)
             .unwrap();
 
         // Second authentication with same counter should fail (replay)
         let auth_challenge2 = manager.generate_authentication_challenge(user_id).unwrap();
-        let sig2 =
-            compute_test_signature(&key_pair, &rng, &auth_challenge2.challenge, &credential_id, 1);
+        let sig2 = compute_test_signature(
+            &key_pair,
+            &rng,
+            &auth_challenge2.challenge,
+            &credential_id,
+            1,
+        );
         let result =
             manager.verify_authentication(&auth_challenge2.challenge, &credential_id, &sig2, 1);
         assert!(result.is_err());

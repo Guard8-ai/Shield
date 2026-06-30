@@ -126,10 +126,7 @@ impl SGXAttestationProvider {
 
     /// Acquire quote collateral: configured JSON first, otherwise fetch from the
     /// PCCS (when `async`). Returns an error (fail-closed) if neither is available.
-    async fn acquire_collateral(
-        &self,
-        evidence: &[u8],
-    ) -> Result<QuoteCollateralV3, String> {
+    async fn acquire_collateral(&self, evidence: &[u8]) -> Result<QuoteCollateralV3, String> {
         if let Some(raw) = &self.collateral_json {
             return serde_json::from_slice(raw)
                 .map_err(|e| format!("invalid collateral JSON: {e}"));
@@ -207,7 +204,11 @@ impl AttestationProvider for SGXAttestationProvider {
         // ADDITIONAL policy gate applied to the *verified* report.
 
         // ---- Step 3a: TCB status must be acceptable (default-deny).
-        if !self.allowed_tcb_statuses.iter().any(|s| s == &report.status) {
+        if !self
+            .allowed_tcb_statuses
+            .iter()
+            .any(|s| s == &report.status)
+        {
             return fail(format!(
                 "TCB status not acceptable: {} (allowed: {:?})",
                 report.status, self.allowed_tcb_statuses
@@ -233,12 +234,20 @@ impl AttestationProvider for SGXAttestationProvider {
 
         // ---- Step 3b: expected MRENCLAVE / MRSIGNER / min ISV SVN gates.
         if let Some(ref expected) = self.expected_mrenclave {
-            if !bool::from(mrenclave.as_bytes().ct_eq(expected.to_lowercase().as_bytes())) {
+            if !bool::from(
+                mrenclave
+                    .as_bytes()
+                    .ct_eq(expected.to_lowercase().as_bytes()),
+            ) {
                 return fail(format!("MRENCLAVE mismatch: expected {expected}"));
             }
         }
         if let Some(ref expected) = self.expected_mrsigner {
-            if !bool::from(mrsigner.as_bytes().ct_eq(expected.to_lowercase().as_bytes())) {
+            if !bool::from(
+                mrsigner
+                    .as_bytes()
+                    .ct_eq(expected.to_lowercase().as_bytes()),
+            ) {
                 return fail(format!("MRSIGNER mismatch: expected {expected}"));
             }
         }
@@ -600,7 +609,9 @@ mod tests {
         assert!(!SGXAttestationProvider::report_data_matches(&rd, &wrong));
         // Empty / oversized expected rejected.
         assert!(!SGXAttestationProvider::report_data_matches(&rd, &[]));
-        assert!(!SGXAttestationProvider::report_data_matches(&rd, &[0u8; 65]));
+        assert!(!SGXAttestationProvider::report_data_matches(
+            &rd, &[0u8; 65]
+        ));
     }
 
     #[tokio::test]
@@ -662,8 +673,14 @@ mod tests {
             "genuine sample must verify: {:?}",
             result.error
         );
-        assert_eq!(result.measurements.get("MRENCLAVE").map(String::as_str), Some(SAMPLE_MRENCLAVE));
-        assert_eq!(result.measurements.get("MRSIGNER").map(String::as_str), Some(SAMPLE_MRSIGNER));
+        assert_eq!(
+            result.measurements.get("MRENCLAVE").map(String::as_str),
+            Some(SAMPLE_MRENCLAVE)
+        );
+        assert_eq!(
+            result.measurements.get("MRSIGNER").map(String::as_str),
+            Some(SAMPLE_MRSIGNER)
+        );
         assert_eq!(
             result.claims.get("tcb_status").and_then(|v| v.as_str()),
             Some(SAMPLE_TCB_STATUS)
@@ -678,7 +695,10 @@ mod tests {
             .with_collateral_json(SAMPLE_COLLATERAL.to_vec())
             .with_verification_time(PINNED_NOW);
         let result = provider.verify(SAMPLE_QUOTE, None).await.unwrap();
-        assert!(!result.verified, "default-deny TCB must reject non-UpToDate");
+        assert!(
+            !result.verified,
+            "default-deny TCB must reject non-UpToDate"
+        );
         assert!(result
             .error
             .as_deref()
