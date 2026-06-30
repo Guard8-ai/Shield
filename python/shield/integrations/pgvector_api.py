@@ -4,6 +4,23 @@ pgvector FastAPI integration for encrypted vector similarity search.
 This module provides FastAPI endpoints for inserting, searching, and managing
 encrypted AI embeddings using Shield encryption.
 
+.. danger::
+    **INSECURE DEMONSTRATION SCAFFOLDING — NOT FOR PRODUCTION.**
+
+    Token verification accepts **any** bearer token of >=10 characters and maps
+    every caller to one static identity (no signature, expiry, or per-user
+    isolation), and a request that simply omits the ``Authorization`` header is
+    let through unauthenticated. Vectors are "encrypted" with a hand-rolled
+    SHA-256/XOR keystream (not an AEAD) **and** the plaintext is stored and
+    returned alongside it, so the encryption is cosmetic. Wiring this router
+    as-is exposes all stored vectors to any caller.
+
+    For this reason the router refuses to instantiate unless you pass
+    ``allow_insecure_demo=True``. For production, validate tokens against a real
+    verifier carrying a real ``user_id``, filter storage by that id, remove the
+    plaintext shadow copy, and use the Rust ``pgvector`` / ``EncryptedVector``
+    module with PostgreSQL.
+
 Example:
     from fastapi import FastAPI
     from shield.integrations.pgvector_api import PgVectorRouter
@@ -11,19 +28,27 @@ Example:
 
     app = FastAPI()
     shield = Shield("master_password", "pgvector.myapp")
-    router = PgVectorRouter(shield=shield, dimension=1536)
+    router = PgVectorRouter(shield=shield, dimension=1536, allow_insecure_demo=True)
     app.include_router(router.router)
-
-Note:
-    This is a simplified implementation demonstrating the API structure.
-    Production use should integrate with the Rust pgvector module and PostgreSQL.
 """
 
 import hashlib
 import json
 import math
 import time
+import warnings
 from typing import Any, Dict, List, Optional
+
+#: Message used both for the refusal error and the construction-time warning.
+_INSECURE_DEMO_MESSAGE = (
+    "shield.integrations.pgvector_api performs NO real authentication (any "
+    ">=10-char bearer token is accepted, a missing token is let through, and "
+    "all callers share one identity) and stores/returns vector plaintext "
+    "alongside a non-AEAD demo 'encryption'. It is insecure demonstration "
+    "scaffolding and MUST NOT be deployed. Pass allow_insecure_demo=True to run "
+    "it as a non-production demo, or use the Rust pgvector module with a real "
+    "token verifier for production."
+)
 
 from fastapi import APIRouter, Depends, HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -68,6 +93,7 @@ class PgVectorRouter:
         dimension: int,
         require_auth: bool = True,
         secret_key: Optional[str] = None,
+        allow_insecure_demo: bool = False,
     ):
         """
         Initialize pgvector router.
@@ -77,7 +103,17 @@ class PgVectorRouter:
             dimension: Expected vector dimension
             require_auth: Whether to require authentication
             secret_key: Secret key for token validation (if require_auth=True)
+            allow_insecure_demo: Must be True to construct this router. The token
+                check and vector "encryption" are insecure demonstration
+                scaffolding only (see the module docstring).
+
+        Raises:
+            RuntimeError: if ``allow_insecure_demo`` is not True.
         """
+        if not allow_insecure_demo:
+            raise RuntimeError(_INSECURE_DEMO_MESSAGE)
+        warnings.warn(_INSECURE_DEMO_MESSAGE, UserWarning, stacklevel=2)
+
         self.shield = shield
         self.dimension = dimension
         self.require_auth = require_auth
@@ -369,6 +405,7 @@ def create_pgvector_app(
     shield: Any,
     dimension: int,
     require_auth: bool = True,
+    allow_insecure_demo: bool = False,
 ) -> APIRouter:
     """
     Create a pgvector FastAPI router.
@@ -377,12 +414,20 @@ def create_pgvector_app(
         shield: Shield instance for encryption
         dimension: Vector dimension
         require_auth: Whether to require authentication
+        allow_insecure_demo: Must be True — this is insecure demo scaffolding
+            (see module docstring).
 
     Returns:
         Configured FastAPI router
+
+    Raises:
+        RuntimeError: if ``allow_insecure_demo`` is not True.
     """
     pgvector_router = PgVectorRouter(
-        shield=shield, dimension=dimension, require_auth=require_auth
+        shield=shield,
+        dimension=dimension,
+        require_auth=require_auth,
+        allow_insecure_demo=allow_insecure_demo,
     )
 
     return pgvector_router.router
