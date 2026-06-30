@@ -246,20 +246,22 @@ class ShieldChannel:
         # Combine contributions
         base_key = PAKEExchange.combine(local_contribution, remote_contribution)
 
-        # Mix in password-derived secret (not exchanged)
-        password_key = PAKEExchange.derive(
+        # Mix in the PBKDF2-derived secret (not exchanged). This is already a
+        # 32-byte key stretched from the password via PBKDF2 (600k); it is not
+        # the raw password.
+        derived_key = PAKEExchange.derive(
             config.password, salt, "session", config.iterations
         )
 
-        # Final session key = HMAC-SHA256(base_key, password_key || service).
+        # Final session key = HMAC-SHA256(base_key, derived_key || service).
         # Binding the service identifier provides domain separation: the same
         # shared secret used for two different services derives two different
         # session keys, so a credential provisioned for one service cannot
-        # establish a channel for another. password_key is a fixed 32 bytes,
+        # establish a channel for another. derived_key is a fixed 32 bytes,
         # so the concatenation is unambiguous across implementations.
         # Keyed HMAC (not SHA256(key || data)) avoids length-extension and
         # matches the Rust source of truth byte-for-byte.
-        mac_input = password_key + config.service.encode()
+        mac_input = derived_key + config.service.encode()
         return hmac.new(base_key, mac_input, hashlib.sha256).digest()
 
     @classmethod

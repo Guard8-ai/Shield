@@ -247,20 +247,22 @@ class ShieldChannel {
 
     _computeSessionKey(config, salt, localContribution, remoteContribution) {
         const baseKey = PAKEExchange.combine(localContribution, remoteContribution);
-        const passwordKey = PAKEExchange.derive(
+        // PBKDF2-derived secret (not exchanged): already a 32-byte key stretched
+        // from the password via PBKDF2 (600k), not the raw password.
+        const derivedKey = PAKEExchange.derive(
             config.password, salt, 'session', config.iterations
         );
 
-        // Final session key = HMAC-SHA256(baseKey, passwordKey || service).
+        // Final session key = HMAC-SHA256(baseKey, derivedKey || service).
         // Binding the service identifier provides domain separation: the same
         // shared secret used for two different services derives two different
         // session keys, so a credential provisioned for one service cannot
-        // establish a channel for another. passwordKey is a fixed 32 bytes,
+        // establish a channel for another. derivedKey is a fixed 32 bytes,
         // so the concatenation is unambiguous across implementations.
         // Keyed HMAC (not SHA256(key || data)) avoids length-extension and
         // matches the Rust source of truth byte-for-byte.
         const macInput = Buffer.concat([
-            passwordKey,
+            derivedKey,
             Buffer.from(config.service, 'utf8'),
         ]);
         return crypto.createHmac('sha256', baseKey).update(macInput).digest();

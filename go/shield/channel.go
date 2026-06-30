@@ -246,19 +246,21 @@ func (ch *ShieldChannel) Close() error {
 
 func (ch *ShieldChannel) computeSessionKey(config *ChannelConfig, salt, localContribution, remoteContribution []byte) []byte {
 	baseKey := PAKECombine(localContribution, remoteContribution)
-	passwordKey := PAKEDerive(config.Password, salt, "session", config.Iterations)
+	// PBKDF2-derived secret (not exchanged): already a 32-byte key stretched
+	// from the password via PBKDF2 (600k), not the raw password.
+	derivedKey := PAKEDerive(config.Password, salt, "session", config.Iterations)
 
-	// Final session key = HMAC-SHA256(base_key, password_key || service).
+	// Final session key = HMAC-SHA256(base_key, derived_key || service).
 	// Binding the service identifier provides domain separation: the same
 	// shared secret used for two different services derives two different
 	// session keys, so a credential provisioned for one service cannot
-	// establish a channel for another. password_key is a fixed 32 bytes,
+	// establish a channel for another. derived_key is a fixed 32 bytes,
 	// so the concatenation is unambiguous across implementations.
 	// Keyed HMAC (not SHA256(key || data)) avoids length-extension and
 	// matches the Rust source of truth byte-for-byte.
 	serviceBytes := []byte(config.Service)
-	macInput := make([]byte, 0, len(passwordKey)+len(serviceBytes))
-	macInput = append(macInput, passwordKey...)
+	macInput := make([]byte, 0, len(derivedKey)+len(serviceBytes))
+	macInput = append(macInput, derivedKey...)
 	macInput = append(macInput, serviceBytes...)
 
 	mac := hmac.New(sha256.New, baseKey)
