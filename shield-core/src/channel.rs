@@ -224,7 +224,7 @@ impl HandshakeState {
         // CRITICAL: Include password-derived key in session key computation
         // This ensures different passwords produce different session keys
         // even though contributions are exchanged.
-        let base_key = PAKEExchange::combine(&[self.local_contribution, remote]);
+        let base_key = PAKEExchange::combine(&[self.local_contribution, remote])?;
 
         // Mix in the password-derived secret that wasn't exchanged
         let password_key = PAKEExchange::derive(

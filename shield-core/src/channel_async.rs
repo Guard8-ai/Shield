@@ -107,7 +107,7 @@ impl HandshakeState {
             .ok_or_else(|| ShieldError::ChannelError("handshake incomplete".into()))?;
 
         // Include password-derived key in session key computation
-        let base_key = PAKEExchange::combine(&[self.local_contribution, remote]);
+        let base_key = PAKEExchange::combine(&[self.local_contribution, remote])?;
 
         let password_key = PAKEExchange::derive(
             config.password(),

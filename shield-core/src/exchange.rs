@@ -79,9 +79,19 @@ impl PAKEExchange {
         result
     }
 
-    /// Combine key contributions into session key using HMAC-SHA256.
-    #[must_use]
-    pub fn combine(contributions: &[[u8; 32]]) -> [u8; 32] {
+    /// Combine key contributions into a session key using HMAC-SHA256.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ShieldError::InvalidFormat`] if fewer than two contributions
+    /// are supplied: a combine of zero or one contribution is meaningless, and
+    /// indexing an empty list would otherwise panic (a denial-of-service risk
+    /// for a caller that passes an externally-influenced list).
+    pub fn combine(contributions: &[[u8; 32]]) -> Result<[u8; 32]> {
+        if contributions.len() < 2 {
+            return Err(ShieldError::InvalidFormat);
+        }
+
         let mut sorted: Vec<&[u8; 32]> = contributions.iter().collect();
         sorted.sort();
 
@@ -95,7 +105,7 @@ impl PAKEExchange {
         let tag = hmac::sign(&hmac_key, &data);
         let mut result = [0u8; 32];
         result.copy_from_slice(&tag.as_ref()[..32]);
-        result
+        Ok(result)
     }
 
     /// Generate random salt.
@@ -227,9 +237,25 @@ mod tests {
         let client = PAKEExchange::derive("password", &salt, "client", None);
         let server = PAKEExchange::derive("password", &salt, "server", None);
 
-        let shared1 = PAKEExchange::combine(&[client, server]);
-        let shared2 = PAKEExchange::combine(&[server, client]);
+        let shared1 = PAKEExchange::combine(&[client, server]).unwrap();
+        let shared2 = PAKEExchange::combine(&[server, client]).unwrap();
         assert_eq!(shared1, shared2);
+    }
+
+    #[test]
+    fn test_pake_combine_empty_is_error_not_panic() {
+        // RT2-10: combine() previously indexed sorted[0] unconditionally and
+        // panicked (DoS) on empty input. It must now return an error.
+        assert!(PAKEExchange::combine(&[]).is_err());
+    }
+
+    #[test]
+    fn test_pake_combine_single_is_error() {
+        // A single contribution is meaningless to "combine" and must be rejected
+        // rather than returning HMAC(c, "").
+        let salt = PAKEExchange::generate_salt().unwrap();
+        let only = PAKEExchange::derive("password", &salt, "client", None);
+        assert!(PAKEExchange::combine(&[only]).is_err());
     }
 
     #[test]

@@ -109,7 +109,7 @@ Swift/iOS *execution* (pending Apple hardware — code is parse-clean and byte-i
 
 | Binding | Command | Expected |
 |---|---|---|
-| Rust | `cd shield-core && cargo test --lib && cargo clippy --lib --all-targets` | 97 tests pass, clippy clean |
+| Rust | `cd shield-core && cargo test --lib && cargo clippy --lib --all-targets` | 99 tests pass, clippy clean |
 | Rust PQ | `cargo test --features pq` | PQ vectors pass |
 | Python | `cd python && python -X utf8 -m pytest -q` | 209 passed |
 | JavaScript | `cd javascript && node --test test/` | 119 pass |
