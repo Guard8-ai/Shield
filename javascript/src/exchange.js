@@ -47,6 +47,14 @@ class PAKEExchange {
         // Sort so the result is order-independent, then combine with a keyed
         // HMAC: HMAC-SHA256(sorted[0], sorted[1] || sorted[2] ...). Matches the
         // Rust source of truth byte-for-byte (not SHA256(concat)).
+        //
+        // NOTE (CodeQL js/insufficient-password-hash false positive): the HMAC
+        // key `sorted[0]` is NOT a password. Each contribution is the output of
+        // PAKEExchange.derive() = HMAC-SHA256(PBKDF2-HMAC-SHA256(secret, salt,
+        // 600k), role) — an already-stretched, 256-bit high-entropy key. This is
+        // key-combination, not password hashing; the "insufficient computational
+        // effort" concern (fast hash of a low-entropy password) does not apply.
+        // The password stretching happens once, inside derive(), via PBKDF2-600k.
         const sorted = contributions.sort(Buffer.compare);
         const data = Buffer.concat(sorted.slice(1));
         return crypto.createHmac('sha256', sorted[0]).update(data).digest();
