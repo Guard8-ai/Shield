@@ -1,0 +1,42 @@
+{
+  "description": "Cross-language conformance vectors for the ShieldChannel session-key derivation and the underlying PAKEExchange primitives. Every binding MUST reproduce these values byte-for-byte. This anchors the channel/PAKE construction the same way tests/v4_test_vectors.json anchors the base AEAD and tests/pq_kex_vectors.json anchors the PQ KEX. Without it, EVERY non-Rust binding silently diverged from the Rust source of truth (Go/Python/JS/Java/C#/Kotlin/Android/Swift all used plain SHA256 in PAKEExchange.derive/combine instead of keyed HMAC-SHA256); the base session-key step alone was aligned on 2026-06-30 but the primitives were not, so the channel remained non-interoperable and no test caught it.",
+  "source_of_truth": "shield-core/src/channel.rs :: HandshakeState::compute_session_key and shield-core/src/exchange.rs :: PAKEExchange::{derive,combine}",
+  "construction": [
+    "contribution(role)  = HMAC-SHA256(PBKDF2-HMAC-SHA256(password, salt, iterations, 32), role)          [PAKEExchange.derive]",
+    "base_key            = HMAC-SHA256(sorted[0], sorted[1] || ...)  where sorted = sort(contributions)   [PAKEExchange.combine]",
+    "derived_key         = contribution('session')",
+    "session_key         = HMAC-SHA256(base_key, derived_key || utf8(service))   [truncated to 32 bytes]"
+  ],
+  "pake_primitives": {
+    "comment": "Direct anchors for PAKEExchange.derive/combine so bindings without a ShieldChannel (C#, Java, Kotlin, Swift) can still verify their primitives.",
+    "password": "conformance-secret",
+    "salt_hex": "01010101010101010101010101010101",
+    "iterations": 600000,
+    "derive": [
+      { "role": "client",  "expected_hex": "4b8f9f8fd7e1922e4f948ff43af7e4d60e2e356a70546e80840c893068f418ae" },
+      { "role": "server",  "expected_hex": "3e34e258a38b04ad514c7831f95957e26f968f94180ab6654a5d1043e2b6dde5" },
+      { "role": "session", "expected_hex": "4e36c09abc9092702c7a563b819849125d3effc369fe635adf69a70a89c0573d" }
+    ],
+    "combine": [
+      {
+        "inputs_hex": [
+          "0202020202020202020202020202020202020202020202020202020202020202",
+          "0303030303030303030303030303030303030303030303030303030303030303"
+        ],
+        "expected_hex": "f1410c0cef7a1cf42d1767f545aa4581bef24258bcf1982e652fd1666c1cf781"
+      }
+    ]
+  },
+  "vectors": [
+    {
+      "name": "basic",
+      "password": "conformance-secret",
+      "salt_hex": "01010101010101010101010101010101",
+      "service": "shield.conformance",
+      "iterations": 600000,
+      "local_contribution_hex": "0202020202020202020202020202020202020202020202020202020202020202",
+      "remote_contribution_hex": "0303030303030303030303030303030303030303030303030303030303030303",
+      "expected_session_key_hex": "c81854ce5fcbcf6f4db68b2a8b389366232b1707fa057a7251d6536bf529183d"
+    }
+  ]
+}
