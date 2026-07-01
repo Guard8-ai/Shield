@@ -1,7 +1,9 @@
 package ai.dikestra.shield;
 
+import javax.crypto.Mac;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
+import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -49,10 +51,12 @@ public class Exchange {
                 PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), salt, iterations, 256);
                 byte[] baseKey = factory.generateSecret(spec).getEncoded();
 
-                MessageDigest md = MessageDigest.getInstance("SHA-256");
-                md.update(baseKey);
-                md.update(role.getBytes(StandardCharsets.UTF_8));
-                return md.digest();
+                // Keyed HMAC-SHA256(baseKey, role), matching the Rust source of
+                // truth byte-for-byte (not SHA256(baseKey || role)) and avoiding
+                // length-extension. Locked by tests/channel_session_vectors.json.
+                Mac mac = Mac.getInstance("HmacSHA256");
+                mac.init(new SecretKeySpec(baseKey, "HmacSHA256"));
+                return mac.doFinal(role.getBytes(StandardCharsets.UTF_8));
             } catch (Exception e) {
                 throw new RuntimeException("Failed to derive key", e);
             }
@@ -80,11 +84,14 @@ public class Exchange {
                     return a.length - b.length;
                 });
 
-                MessageDigest md = MessageDigest.getInstance("SHA-256");
-                for (byte[] contrib : sorted) {
-                    md.update(contrib);
+                // HMAC-SHA256(sorted[0], sorted[1] || sorted[2] ...), matching
+                // the Rust source of truth byte-for-byte (not SHA256(concat)).
+                Mac mac = Mac.getInstance("HmacSHA256");
+                mac.init(new SecretKeySpec(sorted.get(0), "HmacSHA256"));
+                for (int i = 1; i < sorted.size(); i++) {
+                    mac.update(sorted.get(i));
                 }
-                return md.digest();
+                return mac.doFinal();
             } catch (Exception e) {
                 throw new RuntimeException("Failed to combine keys", e);
             }

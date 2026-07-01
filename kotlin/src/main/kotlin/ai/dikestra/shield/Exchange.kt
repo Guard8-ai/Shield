@@ -4,8 +4,10 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
+import javax.crypto.Mac
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * Key Exchange - Key exchange without public-key crypto.
@@ -48,10 +50,12 @@ object PAKEExchange {
         val spec = PBEKeySpec(password.toCharArray(), salt, iterations, 256)
         val baseKey = factory.generateSecret(spec).encoded
 
-        val md = MessageDigest.getInstance("SHA-256")
-        md.update(baseKey)
-        md.update(role.toByteArray(StandardCharsets.UTF_8))
-        return md.digest()
+        // Keyed HMAC-SHA256(baseKey, role), matching the Rust source of truth
+        // byte-for-byte (not SHA256(baseKey || role)) and avoiding
+        // length-extension. Locked by tests/channel_session_vectors.json.
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(baseKey, "HmacSHA256"))
+        return mac.doFinal(role.toByteArray(StandardCharsets.UTF_8))
     }
 
     /**
@@ -70,11 +74,14 @@ object PAKEExchange {
             a.size - b.size
         }
 
-        val md = MessageDigest.getInstance("SHA-256")
-        for (contrib in sorted) {
-            md.update(contrib)
+        // HMAC-SHA256(sorted[0], sorted[1] || sorted[2] ...), matching the Rust
+        // source of truth byte-for-byte (not SHA256(concat)).
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(sorted[0], "HmacSHA256"))
+        for (i in 1 until sorted.size) {
+            mac.update(sorted[i])
         }
-        return md.digest()
+        return mac.doFinal()
     }
 
     /**

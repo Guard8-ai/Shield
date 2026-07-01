@@ -32,9 +32,10 @@ class PAKEExchange {
     static derive(password, salt, role, iterations = null) {
         if (iterations === null) iterations = PAKEExchange.ITERATIONS;
         const baseKey = crypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256');
-        return crypto.createHash('sha256')
-            .update(Buffer.concat([baseKey, Buffer.from(role)]))
-            .digest();
+        // Keyed HMAC (not SHA256(key || role)) to match the Rust source of truth
+        // byte-for-byte and avoid length-extension.
+        // Locked by tests/channel_session_vectors.json.
+        return crypto.createHmac('sha256', baseKey).update(Buffer.from(role)).digest();
     }
 
     /**
@@ -43,9 +44,12 @@ class PAKEExchange {
      * @returns {Buffer}
      */
     static combine(...contributions) {
+        // Sort so the result is order-independent, then combine with a keyed
+        // HMAC: HMAC-SHA256(sorted[0], sorted[1] || sorted[2] ...). Matches the
+        // Rust source of truth byte-for-byte (not SHA256(concat)).
         const sorted = contributions.sort(Buffer.compare);
-        const combined = Buffer.concat(sorted);
-        return crypto.createHash('sha256').update(combined).digest();
+        const data = Buffer.concat(sorted.slice(1));
+        return crypto.createHmac('sha256', sorted[0]).update(data).digest();
     }
 
     /**
