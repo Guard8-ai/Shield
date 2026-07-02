@@ -53,6 +53,13 @@ jobs:
       - name: Post-quantum hybrid KEX conformance vectors
         run: cd shield-core && cargo test --features pq pqhybrid --verbose
 
+      - name: Confidential-computing attestation tests
+        # Runtime coverage for the confidential module (SGX/SEV/MAA/Nitro
+        # attestation + JWT verification). Clippy builds it via --all-features,
+        # but only running the tests catches runtime regressions such as a
+        # missing crypto provider in the JWT backend.
+        run: cd shield-core && cargo test --features confidential --verbose
+
   # Device Fingerprint CLI
   fingerprint:
     name: Fingerprint (${{ matrix.os }})
