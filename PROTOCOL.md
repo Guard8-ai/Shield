@@ -346,13 +346,19 @@ different session keys, so a credential provisioned for one service cannot
 establish a channel for another. (Concretely, the implementation folds the
 service bytes into the final key-derivation HMAC input.)
 
-> **Note (cross-language status):** the prose above is a simplified model. The
-> actual key-derivation primitives are *not yet byte-identical across bindings* —
-> Rust uses HMAC-SHA256 throughout while Go/Python/JS use SHA256 for the
-> contribution/combine/session steps — so a Rust channel peer does **not**
-> currently interoperate with a Go/Python/JS peer. Unifying these (alongside a
-> real DH-based PAKE) is a tracked follow-up. The service-binding domain
-> separation described here is implemented in **all** bindings.
+> **Note (cross-language status):** the prose above is a simplified model of the
+> real construction, which is `contribution(role) = HMAC-SHA256(PBKDF2(secret,
+> salt), role)`, `base_key = HMAC-SHA256(sorted[0], sorted[1]…)`, and
+> `session_key = HMAC-SHA256(base_key, derived_key || service)`. As of 2026-06-30
+> the `PAKEExchange` primitives are **byte-identical across all bindings** —
+> keyed HMAC-SHA256 throughout, matching the Rust source of truth — and are
+> pinned by `tests/channel_session_vectors.json` (previously Go/Python/JS/Java/
+> C#/Kotlin/Android/Swift used plain SHA256 and did not interoperate; see
+> CHANGES-FROM-ORIGINAL Part 18). This is still **not a true DH-based PAKE** —
+> the offline-dictionary limitation (§3.2) is unchanged and a real PAKE remains a
+> tracked follow-up. Execution-verified in Rust/Python/JS/Go/C#/Java; Kotlin/
+> Android/Swift are source-aligned (same JCE/CommonCrypto HMAC) but built on
+> Apple/gradle toolchains not present on the current dev host.
 
 ### 3.6 Finish Messages
 

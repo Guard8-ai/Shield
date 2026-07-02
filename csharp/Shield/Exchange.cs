@@ -48,10 +48,11 @@ namespace Dikestra.Shield
                 using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, iterations, HashAlgorithmName.SHA256);
                 byte[] baseKey = pbkdf2.GetBytes(32);
 
-                using var sha256 = SHA256.Create();
-                byte[] roleBytes = Encoding.UTF8.GetBytes(role);
-                byte[] combined = baseKey.Concat(roleBytes).ToArray();
-                return sha256.ComputeHash(combined);
+                // Keyed HMAC-SHA256(baseKey, role), matching the Rust source of
+                // truth byte-for-byte (not SHA256(baseKey || role)) and avoiding
+                // length-extension. Locked by tests/channel_session_vectors.json.
+                using var hmac = new HMACSHA256(baseKey);
+                return hmac.ComputeHash(Encoding.UTF8.GetBytes(role));
             }
 
             /// <summary>
@@ -61,12 +62,15 @@ namespace Dikestra.Shield
             /// <returns>32-byte shared session key</returns>
             public static byte[] Combine(params byte[][] contributions)
             {
-                // Sort contributions for deterministic output
-                var sorted = contributions.OrderBy(b => Convert.ToHexString(b)).ToArray();
+                // Sort bytewise (ordinal hex of equal-length arrays == bytewise)
+                // so the result is order-independent.
+                var sorted = contributions.OrderBy(b => Convert.ToHexString(b), StringComparer.Ordinal).ToArray();
 
-                using var sha256 = SHA256.Create();
-                byte[] combined = sorted.SelectMany(b => b).ToArray();
-                return sha256.ComputeHash(combined);
+                // HMAC-SHA256(sorted[0], sorted[1] || sorted[2] ...), matching
+                // the Rust source of truth byte-for-byte (not SHA256(concat)).
+                using var hmac = new HMACSHA256(sorted[0]);
+                byte[] data = sorted.Skip(1).SelectMany(b => b).ToArray();
+                return hmac.ComputeHash(data);
             }
 
             /// <summary>

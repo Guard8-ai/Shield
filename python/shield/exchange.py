@@ -73,7 +73,10 @@ class PAKEExchange:
             salt,
             iterations
         )
-        return hashlib.sha256(base_key + role.encode()).digest()
+        # Derive the role-specific key with a keyed HMAC (not SHA256(key || role))
+        # to match the Rust source of truth byte-for-byte and avoid
+        # length-extension. Locked by tests/channel_session_vectors.json.
+        return hmac.new(base_key, role.encode(), hashlib.sha256).digest()
 
     @staticmethod
     def combine(*contributions: bytes) -> bytes:
@@ -86,8 +89,11 @@ class PAKEExchange:
         Returns:
             32-byte shared session key
         """
-        combined = b''.join(sorted(contributions))
-        return hashlib.sha256(combined).digest()
+        # Sort so the result is independent of contribution order, then combine
+        # with a keyed HMAC: HMAC-SHA256(sorted[0], sorted[1] || sorted[2] ...).
+        # Matches the Rust source of truth byte-for-byte (not SHA256(concat)).
+        ordered = sorted(contributions)
+        return hmac.new(ordered[0], b''.join(ordered[1:]), hashlib.sha256).digest()
 
     @staticmethod
     def generate_salt() -> bytes:

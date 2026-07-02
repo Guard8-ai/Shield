@@ -121,16 +121,28 @@ func (pe *PAKEExchange) CreateProof(peerPublic []byte) []byte {
 // high-entropy shared secret (>=128 bits). For password-based or forward-secret
 // key establishment, use the X25519 + ML-KEM-768 hybrid KEX (pqhybrid) instead.
 func PAKEDerive(password string, salt []byte, role string, iterations int) []byte {
-	context := []byte("SHIELD-PAKE-" + role)
-	fullSalt := append(salt, context...)
-	return pbkdf2.Key([]byte(password), fullSalt, iterations, KeySize, sha256.New)
+	// Contribution = HMAC-SHA256(PBKDF2(secret, salt), role). Keyed HMAC over
+	// the role (not PBKDF2 with the role folded into the salt) matches the Rust
+	// source of truth byte-for-byte. Locked by tests/channel_session_vectors.json.
+	baseKey := pbkdf2.Key([]byte(password), salt, iterations, KeySize, sha256.New)
+	mac := hmac.New(sha256.New, baseKey)
+	mac.Write([]byte(role))
+	return mac.Sum(nil)
 }
 
 // PAKECombine combines two contributions to produce a shared key.
+//
+// Sorts the two contributions so the result is independent of argument order,
+// then combines with a keyed HMAC: HMAC-SHA256(sorted[0], sorted[1]). Matches
+// the Rust source of truth byte-for-byte (not SHA256(local || remote)).
 func PAKECombine(local, remote []byte) []byte {
-	combined := append(local, remote...)
-	h := sha256.Sum256(combined)
-	return h[:]
+	first, second := local, remote
+	if bytes.Compare(local, remote) > 0 {
+		first, second = remote, local
+	}
+	mac := hmac.New(sha256.New, first)
+	mac.Write(second)
+	return mac.Sum(nil)
 }
 
 // QRExchange provides QR code-based key exchange.

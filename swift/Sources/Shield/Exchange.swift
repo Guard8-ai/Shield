@@ -35,9 +35,10 @@ public enum PAKEExchange {
                               iterations: Int = 600000) -> [UInt8] {
         let baseKey = pbkdf2(password: password, salt: salt, iterations: iterations, keyLength: 32)
 
-        var combined = baseKey
-        combined.append(contentsOf: Array(role.utf8))
-        return Shield.sha256(combined)
+        // Keyed HMAC-SHA256(baseKey, role), matching the Rust source of truth
+        // byte-for-byte (not SHA256(baseKey || role)) and avoiding
+        // length-extension. Locked by tests/channel_session_vectors.json.
+        return Shield.hmacSha256(key: baseKey, data: Array(role.utf8))
     }
 
     /// Combine key contributions into session key.
@@ -55,11 +56,13 @@ public enum PAKEExchange {
             return a.count < b.count
         }
 
-        var combined: [UInt8] = []
-        for contrib in sorted {
-            combined.append(contentsOf: contrib)
+        // HMAC-SHA256(sorted[0], sorted[1] || sorted[2] ...), matching the Rust
+        // source of truth byte-for-byte (not SHA256(concat)).
+        var data: [UInt8] = []
+        for contrib in sorted.dropFirst() {
+            data.append(contentsOf: contrib)
         }
-        return Shield.sha256(combined)
+        return Shield.hmacSha256(key: sorted[0], data: data)
     }
 
     /// Generate random salt for key exchange.

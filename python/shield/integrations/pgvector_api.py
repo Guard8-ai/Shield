@@ -58,20 +58,20 @@ from pydantic import BaseModel, Field
 class VectorInsertRequest(BaseModel):
     """Request to insert a vector"""
 
-    vector: List[float] = Field(..., min_items=1, max_items=4096)
+    vector: List[float] = Field(..., min_length=1, max_length=4096)
     metadata: Optional[Dict[str, Any]] = None
 
 
 class BatchVectorInsertRequest(BaseModel):
     """Request to batch insert vectors"""
 
-    vectors: List[VectorInsertRequest] = Field(..., min_items=1, max_items=1000)
+    vectors: List[VectorInsertRequest] = Field(..., min_length=1, max_length=1000)
 
 
 class VectorSearchRequest(BaseModel):
     """Request to search similar vectors"""
 
-    query: List[float] = Field(..., min_items=1, max_items=4096)
+    query: List[float] = Field(..., min_length=1, max_length=4096)
     limit: int = Field(10, ge=1, le=100)
     metric: str = Field("cosine", pattern="^(l2|cosine|inner_product)$")
     filter: Optional[Dict[str, Any]] = None

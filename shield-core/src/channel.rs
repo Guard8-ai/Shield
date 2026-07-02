@@ -708,13 +708,13 @@ mod tests {
 
     #[test]
     fn test_session_key_conformance_vector() {
-        // Golden vector locking the Rust session-key derivation. The sync and
-        // async Rust channels must derive this exact key from these fixed
-        // inputs (see the matching async test) so they interoperate, and it
-        // pins the derivation against accidental change. NOTE: the Go/Python/JS
-        // bindings use a SHA256-based derivation rather than this HMAC one, so
-        // they do NOT share this vector (see CHANGES-FROM-ORIGINAL: cross-
-        // language channel derivations are not interoperable today).
+        // Golden vector locking the Rust session-key derivation, shared across
+        // ALL bindings via tests/channel_session_vectors.json. Rust is the
+        // source of truth (this hardcoded value generates the JSON); Go, Python,
+        // JS, and Android read that file and must reproduce this exact key
+        // byte-for-byte (see each binding's channel conformance test). This is
+        // the anchor that stops the channel/PAKE derivation from silently
+        // diverging across languages, the way it did on 2026-06-30.
         //
         //   salt                = 16 x 0x01
         //   local_contribution  = 32 x 0x02
