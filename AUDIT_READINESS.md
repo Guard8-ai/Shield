@@ -4,7 +4,7 @@
 
 **Status:** pre-audit. An independent third-party audit is the single gating item before Shield can be represented as enterprise-/government-deployable. This document does not claim that status; it prepares for the engagement that confers it.
 
-**Version under review:** `2.2.0` across all bindings.
+**Version under review:** `2.3.0` across all bindings.
 **Source of truth:** `shield-core` (Rust). All other bindings are required to match it byte-for-byte.
 **License:** MIT.
 

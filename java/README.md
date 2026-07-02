@@ -32,7 +32,7 @@ or 50 + padding (key mode) bytes over the plaintext.
 ### Gradle
 
 ```groovy
-implementation 'ai.dikestra:shield:2.2.0'
+implementation 'ai.dikestra:shield:2.3.0'
 ```
 
 ### Maven
@@ -41,7 +41,7 @@ implementation 'ai.dikestra:shield:2.2.0'
 <dependency>
     <groupId>ai.dikestra</groupId>
     <artifactId>shield</artifactId>
-    <version>2.2.0</version>
+    <version>2.3.0</version>
 </dependency>
 ```
 

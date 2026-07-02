@@ -18,13 +18,13 @@ Shield builds on well-established symmetric primitives (SHA-256, HMAC-SHA256, PB
 ### Gradle (Kotlin DSL)
 
 ```kotlin
-implementation("ai.dikestra:shield-kotlin:2.2.0")
+implementation("ai.dikestra:shield-kotlin:2.3.0")
 ```
 
 ### Gradle (Groovy)
 
 ```groovy
-implementation 'ai.dikestra:shield-kotlin:2.2.0'
+implementation 'ai.dikestra:shield-kotlin:2.3.0'
 ```
 
 ### Maven
@@ -33,7 +33,7 @@ implementation 'ai.dikestra:shield-kotlin:2.2.0'
 <dependency>
     <groupId>ai.dikestra</groupId>
     <artifactId>shield-kotlin</artifactId>
-    <version>2.2.0</version>
+    <version>2.3.0</version>
 </dependency>
 ```
 

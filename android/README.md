@@ -20,13 +20,13 @@ Shield builds on well-established symmetric primitives (SHA-256, HMAC-SHA256, PB
 ### Gradle (Kotlin DSL)
 
 ```kotlin
-implementation("ai.dikestra:shield-android:2.2.0")
+implementation("ai.dikestra:shield-android:2.3.0")
 ```
 
 ### Gradle (Groovy)
 
 ```groovy
-implementation 'ai.dikestra:shield-android:2.2.0'
+implementation 'ai.dikestra:shield-android:2.3.0'
 ```
 
 ## Quick Start
