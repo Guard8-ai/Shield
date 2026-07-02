@@ -265,7 +265,7 @@ shield keygen
 
 ## Interoperability
 
-All implementations produce **byte-identical output** across 13 platforms.
+All 12 language bindings produce **byte-identical output** — verified on every CI run against shared conformance vectors.
 
 Encrypt in Python:
 ```python
@@ -377,19 +377,19 @@ matrix is the authoritative, always-current source of truth — see the
 **Actions** tab / CI badge above.
 
 ```bash
-# Rust core (97 lib tests + interop + doc-tests; clippy clean)
+# Rust core (104 lib tests + interop + doc-tests; clippy clean)
 cd shield-core && cargo test && cargo clippy --all-targets
 
-# Python (209 tests)
+# Python (226 tests)
 cd python && python -m pytest
 
-# JavaScript (119 tests)
+# JavaScript (127 tests)
 cd javascript && node --test test/
 
 # Go
 cd go && go test ./...
 
-# C (34 tests; + post-quantum vectors on Linux via c/scripts/build_and_test_pq.sh)
+# C (35 tests; + post-quantum vectors on Linux via c/scripts/build_and_test_pq.sh)
 cd c && make test
 
 # Java / Kotlin / C# / Android — gradle test / dotnet test

@@ -604,7 +604,7 @@ shield info
 
 ## Interoperability
 
-All implementations produce **byte-identical output** across 13 platforms:
+All 12 language bindings produce **byte-identical output**:
 
 ```python
 # Python encrypts

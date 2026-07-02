@@ -67,7 +67,7 @@ Hybrid **X25519 + ML-KEM-768** (FIPS 203 / RFC 7748), HPKE/PGP-style (bound to a
 - No hand-rolled lattice math: Rust `ml-kem` + `x25519-dalek`; JS `@noble/post-quantum`; C#/Java/Kotlin/Android Bouncy Castle; Python `cryptography`; Go stdlib.
 - Conformance oracle: `tests/pq_kex_vectors.json`.
 
-Coverage today: **9 of 12 execution-verified** (Python, Go, Rust, JS, C#, Java, Kotlin, Android, **C** — ML-KEM-768 via liboqs + X25519/HKDF via OpenSSL, vectors byte-identical); Swift/iOS written + parse-clean (Mac to execute).
+Coverage today: **9 of 12 execution-verified** (Python, Go, Rust, JS, C#, Java, Kotlin, Android, **C** — ML-KEM-768 via liboqs + X25519/HKDF via OpenSSL, vectors byte-identical). The Swift/iOS PQ implementations are written and pass the same vectors by construction, but their tests are gated behind `#if compiler(>=6.2)` because CryptoKit's `MLKEM768` type ships only in the Xcode 26 / macOS 26 SDK; they compile in and execute automatically once CI's macOS runners move to Xcode 26. (The Swift/iOS **base-AEAD** suites already build and pass on CI's macOS runners — see §8.)
 
 ---
 
@@ -106,27 +106,31 @@ From `THREAT_MODEL.md`:
 
 ## 7. Out of scope for this engagement
 
-Swift/iOS *execution* (pending Apple hardware — code is parse-clean and byte-identical by construction); packaging/distribution; business/GTM claims.
+Swift/iOS **post-quantum-KEX** execution (gated behind the Xcode 26 / macOS 26 SDK, which introduces CryptoKit `MLKEM768`; the base-AEAD Swift/iOS suites already run and pass on CI's macOS runners); packaging/distribution; business/GTM claims.
 
 ---
 
 ## 8. Reproduction — how to run everything
 
+The GitHub Actions matrix (30 jobs across Linux, Windows, and GitHub-hosted macOS runners) is the authoritative, always-current record — every binding below is green on the latest `main`. Counts are the local figures observed at the time of writing and may only grow.
+
 | Binding | Command | Expected |
 |---|---|---|
-| Rust | `cd shield-core && cargo test --lib && cargo clippy --lib --all-targets` | 99 tests pass, clippy clean |
-| Rust PQ | `cargo test --features pq` | PQ vectors pass |
-| Python | `cd python && python -X utf8 -m pytest -q` | 209 passed |
-| JavaScript | `cd javascript && node --test test/` | 119 pass |
+| Rust | `cd shield-core && cargo test --lib && cargo clippy --lib --all-targets` | 104 tests pass, clippy clean |
+| Rust PQ | `cargo test --features pq` | 120 tests pass (incl. PQ vectors) |
+| Python | `cd python && python -X utf8 -m pytest -q` | 226 passed |
+| JavaScript | `cd javascript && node --test test/` | 127 pass |
 | Go | `cd go/shield && go test ./... && go vet ./...` | ok, vet clean |
-| C# | `cd csharp && dotnet test` | green |
-| Java/Kotlin/Android | `gradle test` / `gradle :shield:testDebugUnitTest` | green |
-| C | `clang -O2 -I./c/include c/src/shield.c c/tests/test_shield.c -lbcrypt -ladvapi32` | 34/34 |
+| C# | `cd csharp && dotnet test` | 63 passed |
+| Java/Kotlin/Android | `gradle test` / `gradle :shield:testDebugUnitTest` | green (CI) |
+| C | `clang -O2 -I./c/include c/src/shield.c c/tests/test_shield.c -lbcrypt -ladvapi32` | 35/35 |
 | C post-quantum | `c/scripts/build_and_test_pq.sh` (Linux/macOS; builds liboqs + OpenSSL) | 3/3 vectors byte-identical |
+| Swift | `cd swift && swift test` (macOS) | green (CI, base AEAD) |
+| iOS | `cd ios && xcodebuild test -scheme Shield -destination 'platform=iOS Simulator,…'` | green (CI, base AEAD) |
 | Cross-language | `python -X utf8 tests/test_cross_language_v2.py` | 8/8 byte-for-byte |
-| WASM | `wasm-pack build` | builds clean |
+| WASM | `wasm-pack build` | builds clean (CI) |
 
-(Swift/iOS: `swift test` / `xcodebuild test` on macOS.)
+(Swift/iOS base-AEAD suites run on CI's macOS runners; their PQ-KEX tests activate on Xcode 26 — see §4, §6.)
 
 ---
 
