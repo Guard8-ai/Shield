@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **`jsonwebtoken` upgraded 9 → 10.3 to fix CVE-2026-25537** (GHSA-h395-gr6q-cpjc,
+  medium). A JWT claim type-confusion let a wrong-typed `exp`/`nbf` be treated as
+  absent, bypassing expiry/not-before validation — reachable in the `confidential`
+  attestation-token verifier (Azure MAA, GCP SEV-SNP). The patched release closes
+  it; as defense-in-depth `JwtVerifier::verify` now marks `exp` a required,
+  well-typed claim. The 10.x crypto backend is pluggable and ships no provider by
+  default, so the `rust_crypto` feature is enabled explicitly (pure-Rust, keeps CI
+  portable). No wire/behaviour change; all `confidential` tests pass.
 - **`PAKEExchange` / `ShieldChannel` documented honestly as NOT a true PAKE.**
   The handshake sends a deterministic, password-derived contribution on the
   wire, so a recorded handshake permits an offline dictionary attack against a
