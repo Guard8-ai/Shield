@@ -259,7 +259,7 @@ Based on a comprehensive 189-finding security assessment, all Rust-applicable fi
 - **Modulo bias elimination**: Padding uses rejection sampling
 - **Padding validation**: Decryption rejects out-of-bounds `pad_len`
 
-Test count: 121 tests (106 unit + 7 interop + 8 doc-tests), clippy clean with `-D warnings`.
+Test count: 100+ Rust tests (unit + interop + doc-tests), clippy clean with `-D warnings`. The GitHub Actions matrix is the authoritative, always-current count across all 12 bindings.
 
 ---
 
@@ -267,11 +267,13 @@ Test count: 121 tests (106 unit + 7 interop + 8 doc-tests), clippy clean with `-
 
 | Feature | Shield | libsodium | OpenSSL | GPG |
 |---------|--------|-----------|---------|-----|
-| Post-quantum ready | Yes | Partial | No | No |
-| Symmetric-only (no RSA/ECC) | Yes | Partial | No | No |
-| Zero dependencies | Yes | No | No | No |
-| Cross-language | 13 platforms | Many | C only | CLI |
-| Forward secrecy | Built-in | External | External | No |
+| Post-quantum hybrid KEX | Optional (X25519+ML-KEM-768) | No | No | No |
+| Symmetric core (no RSA/ECC) | Yes | Partial | No | No |
+| Misuse-resistant high-level API | Yes | Partial | No | No |
+| Byte-identical cross-language | 12 bindings | No | C only | CLI |
+| Forward secrecy | Optional (RatchetSession) | External | External | No |
+
+Shield does not claim "zero dependencies": by design it hand-rolls **no** cryptography and instead calls each platform's audited AEAD (Rust `ring`, Python `cryptography`/OpenSSL, Go stdlib, Node `crypto`, .NET BCL, JCE, CryptoKit, Windows CNG). Its differentiator is the *integration* — a misuse-resistant API and byte-identical wire format on top of vetted primitives — not the absence of dependencies.
 
 ---
 

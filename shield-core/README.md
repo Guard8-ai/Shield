@@ -264,7 +264,7 @@ Comprehensive hardening based on 189-finding security assessment:
 - HMAC-SHA256 in all 13 internal modules (ratchet, rotation, group, identity, exchange, signatures)
 - Counter overflow guards in all 8 keystream generators
 - Timing-safe authentication preventing user enumeration
-- 121 tests (106 unit + 7 interop + 8 doc-tests), clippy clean with `-D warnings`
+- 100+ tests (unit + interop + doc-tests), clippy clean with `-D warnings` (CI is the authoritative count)
 
 ## Safety
 

@@ -253,7 +253,7 @@ encrypted = s.encrypt(b"data")
 
 ## Cross-Language Migration
 
-Shield provides identical implementations across 13 platforms. Data encrypted in one language decrypts in any other.
+Shield provides byte-identical implementations across 12 language bindings. Data encrypted in one language decrypts in any other.
 
 ### Encrypt in Python, Decrypt in JavaScript
 

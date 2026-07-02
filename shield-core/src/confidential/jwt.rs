@@ -157,6 +157,13 @@ impl JwtVerifier {
             let mut validation = Validation::new(k.alg);
             validation.validate_exp = true;
             validation.validate_nbf = true;
+            // Defense-in-depth against JWT claim type-confusion (CVE-2026-25537,
+            // fixed by the jsonwebtoken >=10.3 upgrade): require `exp` to be
+            // present *and* well-typed so a wrong-typed expiry can never be
+            // silently treated as absent (which would skip the expiry check).
+            // `nbf` is left optional — attestation tokens do not always carry it,
+            // and requiring it would reject otherwise-valid tokens.
+            validation.set_required_spec_claims(&["exp"]);
             if self.audiences.is_empty() {
                 // No audience configured => cannot safely accept. Fail closed.
                 return Err("No audience configured; refusing to verify (fail-closed)".into());
