@@ -381,6 +381,21 @@ func (ch *ShieldChannel) readFrame() ([]byte, error) {
 	return data, nil
 }
 
+// applyHandshakeDeadline sets a read/write deadline on conn for the handshake
+// duration. Returns a no-op cleanup function if conn doesn't implement
+// net.Conn or timeoutMs is zero.
+func applyHandshakeDeadline(conn io.ReadWriteCloser, timeoutMs int64) func() {
+	if timeoutMs <= 0 {
+		return func() {}
+	}
+	nc, ok := conn.(interface{ SetDeadline(time.Time) error })
+	if !ok {
+		return func() {}
+	}
+	_ = nc.SetDeadline(time.Now().Add(time.Duration(timeoutMs) * time.Millisecond))
+	return func() { _ = nc.SetDeadline(time.Time{}) }
+}
+
 // ShieldListener listens for multiple Shield connections.
 type ShieldListener struct {
 	listener net.Listener

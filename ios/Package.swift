@@ -31,7 +31,8 @@ let package = Package(
             name: "ShieldTests",
             dependencies: ["Shield"],
             path: "Tests/ShieldTests",
-            exclude: ["PqHybridTests.swift"]
+            exclude: ["PqHybridTests.swift"],
+            resources: [.copy("Resources/v4_test_vectors.json")]
         ),
     ]
 )

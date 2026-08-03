@@ -20,6 +20,7 @@ import os
 import secrets
 import struct
 import time
+from collections import OrderedDict
 from typing import Optional
 
 from cryptography.exceptions import InvalidTag
@@ -130,17 +131,14 @@ class Shield:
         self._iterations = iterations
         self._salt = salt
         self._suite = suite
-        # Cache of derived master keys keyed by the 16-byte salt, so decrypting
-        # many messages from the same sender only runs PBKDF2 once per salt.
-        self._key_cache: dict = {}
+        # Bounded LRU cache of derived keys keyed by 16-byte salt (max KEY_CACHE_MAX
+        # entries). Salts from ciphertexts that fail authentication are never cached,
+        # so attacker-chosen garbage values cannot occupy cache slots.
+        self._key_cache: OrderedDict = OrderedDict()
 
         self._key = self._derive_key(salt)
         self._aead_key = _derive_aead_key(self._key)
         self._max_age_ms = max_age_ms
-        # Bounded LRU cache of derived subkeys, keyed by (enc_key, mac_key) pair.
-        # Salts from ciphertexts that fail authentication are never cached, so
-        # attacker-chosen garbage values cannot occupy cache slots.
-        self._key_cache: OrderedDict = OrderedDict()
 
     def _cache_get(self, cache_key: bytes) -> Optional[tuple]:
         """Look up cached subkeys, refreshing LRU position."""

@@ -509,7 +509,8 @@ mod tests {
         );
 
         // Messages encrypted BEFORE removal can still be decrypted (old key still valid for historical messages)
-        let decrypted = GroupEncryption::decrypt_as_member(&encrypted, "alice", &alice_key).unwrap();
+        let decrypted =
+            GroupEncryption::decrypt_as_member(&encrypted, "alice", &alice_key).unwrap();
         assert_eq!(decrypted, plaintext);
 
         // Messages encrypted AFTER removal with the new key cannot be decrypted by bob
