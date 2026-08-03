@@ -19,6 +19,12 @@ final class VectorTests: XCTestCase {
         let version: String
         let description: String
         let test_vectors: [TestVector]
+
+        enum CodingKeys: String, CodingKey {
+            case version
+            case description
+            case test_vectors
+        }
     }
 
     private struct TestVector: Decodable {
@@ -29,6 +35,16 @@ final class VectorTests: XCTestCase {
         let expected_plaintext_hex: String
         let ciphertext_hex: String
         let max_age_ms: Int64?
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case description
+            case format
+            case key_hex
+            case expected_plaintext_hex
+            case ciphertext_hex
+            case max_age_ms
+        }
     }
 
     // MARK: - Helpers
