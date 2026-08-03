@@ -5,7 +5,7 @@
 
 [package]
 name = "shield-browser"
-version = "2.4.0"
+version = "2.4.1"
 edition = "2021"
 authors = ["Eliran Sabag"]
 description = "Shield Browser SDK - Transparent auto-decryption for web applications"

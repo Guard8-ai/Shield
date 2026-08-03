@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-08-03
+
+### Fixed
+- **WebAuthn (Rust):** `Fido2Manager` now enforces origin binding, rpId hash
+  binding, and clientDataJSON binding as required by WebAuthn Level 2.
+  Authentication signature is verified over `authenticatorData || SHA-256(clientDataJSON)`
+  (standard format) instead of the previous non-standard scheme.
+  `#[deprecated]` removed from `Fido2Manager` — all four security gaps are
+  resolved. Added `test_wrong_origin_rejected` and `test_wrong_rp_id_rejected`
+  regression tests.
+- **Swift / iOS:** Fixed `v4-v2-001` test vector key hex (was 34 bytes / 68 hex
+  chars; correct value is 32 bytes / 64 hex chars). All 8 cross-language
+  conformance vectors now pass on both Swift and iOS targets.
+- **Rust (beta clippy):** Added `#[allow(unknown_lints, clippy::unused_async_trait_impl)]`
+  to `NitroVsockClient::send` to silence the new `unused_async_trait_impl` lint
+  introduced in Rust beta without breaking stable builds.
+- **Python interop tests:** Updated `tests/interop.py` for the v4 wire format —
+  replaced stale v2/v3 imports (`MAC_SIZE`, `V2_HEADER_SIZE`, `_generate_keystream`)
+  with their v4 equivalents, fixed the format structure test to account for the
+  suite byte, and added `test_empty_plaintext`, `test_large_plaintext`,
+  `test_key_mode`.
+
 ## [2.4.0] - 2026-08-03
 
 ### Security
