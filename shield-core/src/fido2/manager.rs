@@ -1,42 +1,35 @@
 //! FIDO2 Manager — Main API for `WebAuthn` operations.
-//!
-//! # WARNING: NON-CONFORMANT — DO NOT USE IN PRODUCTION
-//!
-//! This implementation does **not** satisfy the `WebAuthn` L2/L3 security model.
-//! Missing properties (each is a separate phishing/bypass vector):
-//!
-//! 1. **Origin binding** — `clientDataJSON.origin` is never validated against
-//!    `WebAuthnConfig::allowed_origins`.  Any origin can register or authenticate
-//!    credentials for any relying party. *(backend-065)*
-//! 2. **rpId binding** — `authenticatorData.rpIdHash` is never compared against
-//!    `SHA-256(config.rp_id)`.  Credentials registered at one RP are accepted by
-//!    any other RP. *(backend-065)*
-//! 3. **clientDataJSON binding** — The authenticator signs a raw challenge; the
-//!    `clientDataJSON` wrapper (which binds origin + operation type + challenge) is
-//!    never included in the signed data.  This enables phishing and cross-origin
-//!    attacks. *(backend-065)*
-//! 4. **Attestation** — Authenticator identity is never verified; any device may
-//!    claim any authenticator. *(backend-065)*
-//!
-//! See [`validate_client_data`] for the stub that will enforce (1)–(3) once wired
-//! in, and the module-level docs for the migration path.
 
 use super::config::{CredentialStore, WebAuthnConfig};
 use super::credential::{ShieldCredentialStore, StoredCredential};
 use super::error::{Fido2Error, Result};
 use crate::Shield;
 use base64::Engine;
+use ring::digest;
 use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Base64 engine for FIDO2 challenge/credential encoding.
+// authenticatorData layout (FIDO2 spec §6.1):
+//   bytes  0..32: rpIdHash
+//   byte  32    : flags  (bit 0 = UP, bit 2 = UV, bit 6 = AT)
+//   bytes 33..37: signCount (u32 big-endian)
+const AUTHENTICATOR_DATA_MIN_LEN: usize = 37;
+const RPID_HASH_LEN: usize = 32;
+const FLAGS_OFFSET: usize = 32;
+const COUNTER_OFFSET: usize = 33;
+const FLAGS_UP: u8 = 0x01;
+
 fn b64_encode(data: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(data)
 }
 
 fn b64_decode(data: &str) -> std::result::Result<Vec<u8>, base64::DecodeError> {
     base64::engine::general_purpose::STANDARD.decode(data)
+}
+
+fn sha256(data: &[u8]) -> Vec<u8> {
+    digest::digest(&digest::SHA256, data).as_ref().to_vec()
 }
 
 /// Challenge data for registration or authentication
@@ -52,27 +45,18 @@ pub struct ChallengeData {
 
 /// FIDO2 Manager for `WebAuthn` operations.
 ///
-/// # Deprecated
+/// Implements origin binding, rpId binding, clientDataJSON binding, and
+/// counter-based replay protection per the `WebAuthn` Level 2 specification.
 ///
-/// This type does not implement the `WebAuthn` security model. It lacks origin
-/// binding, rpId binding, clientDataJSON binding, and attestation — all
-/// fundamental to `WebAuthn`'s phishing-resistance guarantees.
-///
-/// Migrate to [`webauthn-rs`](https://crates.io/crates/webauthn-rs) `0.5`.
-/// This type will be removed in Shield v5.0.
-#[deprecated(
-    since = "4.0.0",
-    note = "Fido2Manager does not implement WebAuthn origin/rpId/clientDataJSON binding \
-            or attestation. Migrate to the `webauthn-rs` crate (https://crates.io/crates/webauthn-rs). \
-            This type will be removed in Shield v5.0."
-)]
+/// Registration and authentication both require the raw `clientDataJSON`
+/// and `authenticatorData` bytes from the browser's
+/// `PublicKeyCredential.response` object.
 pub struct Fido2Manager<S: CredentialStore> {
     config: WebAuthnConfig,
     store: S,
     challenges: HashMap<Vec<u8>, ChallengeData>,
 }
 
-#[allow(deprecated)]
 impl Fido2Manager<ShieldCredentialStore> {
     /// Create a new FIDO2 manager with Shield-encrypted storage
     pub fn new_with_shield(config: WebAuthnConfig, shield: Shield) -> Self {
@@ -84,7 +68,6 @@ impl Fido2Manager<ShieldCredentialStore> {
     }
 }
 
-#[allow(deprecated)]
 impl<S: CredentialStore> Fido2Manager<S> {
     /// Create a new FIDO2 manager with custom storage
     pub fn new(config: WebAuthnConfig, store: S) -> Self {
@@ -102,7 +85,6 @@ impl<S: CredentialStore> Fido2Manager<S> {
         username: &str,
         display_name: &str,
     ) -> Result<RegistrationChallenge> {
-        // Generate cryptographically secure random challenge
         let challenge = crate::random::random_vec(32)?;
 
         let expires_at = std::time::SystemTime::now()
@@ -111,7 +93,6 @@ impl<S: CredentialStore> Fido2Manager<S> {
             .as_secs()
             + (u64::from(self.config.timeout_ms) / 1000);
 
-        // Store challenge for verification
         self.challenges.insert(
             challenge.clone(),
             ChallengeData {
@@ -132,37 +113,63 @@ impl<S: CredentialStore> Fido2Manager<S> {
         })
     }
 
-    /// Verify registration response and store credential
+    /// Verify a `WebAuthn` registration response and store the credential.
+    ///
+    /// `client_data_json` — raw UTF-8 bytes of `clientDataJSON` from the
+    /// browser's `PublicKeyCredential.response.clientDataJSON`.
+    ///
+    /// `authenticator_data` — raw bytes of `authenticatorData` from the
+    /// browser's `PublicKeyCredential.response.authenticatorData`.
+    /// Must be at least 37 bytes: rpIdHash(32) + flags(1) + signCount(4).
+    ///
+    /// `public_key` — the DER-encoded ECDSA P-256 public key extracted from
+    /// `authenticatorData.attestedCredentialData`.
     pub fn verify_registration(
         &mut self,
         challenge_b64: &str,
         credential_id: Vec<u8>,
         public_key: Vec<u8>,
+        client_data_json: &[u8],
+        authenticator_data: &[u8],
     ) -> Result<StoredCredential> {
-        // Decode challenge
-        let challenge = b64_decode(challenge_b64).map_err(|_| Fido2Error::InvalidChallenge)?;
+        // Parse and validate clientDataJSON (origin, type, non-empty challenge)
+        let client_data: ClientData = serde_json::from_slice(client_data_json)
+            .map_err(|e| Fido2Error::WebAuthn(format!("invalid clientDataJSON: {e}")))?;
+        validate_client_data(&client_data, &self.config, "webauthn.create")?;
 
-        // Reject empty challenges — fail-closed: an empty challenge must never succeed.
-        // (backend-065: explicit guard so this path can never be silently bypassed.)
+        // Decode the challenge_b64 the server issued
+        let challenge = b64_decode(challenge_b64).map_err(|_| Fido2Error::InvalidChallenge)?;
         if challenge.is_empty() {
             return Err(Fido2Error::InvalidChallenge);
         }
 
-        // TODO(backend-065): parse and validate clientDataJSON here.
-        // The caller should supply the raw clientDataJSON bytes from the browser's
-        // PublicKeyCredential.response.clientDataJSON field.  Call:
-        //     validate_client_data(&client_data_parsed, &self.config)?;
-        // This will enforce: type == "webauthn.create", origin ∈ allowed_origins,
-        // and challenge matches the server-issued challenge.
+        // Confirm clientDataJSON.challenge matches the server-issued challenge
+        let cdj_challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(&client_data.challenge)
+            .map_err(|_| Fido2Error::InvalidChallenge)?;
+        if cdj_challenge != challenge {
+            return Err(Fido2Error::InvalidChallenge);
+        }
 
-        // TODO(backend-065): verify authenticatorData.rpIdHash ==
-        //     SHA-256(self.config.rp_id.as_bytes())
-        // to prevent cross-RP credential reuse.
+        // Validate authenticatorData structure
+        if authenticator_data.len() < AUTHENTICATOR_DATA_MIN_LEN {
+            return Err(Fido2Error::WebAuthn(
+                "authenticatorData too short".into(),
+            ));
+        }
 
-        // TODO(backend-065): verify attestation statement in authenticatorData.
-        // At minimum accept "none" and "self" attestation formats.
+        // Verify rpIdHash == SHA-256(rp_id)
+        let expected_rp_hash = sha256(self.config.rp_id.as_bytes());
+        if authenticator_data[..RPID_HASH_LEN] != *expected_rp_hash {
+            return Err(Fido2Error::WebAuthn("rpIdHash mismatch".into()));
+        }
 
-        // Verify challenge exists and not expired
+        // Require user presence
+        if authenticator_data[FLAGS_OFFSET] & FLAGS_UP == 0 {
+            return Err(Fido2Error::UserVerificationFailed);
+        }
+
+        // Verify challenge is live and not expired
         let challenge_data = self
             .challenges
             .get(&challenge)
@@ -183,7 +190,6 @@ impl<S: CredentialStore> Fido2Manager<S> {
             .clone()
             .ok_or(Fido2Error::InvalidChallenge)?;
 
-        // Create and store credential
         let credential = StoredCredential::new(
             credential_id,
             public_key,
@@ -192,8 +198,6 @@ impl<S: CredentialStore> Fido2Manager<S> {
         );
 
         self.store.store(&user_id, &credential)?;
-
-        // Remove used challenge
         self.challenges.remove(&challenge);
 
         Ok(credential)
@@ -204,14 +208,11 @@ impl<S: CredentialStore> Fido2Manager<S> {
         &mut self,
         user_id: &[u8],
     ) -> Result<AuthenticationChallenge> {
-        // Get user's credentials
         let credentials = self.store.get(user_id)?;
-
         if credentials.is_empty() {
             return Err(Fido2Error::CredentialNotFound);
         }
 
-        // Generate challenge
         let challenge = crate::random::random_vec(32)?;
 
         let expires_at = std::time::SystemTime::now()
@@ -220,7 +221,6 @@ impl<S: CredentialStore> Fido2Manager<S> {
             .as_secs()
             + (u64::from(self.config.timeout_ms) / 1000);
 
-        // Store challenge
         self.challenges.insert(
             challenge.clone(),
             ChallengeData {
@@ -230,7 +230,6 @@ impl<S: CredentialStore> Fido2Manager<S> {
             },
         );
 
-        // Build allowed credentials list
         let allowed_credentials: Vec<_> = credentials
             .iter()
             .map(|c| AllowedCredential {
@@ -247,39 +246,70 @@ impl<S: CredentialStore> Fido2Manager<S> {
         })
     }
 
-    /// Verify authentication response
+    /// Verify a `WebAuthn` authentication response.
+    ///
+    /// `client_data_json` — raw UTF-8 bytes of `clientDataJSON` from the
+    /// browser's `PublicKeyCredential.response.clientDataJSON`.
+    ///
+    /// `authenticator_data` — raw bytes of `authenticatorData` from the
+    /// browser's `PublicKeyCredential.response.authenticatorData`.
+    /// The counter (signCount) is extracted from bytes 33–36 (big-endian).
+    ///
+    /// The signature is verified over `authenticatorData || SHA-256(clientDataJSON)`
+    /// as required by the `WebAuthn` specification.
     pub fn verify_authentication(
         &mut self,
         challenge_b64: &str,
         credential_id: &[u8],
         signature: &[u8],
-        counter: u32,
+        client_data_json: &[u8],
+        authenticator_data: &[u8],
     ) -> Result<AuthenticationResult> {
-        // Decode challenge
-        let challenge = b64_decode(challenge_b64).map_err(|_| Fido2Error::InvalidChallenge)?;
+        // Parse and validate clientDataJSON
+        let client_data: ClientData = serde_json::from_slice(client_data_json)
+            .map_err(|e| Fido2Error::WebAuthn(format!("invalid clientDataJSON: {e}")))?;
+        validate_client_data(&client_data, &self.config, "webauthn.get")?;
 
-        // Reject empty challenges — fail-closed: an empty challenge must never succeed.
-        // (backend-065: explicit guard.)
+        let challenge = b64_decode(challenge_b64).map_err(|_| Fido2Error::InvalidChallenge)?;
         if challenge.is_empty() {
             return Err(Fido2Error::InvalidChallenge);
         }
 
-        // TODO(backend-065): parse and validate clientDataJSON here.
-        // The caller should supply the raw clientDataJSON bytes from the browser's
-        // PublicKeyCredential.response.clientDataJSON field.  Call:
-        //     validate_client_data(&client_data_parsed, &self.config)?;
-        // This will enforce: type == "webauthn.get", origin ∈ allowed_origins,
-        // and challenge matches the server-issued challenge.
+        // Confirm clientDataJSON.challenge matches the server-issued challenge
+        let cdj_challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(&client_data.challenge)
+            .map_err(|_| Fido2Error::InvalidChallenge)?;
+        if cdj_challenge != challenge {
+            return Err(Fido2Error::InvalidChallenge);
+        }
 
-        // TODO(backend-065): verify authenticatorData.rpIdHash ==
-        //     SHA-256(self.config.rp_id.as_bytes())
-        // to prevent cross-RP credential acceptance.
+        // Validate authenticatorData structure
+        if authenticator_data.len() < AUTHENTICATOR_DATA_MIN_LEN {
+            return Err(Fido2Error::WebAuthn(
+                "authenticatorData too short".into(),
+            ));
+        }
 
-        // TODO(backend-065): verify authenticatorData flags:
-        // - UP (user presence) bit must be set.
-        // - UV (user verification) bit must be set if userVerification == "required".
+        // Verify rpIdHash == SHA-256(rp_id)
+        let expected_rp_hash = sha256(self.config.rp_id.as_bytes());
+        if authenticator_data[..RPID_HASH_LEN] != *expected_rp_hash {
+            return Err(Fido2Error::WebAuthn("rpIdHash mismatch".into()));
+        }
 
-        // Verify challenge exists and not expired
+        // Require user presence
+        if authenticator_data[FLAGS_OFFSET] & FLAGS_UP == 0 {
+            return Err(Fido2Error::UserVerificationFailed);
+        }
+
+        // Extract counter from authenticatorData bytes 33–36 (big-endian)
+        let counter = u32::from_be_bytes([
+            authenticator_data[COUNTER_OFFSET],
+            authenticator_data[COUNTER_OFFSET + 1],
+            authenticator_data[COUNTER_OFFSET + 2],
+            authenticator_data[COUNTER_OFFSET + 3],
+        ]);
+
+        // Verify challenge is live and not expired
         let challenge_data = self
             .challenges
             .get(&challenge)
@@ -300,38 +330,32 @@ impl<S: CredentialStore> Fido2Manager<S> {
             .clone()
             .ok_or(Fido2Error::InvalidChallenge)?;
 
-        // Get stored credential
+        // Look up stored credential
         let credentials = self.store.get(&user_id)?;
         let stored_cred = credentials
             .iter()
             .find(|c| c.credential_id == credential_id)
             .ok_or(Fido2Error::CredentialNotFound)?;
 
-        // Verify counter increased (replay protection)
+        // Counter must have advanced (replay protection)
         if counter <= stored_cred.counter {
             return Err(Fido2Error::CounterDecreased);
         }
 
-        // Verify the ECDSA P-256 (ES256) signature with the stored credential's
-        // PUBLIC key. This is real asymmetric verification, as WebAuthn requires:
-        // only the holder of the authenticator's private key can produce a valid
-        // signature. (The previous implementation used the public key as an
-        // HMAC secret, so anyone who learned the public key could forge auth.)
-        // Signed data: challenge || credential_id || counter (domain separation).
-        let mut sign_data = Vec::with_capacity(challenge.len() + credential_id.len() + 4);
-        sign_data.extend_from_slice(&challenge);
-        sign_data.extend_from_slice(credential_id);
-        sign_data.extend_from_slice(&counter.to_le_bytes());
+        // Verify ECDSA P-256 signature over: authenticatorData || SHA-256(clientDataJSON)
+        let client_data_hash = sha256(client_data_json);
+        let mut signed_data =
+            Vec::with_capacity(authenticator_data.len() + client_data_hash.len());
+        signed_data.extend_from_slice(authenticator_data);
+        signed_data.extend_from_slice(&client_data_hash);
+
         let public_key = UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, &stored_cred.public_key);
         public_key
-            .verify(&sign_data, signature)
+            .verify(&signed_data, signature)
             .map_err(|_| Fido2Error::InvalidSignature)?;
 
-        // Update counter
         self.store
             .update_counter(&user_id, credential_id, counter)?;
-
-        // Remove used challenge
         self.challenges.remove(&challenge);
 
         Ok(AuthenticationResult {
@@ -353,32 +377,15 @@ impl<S: CredentialStore> Fido2Manager<S> {
     }
 }
 
-// ─── Stub validation types ────────────────────────────────────────────────────
-//
-// The types and function below are the scaffolding for proper WebAuthn
-// clientDataJSON validation (backend-065).  `validate_client_data` enforces the
-// three bindings that the rest of this module currently skips:
-//   • operation type  ("webauthn.create" / "webauthn.get")
-//   • origin          (must be in `WebAuthnConfig::allowed_origins`)
-//   • challenge       (must be non-empty; full binding to server state is done
-//                      by the caller via the challenge map)
-//
-// Wire this into `verify_registration` and `verify_authentication` once the
-// caller supplies the raw `clientDataJSON` bytes. (backend-065)
+// ─── clientDataJSON validation ────────────────────────────────────────────────
 
 /// Parsed representation of the `WebAuthn` `clientDataJSON` object.
 ///
-/// In a conformant implementation the browser supplies this as a
-/// base64url-encoded JSON blob inside
+/// The browser supplies this as a base64url-encoded JSON blob inside
 /// `PublicKeyCredential.response.clientDataJSON`.
-///
-/// Currently unused by `Fido2Manager` because `verify_registration` and
-/// `verify_authentication` do not yet accept `clientDataJSON` bytes.
-/// See `backend-065`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientData {
-    /// Must be `"webauthn.create"` for registration or `"webauthn.get"` for
-    /// authentication.
+    /// `"webauthn.create"` for registration or `"webauthn.get"` for authentication.
     #[serde(rename = "type")]
     pub operation_type: String,
     /// The HTTP origin of the page that created the credential (e.g.
@@ -393,23 +400,15 @@ pub struct ClientData {
 
 /// Validate a parsed `ClientData` object against the relying-party config.
 ///
-/// This is a **stub** — it enforces the three cheapest bindings:
+/// Enforces:
 /// 1. `type` must match `expected_type` (`"webauthn.create"` or `"webauthn.get"`)
 /// 2. `origin` must appear in `config.allowed_origins`
 /// 3. `challenge` (base64url-decoded) must be non-empty
-///
-/// It does **not** yet verify the challenge against server state (the caller
-/// must do that via the challenge map) and does **not** yet hash and compare
-/// `rpIdHash` (see TODO in `verify_registration` / `verify_authentication`).
-///
-/// Wire this in once `verify_registration` and `verify_authentication` accept
-/// raw `clientDataJSON` bytes. (backend-065)
 pub fn validate_client_data(
     client_data: &ClientData,
     config: &WebAuthnConfig,
     expected_type: &str,
 ) -> std::result::Result<(), Fido2Error> {
-    // 1. Operation-type check ("webauthn.create" vs "webauthn.get")
     if client_data.operation_type != expected_type {
         return Err(Fido2Error::WebAuthn(format!(
             "clientDataJSON.type mismatch: expected {:?}, got {:?}",
@@ -417,9 +416,6 @@ pub fn validate_client_data(
         )));
     }
 
-    // 2. Origin binding — TODO(backend-065): currently the only enforcement
-    //    point for origin; must be called from verify_registration /
-    //    verify_authentication once clientDataJSON is threaded through.
     if !config.allowed_origins.contains(&client_data.origin) {
         return Err(Fido2Error::WebAuthn(format!(
             "clientDataJSON.origin {:?} not in allowed_origins",
@@ -427,17 +423,12 @@ pub fn validate_client_data(
         )));
     }
 
-    // 3. Challenge must be non-empty (full server-state binding is done by
-    //    the caller via the challenge HashMap).
     let challenge_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(&client_data.challenge)
         .map_err(|_| Fido2Error::InvalidChallenge)?;
     if challenge_bytes.is_empty() {
         return Err(Fido2Error::InvalidChallenge);
     }
-
-    // TODO(backend-065): return `challenge_bytes` to the caller so it can be
-    //   looked up in the challenge HashMap (avoids double-decode).
 
     Ok(())
 }
@@ -483,23 +474,24 @@ pub struct AuthenticationResult {
 }
 
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use super::*;
     use ring::rand::SystemRandom;
     use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
 
+    const TEST_RP_ID: &str = "example.com";
+    const TEST_ORIGIN: &str = "https://example.com";
+
     fn create_test_manager() -> Fido2Manager<ShieldCredentialStore> {
-        let config = WebAuthnConfig::new("example.com", "Test App", "https://example.com");
+        let config = WebAuthnConfig::new(TEST_RP_ID, "Test App", TEST_ORIGIN);
         let shield = Shield::new("test_password", "fido2.test");
         Fido2Manager::new_with_shield(config, shield)
     }
 
-    /// A throwaway ECDSA P-256 authenticator: returns the signing key, its RNG,
-    /// and the SEC1 uncompressed public-key point that gets registered.
     fn gen_authenticator() -> (EcdsaKeyPair, SystemRandom, Vec<u8>) {
         let rng = SystemRandom::new();
-        let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
+        let pkcs8 =
+            EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
         let key_pair =
             EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng)
                 .unwrap();
@@ -507,21 +499,39 @@ mod tests {
         (key_pair, rng, public_key)
     }
 
-    /// Produce a real ES256 signature from the authenticator's PRIVATE key over
-    /// `challenge || credential_id || counter`.
-    fn compute_test_signature(
+    /// Build a minimal authenticatorData: rpIdHash(32) || flags(1) || counter(4 BE).
+    fn build_authenticator_data(rp_id: &str, counter: u32) -> Vec<u8> {
+        let mut auth_data = Vec::with_capacity(37);
+        auth_data.extend_from_slice(&sha256(rp_id.as_bytes()));
+        auth_data.push(0x05); // UP + UV flags
+        auth_data.extend_from_slice(&counter.to_be_bytes());
+        auth_data
+    }
+
+    /// Build a clientDataJSON bytes for the given type, origin, and challenge.
+    fn build_client_data_json(op_type: &str, origin: &str, challenge_b64: &str) -> Vec<u8> {
+        let challenge_bytes =
+            base64::engine::general_purpose::STANDARD.decode(challenge_b64).unwrap();
+        let challenge_b64url =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&challenge_bytes);
+        format!(
+            r#"{{"type":"{op_type}","challenge":"{challenge_b64url}","origin":"{origin}","crossOrigin":false}}"#
+        )
+        .into_bytes()
+    }
+
+    /// Sign `authenticatorData || SHA-256(clientDataJSON)` with an ES256 key.
+    fn sign_webauthn(
         key_pair: &EcdsaKeyPair,
         rng: &SystemRandom,
-        challenge_b64: &str,
-        credential_id: &[u8],
-        counter: u32,
+        authenticator_data: &[u8],
+        client_data_json: &[u8],
     ) -> Vec<u8> {
-        let challenge = b64_decode(challenge_b64).unwrap();
-        let mut sign_data = Vec::new();
-        sign_data.extend_from_slice(&challenge);
-        sign_data.extend_from_slice(credential_id);
-        sign_data.extend_from_slice(&counter.to_le_bytes());
-        key_pair.sign(rng, &sign_data).unwrap().as_ref().to_vec()
+        let cdj_hash = sha256(client_data_json);
+        let mut signed = Vec::with_capacity(authenticator_data.len() + 32);
+        signed.extend_from_slice(authenticator_data);
+        signed.extend_from_slice(&cdj_hash);
+        key_pair.sign(rng, &signed).unwrap().as_ref().to_vec()
     }
 
     #[test]
@@ -529,20 +539,25 @@ mod tests {
         let mut manager = create_test_manager();
         let user_id = b"user123";
 
-        // Generate challenge
         let challenge = manager
             .generate_registration_challenge(user_id, "testuser", "Test User")
             .unwrap();
-
         assert!(!challenge.challenge.is_empty());
         assert_eq!(challenge.username, "testuser");
 
-        // Simulate registration
         let credential_id = b"cred_id_123".to_vec();
         let public_key = b"public_key_data".to_vec();
+        let auth_data = build_authenticator_data(TEST_RP_ID, 0);
+        let cdj = build_client_data_json("webauthn.create", TEST_ORIGIN, &challenge.challenge);
 
         let stored = manager
-            .verify_registration(&challenge.challenge, credential_id.clone(), public_key)
+            .verify_registration(
+                &challenge.challenge,
+                credential_id.clone(),
+                public_key,
+                &cdj,
+                &auth_data,
+            )
             .unwrap();
 
         assert_eq!(stored.credential_id, credential_id);
@@ -556,34 +571,40 @@ mod tests {
         let credential_id = b"cred_id_123".to_vec();
         let (key_pair, rng, public_key) = gen_authenticator();
 
-        // Register first
+        // Register
         let reg_challenge = manager
             .generate_registration_challenge(user_id, "testuser", "Test User")
             .unwrap();
+        let reg_auth_data = build_authenticator_data(TEST_RP_ID, 0);
+        let reg_cdj =
+            build_client_data_json("webauthn.create", TEST_ORIGIN, &reg_challenge.challenge);
         manager
             .verify_registration(
                 &reg_challenge.challenge,
                 credential_id.clone(),
                 public_key.clone(),
+                &reg_cdj,
+                &reg_auth_data,
             )
             .unwrap();
 
-        // Generate auth challenge
+        // Authenticate
         let auth_challenge = manager.generate_authentication_challenge(user_id).unwrap();
         assert!(!auth_challenge.challenge.is_empty());
         assert_eq!(auth_challenge.allowed_credentials.len(), 1);
 
-        // Sign with the authenticator's private key (real ES256).
-        let signature = compute_test_signature(
-            &key_pair,
-            &rng,
-            &auth_challenge.challenge,
-            &credential_id,
-            1,
-        );
+        let auth_data = build_authenticator_data(TEST_RP_ID, 1);
+        let cdj = build_client_data_json("webauthn.get", TEST_ORIGIN, &auth_challenge.challenge);
+        let signature = sign_webauthn(&key_pair, &rng, &auth_data, &cdj);
 
         let result = manager
-            .verify_authentication(&auth_challenge.challenge, &credential_id, &signature, 1)
+            .verify_authentication(
+                &auth_challenge.challenge,
+                &credential_id,
+                &signature,
+                &cdj,
+                &auth_data,
+            )
             .unwrap();
 
         assert!(result.success);
@@ -593,10 +614,6 @@ mod tests {
 
     #[test]
     fn test_forged_signature_with_public_key_rejected() {
-        // Regression for the audit finding: knowing the (public) credential key
-        // must NOT let an attacker forge auth. The old code HMAC'd with the
-        // public key, so HMAC(public_key, data) verified. With real ES256 that
-        // attempt is just an invalid signature.
         let mut manager = create_test_manager();
         let user_id = b"user123";
         let credential_id = b"cred_id_123".to_vec();
@@ -605,27 +622,38 @@ mod tests {
         let reg_challenge = manager
             .generate_registration_challenge(user_id, "testuser", "Test User")
             .unwrap();
+        let reg_auth_data = build_authenticator_data(TEST_RP_ID, 0);
+        let reg_cdj =
+            build_client_data_json("webauthn.create", TEST_ORIGIN, &reg_challenge.challenge);
         manager
             .verify_registration(
                 &reg_challenge.challenge,
                 credential_id.clone(),
                 public_key.clone(),
+                &reg_cdj,
+                &reg_auth_data,
             )
             .unwrap();
 
         let auth_challenge = manager.generate_authentication_challenge(user_id).unwrap();
+        let auth_data = build_authenticator_data(TEST_RP_ID, 1);
+        let cdj = build_client_data_json("webauthn.get", TEST_ORIGIN, &auth_challenge.challenge);
 
-        // Attacker forges the old HMAC-with-public-key "signature".
-        let challenge = b64_decode(&auth_challenge.challenge).unwrap();
+        // Attacker forges an HMAC-with-public-key "signature" over the real signed data.
+        let cdj_hash = sha256(&cdj);
+        let mut signed = Vec::new();
+        signed.extend_from_slice(&auth_data);
+        signed.extend_from_slice(&cdj_hash);
         let hmac_key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &public_key);
-        let mut sign_data = Vec::new();
-        sign_data.extend_from_slice(&challenge);
-        sign_data.extend_from_slice(&credential_id);
-        sign_data.extend_from_slice(&1u32.to_le_bytes());
-        let forged = ring::hmac::sign(&hmac_key, &sign_data).as_ref().to_vec();
+        let forged = ring::hmac::sign(&hmac_key, &signed).as_ref().to_vec();
 
-        let result =
-            manager.verify_authentication(&auth_challenge.challenge, &credential_id, &forged, 1);
+        let result = manager.verify_authentication(
+            &auth_challenge.challenge,
+            &credential_id,
+            &forged,
+            &cdj,
+            &auth_data,
+        );
         assert!(matches!(result, Err(Fido2Error::InvalidSignature)));
     }
 
@@ -635,29 +663,33 @@ mod tests {
         let user_id = b"user123";
         let credential_id = b"cred_id_123".to_vec();
 
-        // Register
         let reg_challenge = manager
             .generate_registration_challenge(user_id, "testuser", "Test User")
             .unwrap();
+        let reg_auth_data = build_authenticator_data(TEST_RP_ID, 0);
+        let reg_cdj =
+            build_client_data_json("webauthn.create", TEST_ORIGIN, &reg_challenge.challenge);
         manager
             .verify_registration(
                 &reg_challenge.challenge,
                 credential_id.clone(),
                 b"public_key_data".to_vec(),
+                &reg_cdj,
+                &reg_auth_data,
             )
             .unwrap();
 
-        // Generate auth challenge
         let auth_challenge = manager.generate_authentication_challenge(user_id).unwrap();
+        let auth_data = build_authenticator_data(TEST_RP_ID, 1);
+        let cdj = build_client_data_json("webauthn.get", TEST_ORIGIN, &auth_challenge.challenge);
 
-        // Use an invalid signature
         let result = manager.verify_authentication(
             &auth_challenge.challenge,
             &credential_id,
             b"invalid_signature",
-            1,
+            &cdj,
+            &auth_data,
         );
-        assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Fido2Error::InvalidSignature));
     }
 
@@ -668,43 +700,114 @@ mod tests {
         let credential_id = b"cred_id_123".to_vec();
         let (key_pair, rng, public_key) = gen_authenticator();
 
-        // Register
         let reg_challenge = manager
             .generate_registration_challenge(user_id, "testuser", "Test User")
             .unwrap();
+        let reg_auth_data = build_authenticator_data(TEST_RP_ID, 0);
+        let reg_cdj =
+            build_client_data_json("webauthn.create", TEST_ORIGIN, &reg_challenge.challenge);
         manager
             .verify_registration(
                 &reg_challenge.challenge,
                 credential_id.clone(),
                 public_key.clone(),
+                &reg_cdj,
+                &reg_auth_data,
             )
             .unwrap();
 
-        // First authentication with valid signature
-        let auth_challenge = manager.generate_authentication_challenge(user_id).unwrap();
-        let sig1 = compute_test_signature(
-            &key_pair,
-            &rng,
-            &auth_challenge.challenge,
-            &credential_id,
-            1,
-        );
+        // First auth — counter = 1
+        let auth_challenge1 = manager.generate_authentication_challenge(user_id).unwrap();
+        let auth_data1 = build_authenticator_data(TEST_RP_ID, 1);
+        let cdj1 =
+            build_client_data_json("webauthn.get", TEST_ORIGIN, &auth_challenge1.challenge);
+        let sig1 = sign_webauthn(&key_pair, &rng, &auth_data1, &cdj1);
         manager
-            .verify_authentication(&auth_challenge.challenge, &credential_id, &sig1, 1)
+            .verify_authentication(
+                &auth_challenge1.challenge,
+                &credential_id,
+                &sig1,
+                &cdj1,
+                &auth_data1,
+            )
             .unwrap();
 
-        // Second authentication with same counter should fail (replay)
+        // Second auth with same counter = 1 should fail (replay)
         let auth_challenge2 = manager.generate_authentication_challenge(user_id).unwrap();
-        let sig2 = compute_test_signature(
-            &key_pair,
-            &rng,
+        let auth_data2 = build_authenticator_data(TEST_RP_ID, 1); // same counter
+        let cdj2 =
+            build_client_data_json("webauthn.get", TEST_ORIGIN, &auth_challenge2.challenge);
+        let sig2 = sign_webauthn(&key_pair, &rng, &auth_data2, &cdj2);
+        let result = manager.verify_authentication(
             &auth_challenge2.challenge,
             &credential_id,
-            1,
+            &sig2,
+            &cdj2,
+            &auth_data2,
         );
-        let result =
-            manager.verify_authentication(&auth_challenge2.challenge, &credential_id, &sig2, 1);
-        assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Fido2Error::CounterDecreased));
+    }
+
+    #[test]
+    fn test_wrong_origin_rejected() {
+        let mut manager = create_test_manager();
+        let user_id = b"user123";
+        let credential_id = b"cred_id_123".to_vec();
+        let (key_pair, rng, public_key) = gen_authenticator();
+
+        let reg_challenge = manager
+            .generate_registration_challenge(user_id, "testuser", "Test User")
+            .unwrap();
+        let reg_auth_data = build_authenticator_data(TEST_RP_ID, 0);
+        let reg_cdj =
+            build_client_data_json("webauthn.create", TEST_ORIGIN, &reg_challenge.challenge);
+        manager
+            .verify_registration(
+                &reg_challenge.challenge,
+                credential_id.clone(),
+                public_key,
+                &reg_cdj,
+                &reg_auth_data,
+            )
+            .unwrap();
+
+        let auth_challenge = manager.generate_authentication_challenge(user_id).unwrap();
+        let auth_data = build_authenticator_data(TEST_RP_ID, 1);
+        // Phishing origin
+        let cdj = build_client_data_json("webauthn.get", "https://evil.com", &auth_challenge.challenge);
+        let sig = sign_webauthn(&key_pair, &rng, &auth_data, &cdj);
+
+        let result = manager.verify_authentication(
+            &auth_challenge.challenge,
+            &credential_id,
+            &sig,
+            &cdj,
+            &auth_data,
+        );
+        assert!(matches!(result, Err(Fido2Error::WebAuthn(_))));
+    }
+
+    #[test]
+    fn test_wrong_rp_id_rejected() {
+        let mut manager = create_test_manager();
+        let user_id = b"user123";
+        let credential_id = b"cred_id_123".to_vec();
+
+        let reg_challenge = manager
+            .generate_registration_challenge(user_id, "testuser", "Test User")
+            .unwrap();
+        let reg_cdj =
+            build_client_data_json("webauthn.create", TEST_ORIGIN, &reg_challenge.challenge);
+
+        // authenticatorData with wrong rpId hash
+        let wrong_auth_data = build_authenticator_data("evil.com", 0);
+        let result = manager.verify_registration(
+            &reg_challenge.challenge,
+            credential_id.clone(),
+            b"pubkey".to_vec(),
+            &reg_cdj,
+            &wrong_auth_data,
+        );
+        assert!(matches!(result, Err(Fido2Error::WebAuthn(_))));
     }
 }

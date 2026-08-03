@@ -1,43 +1,20 @@
 //! FIDO2/WebAuthn configuration
-//!
-//! # DEPRECATED — Non-Conformant Implementation
-//!
-//! This configuration is part of a non-conformant FIDO2 implementation.
-//! Fields `rp_id` and `allowed_origins` are present for structural
-//! completeness and future migration but are **not currently enforced**
-//! during registration or authentication.  See `backend-065`.
-//!
-//! Migrate to [`webauthn-rs`](https://crates.io/crates/webauthn-rs) `0.5`.
 
 use super::credential::StoredCredential;
 use super::error::Result;
 
 /// `WebAuthn` relying party configuration.
-///
-/// # Warning
-///
-/// The fields `rp_id` and `allowed_origins` are stored in challenges and
-/// credentials but are **not validated** during the current implementation.
-/// This means origin binding and rpId binding are absent — a critical
-/// `WebAuthn` security property.  See `backend-065` and module-level docs.
 #[derive(Clone, Debug)]
 pub struct WebAuthnConfig {
-    /// Relying party ID (e.g., "example.com").
-    ///
-    /// TODO(backend-065): hash and compare against `authenticatorData.rpIdHash`
-    /// during registration and authentication to prevent cross-RP credential reuse.
+    /// Relying party ID (e.g., `"example.com"`). Hashed and compared against
+    /// `authenticatorData.rpIdHash` during registration and authentication.
     pub rp_id: String,
     /// Relying party name (e.g., "Shield Demo")
     pub rp_name: String,
-    /// Primary expected origin (e.g., `https://example.com`).
-    ///
-    /// Kept for API compatibility. Use `allowed_origins` for the full list.
-    /// TODO(backend-065): enforce during `clientDataJSON` parsing.
+    /// Primary expected origin (e.g., `"https://example.com"`).
     pub origin: String,
     /// All origins permitted to register/authenticate with this relying party.
-    ///
-    /// TODO(backend-065): validated by `validate_client_data` once that
-    /// function is wired into `verify_registration` and `verify_authentication`.
+    /// Validated against `clientDataJSON.origin` during every ceremony.
     pub allowed_origins: Vec<String>,
     /// Challenge timeout in milliseconds (default: 60000)
     pub timeout_ms: u32,
@@ -64,8 +41,6 @@ impl WebAuthnConfig {
     }
 
     /// Add an additional allowed origin.
-    ///
-    /// TODO(backend-065): used by `validate_client_data` once wired in.
     #[must_use]
     pub fn with_allowed_origin(mut self, origin: impl Into<String>) -> Self {
         self.allowed_origins.push(origin.into());

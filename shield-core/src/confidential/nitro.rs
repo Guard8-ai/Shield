@@ -777,7 +777,7 @@ impl NitroVsockClient {
     /// without requiring `unsafe` code. `socat` is available in standard
     /// Nitro Enclave base images.
     #[cfg(target_os = "linux")]
-    #[allow(clippy::unused_async)]
+    #[allow(unknown_lints, clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn send(&self, data: &[u8]) -> Result<Vec<u8>, AttestationError> {
         use std::io::Write;
         use std::process::{Command, Stdio};
@@ -827,7 +827,7 @@ impl NitroVsockClient {
 
     /// Send data and receive response via vsock (non-Linux).
     #[cfg(not(target_os = "linux"))]
-    #[allow(clippy::unused_async)]
+    #[allow(unknown_lints, clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn send(&self, _data: &[u8]) -> Result<Vec<u8>, AttestationError> {
         Err(AttestationError::NotInTEE(
             "vsock is only available on Linux".into(),
