@@ -35,7 +35,7 @@ final class VectorTests: XCTestCase {
                plaintextHex: "ffffffffffffffff",
                ciphertextHex: "13010000000000000000000000002600f6ea8805189d78b642c527f685aa4b668ab0cb6b41b4e84e5ee63fa0c1bd0fcc289caf88ca34ea69d5acc2b3e0559de0df4f5b65d52e67ecf23a757b42d7f0"),
         Vector(id: "v4-v2-001",
-               keyHex:       "abababababababababababababababababababababababababababababababababab",
+               keyHex:       "abababababababababababababababababababababababababababababababab",
                plaintextHex: "48656c6c6f2c20576f726c6421",
                ciphertextHex: "1301000000000000000000000000ed207ffc8bbeb03aa1c03f8a64bbd51f1c4a7dc3243a0797272b2a92281054cd5a19d9bb12eb13c672deb5804b4677e88bd1d40c487cf4a10b139b25fcdb0c78702a90e17ddb"),
         Vector(id: "v4-v2-002",
