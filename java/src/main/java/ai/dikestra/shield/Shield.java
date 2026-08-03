@@ -288,7 +288,14 @@ public class Shield {
                 // Replay protection
                 if (maxAgeMs != null) {
                     long nowMs = System.currentTimeMillis();
-                    long age = nowMs - timestampMs;
+                    // Saturating subtraction (like the Rust core): a hostile timestamp
+                    // near Long.MIN_VALUE must not overflow to a small/negative age.
+                    long age;
+                    try {
+                        age = Math.subtractExact(nowMs, timestampMs);
+                    } catch (ArithmeticException e) {
+                        age = Long.MAX_VALUE;
+                    }
 
                     // Reject if too far in future (>5s clock skew) or too old
                     if (timestampMs > nowMs + 5000 || age > maxAgeMs) {
@@ -376,12 +383,14 @@ public class Shield {
     }
 
     public static byte[] pbkdf2(String password, byte[] salt, int iterations, int keyLength) {
+        PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), salt, iterations, keyLength * 8);
         try {
-            PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), salt, iterations, keyLength * 8);
             SecretKeyFactory skf = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
             return skf.generateSecret(spec).getEncoded();
         } catch (Exception e) {
             throw new RuntimeException("PBKDF2 not available", e);
+        } finally {
+            spec.clearPassword();
         }
     }
 

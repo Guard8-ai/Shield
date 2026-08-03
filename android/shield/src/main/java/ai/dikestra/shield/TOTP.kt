@@ -296,8 +296,11 @@ class RecoveryCodes(
         get() = _codes.size - _used.size
 
     /**
-     * Get all recovery codes (for display to user).
+     * Get unused recovery codes (for display to user).
+     *
+     * Codes that have already been consumed by [verify] are excluded,
+     * matching the desktop Java/Kotlin implementations.
      */
     val codes: List<String>
-        get() = _codes.sorted()
+        get() = (_codes - _used).sorted()
 }

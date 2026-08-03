@@ -55,12 +55,13 @@ public final class SecureKeychain {
         // Delete any existing key first
         try? delete(for: alias)
 
+        // Note: kSecAttrAccessible and kSecAttrAccessControl are mutually exclusive.
+        // We set one or the other below, never both.
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
             kSecAttrAccount as String: alias,
-            kSecValueData as String: Data(key),
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            kSecValueData as String: Data(key)
         ]
 
         if let accessGroup = accessGroup {
@@ -68,13 +69,17 @@ public final class SecureKeychain {
         }
 
         if biometricProtection {
-            let access = SecAccessControlCreateWithFlags(
+            guard let access = SecAccessControlCreateWithFlags(
                 nil,
                 kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
                 .biometryCurrentSet,
                 nil
-            )
+            ) else {
+                throw ShieldError.keychainError(errSecParam)
+            }
             query[kSecAttrAccessControl as String] = access
+        } else {
+            query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         }
 
         let status = SecItemAdd(query as CFDictionary, nil)
@@ -151,6 +156,15 @@ public final class SecureKeychain {
 
     /// Create a Shield instance with a stored or new key.
     ///
+    /// On first call a random 16-byte salt is generated, the PBKDF2 key is derived
+    /// from `password + service + randomSalt`, and that key is stored in the Keychain
+    /// under `alias`.  On every subsequent call the same stored key is retrieved and
+    /// used directly — no re-derivation occurs, so the salt need not be persisted
+    /// separately.
+    ///
+    /// Important: do not delete the Keychain entry while ciphertexts derived from it
+    /// still exist — those ciphertexts will become permanently unreadable.
+    ///
     /// - Parameters:
     ///   - alias: Key identifier
     ///   - password: Password for key derivation (if creating new)
@@ -166,14 +180,16 @@ public final class SecureKeychain {
             return try Shield(key: existingKey)
         }
 
-        // Create new Shield and store its key
-        let shield = Shield(password: password, service: service)
+        // Generate a random 16-byte salt for this key's lifetime.
+        // The salt does not need to be stored separately — the derived key IS stored.
+        var randomSalt = [UInt8](repeating: 0, count: 16)
+        guard SecRandomCopyBytes(kSecRandomDefault, 16, &randomSalt) == errSecSuccess else {
+            throw ShieldError.randomGenerationFailed
+        }
 
-        // Derive key again for storage (we don't have direct access to Shield's key)
-        let key = deriveKey(password: password, service: service)
+        let key = deriveKey(password: password, service: service, salt: randomSalt)
         try store(key: key, for: alias)
-
-        return shield
+        return try Shield(key: key)
     }
 
     /// Store a Shield key with biometric protection.
@@ -188,14 +204,22 @@ public final class SecureKeychain {
         password: String,
         service: String
     ) throws {
-        let key = deriveKey(password: password, service: service)
+        var randomSalt = [UInt8](repeating: 0, count: 16)
+        guard SecRandomCopyBytes(kSecRandomDefault, 16, &randomSalt) == errSecSuccess else {
+            throw ShieldError.randomGenerationFailed
+        }
+        let key = deriveKey(password: password, service: service, salt: randomSalt)
         try store(key: key, for: alias, biometricProtection: true)
     }
 
     // MARK: - Private Methods
 
-    private func deriveKey(password: String, service: String) -> [UInt8] {
-        let salt = service.data(using: .utf8)!.sha256()
+    /// Derive a 32-byte key using PBKDF2-SHA256.
+    ///
+    /// The PBKDF2 input salt is `randomSalt + Array(service.utf8)` (random 16 bytes
+    /// prepended to the service bytes).  600 000 iterations, 32-byte output.
+    private func deriveKey(password: String, service: String, salt randomSalt: [UInt8]) -> [UInt8] {
+        let salt = randomSalt + Array(service.utf8)
         var derivedKey = [UInt8](repeating: 0, count: 32)
         let passwordData = password.data(using: .utf8)!
 
@@ -208,7 +232,7 @@ public final class SecureKeychain {
                     saltBytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
                     salt.count,
                     CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
-                    100_000,
+                    600_000,
                     &derivedKey,
                     32
                 )
@@ -219,14 +243,3 @@ public final class SecureKeychain {
     }
 }
 
-// MARK: - Data Extension
-
-private extension Data {
-    func sha256() -> [UInt8] {
-        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-        self.withUnsafeBytes { bytes in
-            _ = CC_SHA256(bytes.baseAddress, CC_LONG(self.count), &hash)
-        }
-        return hash
-    }
-}

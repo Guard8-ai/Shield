@@ -14,7 +14,7 @@
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](python/)
 [![JavaScript](https://img.shields.io/badge/JavaScript-ES6+-yellow.svg)](javascript/)
 [![Go](https://img.shields.io/badge/Go-1.19+-00ADD8.svg)](go/)
-[![Security](https://img.shields.io/badge/Security-Audited-green.svg)](SECURITY_AUDIT.md)
+[![Security](https://img.shields.io/badge/Security-Reviewed-yellow.svg)](SECURITY_AUDIT.md)
 [![Clippy](https://img.shields.io/badge/Clippy-0%20warnings-brightgreen.svg)](shield-core/)
 
 ```bash
@@ -257,7 +257,16 @@ shield keygen
 
 ## Interoperability
 
-All implementations produce **byte-identical output** across 13 platforms.
+All implementations produce **byte-identical output** for the base v4 AEAD format, PQ hybrid KEX, and channel session-key derivation across 13 platforms.
+
+Swift/iOS conformance is **execution-verified**: the CI workflow (`swift.yml`) runs 8+ deterministic v4 test vectors from `tests/v4_test_vectors.json` on a macOS runner via `swift test`, exercising both v1 and v2 format decryption. Any future AEAD regression will be caught within one PR.
+
+> **Scope note:** Byte-identical compatibility applies to: base v4 AEAD encryption/decryption,
+> PQ hybrid key exchange, and channel (ShieldChannel) session-key derivation.
+> Advanced modules — ratchet (RatchetSession), stream cipher (StreamCipher), group encryption,
+> and identity — are **NOT yet conformance-locked** across all bindings; the Rust reference
+> implementation uses HMAC-SHA256 internally while other bindings use raw SHA256, making them
+> non-interoperable for those modules. See [PROTOCOL.md §3.8](PROTOCOL.md) for details.
 
 Encrypt in Python:
 ```python

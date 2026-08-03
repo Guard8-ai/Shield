@@ -48,14 +48,24 @@ def get_password(prompt: str = "Password: ", confirm: bool = False) -> str:
     return password
 
 
+def _create_private_file(path: str) -> None:
+    """Pre-create an output file with 0o600 permissions before writing."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.close(fd)
+
+
 def cmd_encrypt(args: argparse.Namespace) -> int:
     """Encrypt a file."""
     if not os.path.exists(args.file):
         print(f"Error: File not found: {args.file}", file=sys.stderr)
         return 1
 
-    password = args.password or get_password(confirm=True)
+    # Passwords are never read from argv to avoid leaking via /proc/cmdline or ps.
+    password = get_password(confirm=True)
     output = args.output or args.file + ".enc"
+
+    # Pre-create output with restricted permissions before writing any data.
+    _create_private_file(output)
 
     # Use file path as salt for deterministic key derivation
     salt = os.path.basename(args.file).encode()
@@ -76,7 +86,8 @@ def cmd_decrypt(args: argparse.Namespace) -> int:
         print(f"Error: File not found: {args.file}", file=sys.stderr)
         return 1
 
-    password = args.password or get_password()
+    # Passwords are never read from argv to avoid leaking via /proc/cmdline or ps.
+    password = get_password()
 
     # Determine output filename
     if args.output:
@@ -85,6 +96,9 @@ def cmd_decrypt(args: argparse.Namespace) -> int:
         output = args.file[:-4]
     else:
         output = args.file + ".dec"
+
+    # Pre-create output with restricted permissions before writing any data.
+    _create_private_file(output)
 
     # Use original filename (without .enc) as salt
     original_name = os.path.basename(output)
@@ -136,7 +150,8 @@ def cmd_totp_setup(args: argparse.Namespace) -> int:
 def cmd_totp_code(args: argparse.Namespace) -> int:
     """Generate TOTP code from secret."""
     try:
-        secret = TOTP.secret_from_base32(args.secret)
+        secret_b32 = getpass.getpass("TOTP secret (Base32): ")
+        secret = TOTP.secret_from_base32(secret_b32)
         totp = TOTP(secret)
         print(totp.generate())
         return 0
@@ -162,13 +177,14 @@ def main(argv: Optional[list] = None) -> int:
     encrypt_parser = subparsers.add_parser("encrypt", help="Encrypt a file")
     encrypt_parser.add_argument("file", help="File to encrypt")
     encrypt_parser.add_argument("-o", "--output", help="Output file")
-    encrypt_parser.add_argument("-p", "--password", help="Password (insecure, prefer prompt)")
+    # NOTE: -p/--password intentionally omitted — passwords must come from
+    # the interactive prompt (getpass) to avoid exposure via /proc/cmdline or ps.
 
     # decrypt command
     decrypt_parser = subparsers.add_parser("decrypt", help="Decrypt a file")
     decrypt_parser.add_argument("file", help="File to decrypt")
     decrypt_parser.add_argument("-o", "--output", help="Output file")
-    decrypt_parser.add_argument("-p", "--password", help="Password (insecure, prefer prompt)")
+    # NOTE: -p/--password intentionally omitted — see encrypt command.
 
     # keygen command
     keygen_parser = subparsers.add_parser("keygen", help="Generate random key")
@@ -181,7 +197,7 @@ def main(argv: Optional[list] = None) -> int:
 
     # totp-code command
     totp_code_parser = subparsers.add_parser("totp-code", help="Generate TOTP code")
-    totp_code_parser.add_argument("secret", help="Base32 secret")
+    # NOTE: secret is prompted interactively via getpass to avoid exposure in ps/logs.
 
     args = parser.parse_args(argv)
 

@@ -25,6 +25,7 @@ Example:
 
 import hmac
 import hashlib
+import socket
 import struct
 import secrets
 from typing import Optional, BinaryIO, Union
@@ -42,6 +43,45 @@ MAX_MESSAGE_SIZE = 16 * 1024 * 1024  # 16 MB
 HANDSHAKE_CLIENT_HELLO = 1
 HANDSHAKE_SERVER_HELLO = 2
 HANDSHAKE_FINISHED = 3
+
+
+def _find_socket(stream) -> Optional[socket.socket]:
+    """Return the underlying socket for a stream, or None if not applicable."""
+    # socket.makefile() wraps produce a SocketIO whose underlying socket is
+    # accessible via .raw._sock or through the fileno().
+    raw = getattr(stream, "raw", None)
+    if raw is not None:
+        underlying = getattr(raw, "_sock", None)
+        if isinstance(underlying, socket.socket):
+            return underlying
+    # Direct socket passed in (e.g. conn.makefile returns a SocketIO)
+    underlying = getattr(stream, "_sock", None)
+    if isinstance(underlying, socket.socket):
+        return underlying
+    return None
+
+
+class _HandshakeTimeout:
+    """Context manager applying handshake_timeout_ms to the underlying socket."""
+
+    def __init__(self, stream, timeout_ms: int):
+        self._sock = _find_socket(stream)
+        self._timeout_s = timeout_ms / 1000.0
+        self._prev_timeout = None
+
+    def __enter__(self):
+        if self._sock is not None:
+            self._prev_timeout = self._sock.gettimeout()
+            self._sock.settimeout(self._timeout_s)
+        return self
+
+    def __exit__(self, *args):
+        if self._sock is not None and self._prev_timeout is not None:
+            self._sock.settimeout(self._prev_timeout)
+
+
+class ChannelError(Exception):
+    """Raised when a channel message fails authentication or is out of order."""
 
 
 @dataclass
@@ -92,36 +132,37 @@ class ShieldChannel:
         Returns:
             Connected ShieldChannel
         """
-        # Step 1: Generate client salt and send ClientHello
-        client_salt = secrets.token_bytes(16)
-        cls._send_handshake(stream, HANDSHAKE_CLIENT_HELLO, client_salt)
+        with _HandshakeTimeout(stream, config.handshake_timeout_ms):
+            # Step 1: Generate client salt and send ClientHello
+            client_salt = secrets.token_bytes(16)
+            cls._send_handshake(stream, HANDSHAKE_CLIENT_HELLO, client_salt)
 
-        # Step 2: Receive ServerHello (server's salt + contribution)
-        server_hello = cls._recv_handshake(stream, HANDSHAKE_SERVER_HELLO)
-        if len(server_hello) != 48:
-            raise ValueError("Invalid ServerHello")
+            # Step 2: Receive ServerHello (server's salt + contribution)
+            server_hello = cls._recv_handshake(stream, HANDSHAKE_SERVER_HELLO)
+            if len(server_hello) != 48:
+                raise ValueError("Invalid ServerHello")
 
-        # Extract final salt and server contribution
-        final_salt = server_hello[:16]
-        server_contribution = server_hello[16:48]
+            # Extract final salt and server contribution
+            final_salt = server_hello[:16]
+            server_contribution = server_hello[16:48]
 
-        # Step 3: Derive our contribution and send it
-        client_contribution = PAKEExchange.derive(
-            config.password, final_salt, "client", config.iterations
-        )
-        cls._send_handshake(stream, HANDSHAKE_FINISHED, client_contribution)
+            # Step 3: Derive our contribution and send it
+            client_contribution = PAKEExchange.derive(
+                config.password, final_salt, "client", config.iterations
+            )
+            cls._send_handshake(stream, HANDSHAKE_FINISHED, client_contribution)
 
-        # Compute session key
-        session_key = cls._compute_session_key(
-            config, final_salt, client_contribution, server_contribution
-        )
+            # Compute session key
+            session_key = cls._compute_session_key(
+                config, final_salt, client_contribution, server_contribution
+            )
 
-        # Create ratchet session (client is initiator)
-        session = RatchetSession(session_key, is_initiator=True)
+            # Create ratchet session (client is initiator)
+            session = RatchetSession(session_key, is_initiator=True)
 
-        # Exchange confirmation messages
-        cls._send_confirmation(stream, session_key, is_client=True)
-        cls._verify_confirmation(stream, session_key, expect_client=False)
+            # Exchange confirmation messages
+            cls._send_confirmation(stream, session_key, is_client=True)
+            cls._verify_confirmation(stream, session_key, expect_client=False)
 
         return cls(stream, session, config.service)
 
@@ -139,42 +180,43 @@ class ShieldChannel:
         Returns:
             Connected ShieldChannel
         """
-        # Step 1: Receive ClientHello (client's proposed salt)
-        client_hello = cls._recv_handshake(stream, HANDSHAKE_CLIENT_HELLO)
-        if len(client_hello) != 16:
-            raise ValueError("Invalid ClientHello")
+        with _HandshakeTimeout(stream, config.handshake_timeout_ms):
+            # Step 1: Receive ClientHello (client's proposed salt)
+            client_hello = cls._recv_handshake(stream, HANDSHAKE_CLIENT_HELLO)
+            if len(client_hello) != 16:
+                raise ValueError("Invalid ClientHello")
 
-        # Mix client salt with server salt for freshness
-        server_salt = secrets.token_bytes(16)
-        final_salt = bytes(a ^ b for a, b in zip(server_salt, client_hello))
+            # Mix client salt with server salt for freshness
+            server_salt = secrets.token_bytes(16)
+            final_salt = bytes(a ^ b for a, b in zip(server_salt, client_hello))
 
-        # Derive server contribution
-        server_contribution = PAKEExchange.derive(
-            config.password, final_salt, "server", config.iterations
-        )
+            # Derive server contribution
+            server_contribution = PAKEExchange.derive(
+                config.password, final_salt, "server", config.iterations
+            )
 
-        # Step 2: Send ServerHello (final salt + server contribution)
-        server_hello = final_salt + server_contribution
-        cls._send_handshake(stream, HANDSHAKE_SERVER_HELLO, server_hello)
+            # Step 2: Send ServerHello (final salt + server contribution)
+            server_hello = final_salt + server_contribution
+            cls._send_handshake(stream, HANDSHAKE_SERVER_HELLO, server_hello)
 
-        # Step 3: Receive client contribution
-        client_finished = cls._recv_handshake(stream, HANDSHAKE_FINISHED)
-        if len(client_finished) != 32:
-            raise ValueError("Invalid Finished")
+            # Step 3: Receive client contribution
+            client_finished = cls._recv_handshake(stream, HANDSHAKE_FINISHED)
+            if len(client_finished) != 32:
+                raise ValueError("Invalid Finished")
 
-        client_contribution = client_finished
+            client_contribution = client_finished
 
-        # Compute session key
-        session_key = cls._compute_session_key(
-            config, final_salt, server_contribution, client_contribution
-        )
+            # Compute session key
+            session_key = cls._compute_session_key(
+                config, final_salt, server_contribution, client_contribution
+            )
 
-        # Create ratchet session (server is not initiator)
-        session = RatchetSession(session_key, is_initiator=False)
+            # Create ratchet session (server is not initiator)
+            session = RatchetSession(session_key, is_initiator=False)
 
-        # Exchange confirmation messages
-        cls._verify_confirmation(stream, session_key, expect_client=True)
-        cls._send_confirmation(stream, session_key, is_client=False)
+            # Exchange confirmation messages
+            cls._verify_confirmation(stream, session_key, expect_client=True)
+            cls._send_confirmation(stream, session_key, is_client=False)
 
         return cls(stream, session, config.service)
 
@@ -195,9 +237,15 @@ class ShieldChannel:
         Receive and decrypt message.
 
         Verifies authentication and advances receive ratchet.
+
+        Raises:
+            ChannelError: If the message fails authentication or is out of order.
         """
         encrypted = self._read_frame()
-        return self._session.decrypt(encrypted)
+        plaintext = self._session.decrypt(encrypted)
+        if plaintext is None:
+            raise ChannelError("Message authentication failed or out of order")
+        return plaintext
 
     @property
     def service(self) -> str:

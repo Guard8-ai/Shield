@@ -94,6 +94,14 @@ class ShieldChannel {
      * @returns {Promise<ShieldChannel>}
      */
     static async connect(stream, config) {
+        return ShieldChannel._withHandshakeTimeout(
+            ShieldChannel._connect(stream, config),
+            stream,
+            config.handshakeTimeoutMs
+        );
+    }
+
+    static async _connect(stream, config) {
         const channel = new ShieldChannel(stream, null, config.service);
 
         // Step 1: Generate client salt and send ClientHello
@@ -137,6 +145,14 @@ class ShieldChannel {
      * @returns {Promise<ShieldChannel>}
      */
     static async accept(stream, config) {
+        return ShieldChannel._withHandshakeTimeout(
+            ShieldChannel._accept(stream, config),
+            stream,
+            config.handshakeTimeoutMs
+        );
+    }
+
+    static async _accept(stream, config) {
         const channel = new ShieldChannel(stream, null, config.service);
 
         // Step 1: Receive ClientHello
@@ -237,6 +253,32 @@ class ShieldChannel {
     }
 
     // --- Internal helpers ---
+
+    /**
+     * Race a handshake against the configured timeout. On timeout the
+     * underlying socket is destroyed so a stalled/slowloris peer cannot
+     * hold the pre-authentication connection (and its resources) open
+     * indefinitely.
+     */
+    static _withHandshakeTimeout(handshakePromise, stream, timeoutMs) {
+        if (!timeoutMs || timeoutMs <= 0) {
+            return handshakePromise;
+        }
+        let timer;
+        const timeout = new Promise((resolve, reject) => {
+            timer = setTimeout(() => {
+                const err = new Error(`Handshake timed out after ${timeoutMs}ms`);
+                stream.destroy(err);
+                reject(err);
+            }, timeoutMs);
+            if (typeof timer.unref === 'function') {
+                timer.unref();
+            }
+        });
+        return Promise.race([handshakePromise, timeout]).finally(() => {
+            clearTimeout(timer);
+        });
+    }
 
     _computeSessionKey(config, salt, localContribution, remoteContribution) {
         const baseKey = PAKEExchange.combine(localContribution, remoteContribution);
@@ -341,24 +383,44 @@ class ShieldChannel {
 
     async _readBytes(count) {
         return new Promise((resolve, reject) => {
-            const tryRead = () => {
+            // Fast path: already buffered.
+            if (this._readBuffer.length >= count) {
+                const result = this._readBuffer.slice(0, count);
+                this._readBuffer = this._readBuffer.slice(count);
+                resolve(result);
+                return;
+            }
+
+            // Register each handler exactly ONCE and remove all of them when
+            // the promise settles. The previous implementation re-registered
+            // once('error')/once('close') on every data chunk, leaking
+            // listeners (MaxListenersExceededWarning) on long-lived sockets.
+            const onData = (chunk) => {
+                this._readBuffer = Buffer.concat([this._readBuffer, chunk]);
                 if (this._readBuffer.length >= count) {
                     const result = this._readBuffer.slice(0, count);
                     this._readBuffer = this._readBuffer.slice(count);
+                    cleanup();
                     resolve(result);
-                    return;
                 }
-
-                this._stream.once('data', (chunk) => {
-                    this._readBuffer = Buffer.concat([this._readBuffer, chunk]);
-                    tryRead();
-                });
-
-                this._stream.once('error', reject);
-                this._stream.once('close', () => reject(new Error('Connection closed')));
+            };
+            const onError = (err) => {
+                cleanup();
+                reject(err);
+            };
+            const onClose = () => {
+                cleanup();
+                reject(new Error('Connection closed'));
+            };
+            const cleanup = () => {
+                this._stream.removeListener('data', onData);
+                this._stream.removeListener('error', onError);
+                this._stream.removeListener('close', onClose);
             };
 
-            tryRead();
+            this._stream.on('data', onData);
+            this._stream.on('error', onError);
+            this._stream.on('close', onClose);
         });
     }
 }

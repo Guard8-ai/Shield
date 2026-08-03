@@ -387,10 +387,11 @@ void test_lamport_signature(void) {
     size_t msg_len = strlen(message);
 
     uint8_t signature[256 * 32];
-    assert(shield_lamport_sign(&lamport, (const uint8_t *)message, msg_len, signature) == SHIELD_OK);
+    assert(shield_lamport_sign(&lamport, (const uint8_t *)message, msg_len, signature, sizeof(signature)) == SHIELD_OK);
 
-    assert(shield_lamport_verify((const uint8_t *)message, msg_len, signature,
-                                  shield_lamport_public_key(&lamport)));
+    assert(shield_lamport_verify((const uint8_t *)message, msg_len, signature, sizeof(signature),
+                                  shield_lamport_public_key(&lamport),
+                                  SHIELD_LAMPORT_PUBLIC_KEY_SIZE));
 
     shield_lamport_free(&lamport);
 
@@ -404,11 +405,11 @@ void test_lamport_one_time_use(void) {
     shield_lamport_generate(&lamport);
 
     uint8_t signature[256 * 32];
-    shield_lamport_sign(&lamport, (const uint8_t *)"first", 5, signature);
+    shield_lamport_sign(&lamport, (const uint8_t *)"first", 5, signature, sizeof(signature));
 
     assert(shield_lamport_is_used(&lamport));
 
-    shield_error_t err = shield_lamport_sign(&lamport, (const uint8_t *)"second", 6, signature);
+    shield_error_t err = shield_lamport_sign(&lamport, (const uint8_t *)"second", 6, signature, sizeof(signature));
     assert(err == SHIELD_ERR_LAMPORT_KEY_USED);
 
     shield_lamport_free(&lamport);

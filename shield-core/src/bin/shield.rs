@@ -377,6 +377,7 @@ fn cmd_text(args: &[String]) -> ExitCode {
 }
 
 fn cmd_keygen(args: &[String]) -> ExitCode {
+    const MAX_KEYGEN_LENGTH: usize = 1024;
     let mut length = 32usize;
 
     let mut i = 0;
@@ -391,6 +392,13 @@ fn cmd_keygen(args: &[String]) -> ExitCode {
             _ => {}
         }
         i += 1;
+    }
+
+    if length == 0 || length > MAX_KEYGEN_LENGTH {
+        eprintln!(
+            "Error: Key length must be between 1 and {MAX_KEYGEN_LENGTH} bytes (got {length})"
+        );
+        return ExitCode::FAILURE;
     }
 
     let mut key = vec![0u8; length];
@@ -538,6 +546,31 @@ fn encrypt_file(
     Ok(())
 }
 
+/// Write data to a file with restrictive permissions (0o600 on Unix).
+///
+/// On Unix, creates the file with owner-read/write only permissions so that
+/// decrypted output is not world-readable. On non-Unix platforms falls back
+/// to a regular write.
+fn write_private(path: &str, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        std::io::Write::write_all(&mut file, data)?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, data)?;
+        Ok(())
+    }
+}
+
 fn decrypt_file(
     shield: &Shield,
     input: &str,
@@ -545,6 +578,6 @@ fn decrypt_file(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let data = fs::read(input)?;
     let decrypted = shield.decrypt(&data)?;
-    fs::write(output, decrypted)?;
+    write_private(output, &decrypted)?;
     Ok(())
 }

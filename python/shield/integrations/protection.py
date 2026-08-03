@@ -80,7 +80,7 @@ class RateLimiter:
         window: int = 60,
         storage: Optional[Dict[str, bytes]] = None,
     ):
-        self.shield = Shield(password, service)
+        self.shield = Shield(password, service, max_age_ms=None)
         self.max_requests = max_requests
         self.window = window
         self.storage = storage if storage is not None else {}
@@ -207,7 +207,7 @@ class TokenBucket:
         refill_rate: float = 1.0,
         storage: Optional[Dict[str, bytes]] = None,
     ):
-        self.shield = Shield(password, service)
+        self.shield = Shield(password, service, max_age_ms=None)
         self.capacity = capacity
         self.refill_rate = refill_rate
         self.storage = storage if storage is not None else {}
@@ -319,7 +319,7 @@ class APIProtector:
         headers: Dict[str, str] = field(default_factory=dict)
 
     def __init__(self, password: str, service: str):
-        self.shield = Shield(password, service)
+        self.shield = Shield(password, service, max_age_ms=None)
         self.password = password
         self.service = service
         self.rate_limiter: Optional[RateLimiter] = None

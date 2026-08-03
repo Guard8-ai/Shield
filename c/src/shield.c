@@ -11,7 +11,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <wincrypt.h>
+#include <bcrypt.h>
 #else
 #include <fcntl.h>
 #include <unistd.h>
@@ -217,6 +217,13 @@ void shield_pbkdf2(const char *password, const uint8_t *salt, size_t salt_len, i
     size_t i, j, k;
 
     salt_ext = (uint8_t *)malloc(salt_len + 4);
+    if (!salt_ext) {
+        /* shield_pbkdf2 returns void: a silent return would hand the caller an
+         * uninitialized buffer as a "key". Fail closed instead, matching the
+         * CSPRNG-failure policy in shield_init. */
+        fprintf(stderr, "shield_pbkdf2: allocation failure; aborting (fail-closed)\n");
+        abort();
+    }
     memcpy(salt_ext, salt, salt_len);
 
     for (i = 0; i < blocks; i++) {
@@ -264,15 +271,12 @@ void shield_secure_wipe(void *ptr, size_t len) {
 
 shield_error_t shield_random_bytes(uint8_t *buf, size_t len) {
 #ifdef _WIN32
-    HCRYPTPROV hProv;
-    if (!CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
+    /* CNG system-preferred RNG. Replaces the deprecated CryptoAPI
+     * CryptGenRandom; bcrypt is already linked for the AEAD backend. */
+    if (!BCRYPT_SUCCESS(BCryptGenRandom(NULL, buf, (ULONG)len,
+                                        BCRYPT_USE_SYSTEM_PREFERRED_RNG))) {
         return SHIELD_ERR_RANDOM_FAILED;
     }
-    if (!CryptGenRandom(hProv, (DWORD)len, buf)) {
-        CryptReleaseContext(hProv, 0);
-        return SHIELD_ERR_RANDOM_FAILED;
-    }
-    CryptReleaseContext(hProv, 0);
 #else
     int fd = open("/dev/urandom", O_RDONLY);
     if (fd < 0) {
@@ -784,13 +788,26 @@ uint8_t *shield_ratchet_encrypt(shield_ratchet_t *ctx, const uint8_t *plaintext,
         return NULL;
     }
 
-    keystream = (uint8_t *)malloc(plaintext_len);
+    keystream = (uint8_t *)malloc(plaintext_len ? plaintext_len : 1);
+    if (!keystream) {
+        shield_secure_wipe(message_key, SHIELD_KEY_SIZE);
+        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
+        return NULL;
+    }
     generate_keystream(message_key, nonce, plaintext_len, keystream);
 
-    ciphertext = (uint8_t *)malloc(plaintext_len);
+    ciphertext = (uint8_t *)malloc(plaintext_len ? plaintext_len : 1);
+    if (!ciphertext) {
+        shield_secure_wipe(keystream, plaintext_len);
+        free(keystream);
+        shield_secure_wipe(message_key, SHIELD_KEY_SIZE);
+        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
+        return NULL;
+    }
     for (i = 0; i < plaintext_len; i++) {
         ciphertext[i] = plaintext[i] ^ keystream[i];
     }
+    shield_secure_wipe(keystream, plaintext_len);
     free(keystream);
 
     /* Counter */
@@ -800,6 +817,12 @@ uint8_t *shield_ratchet_encrypt(shield_ratchet_t *ctx, const uint8_t *plaintext,
 
     /* MAC over counter || nonce || ciphertext */
     uint8_t *mac_data = (uint8_t *)malloc(8 + SHIELD_NONCE_SIZE + plaintext_len);
+    if (!mac_data) {
+        free(ciphertext);
+        shield_secure_wipe(message_key, SHIELD_KEY_SIZE);
+        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
+        return NULL;
+    }
     memcpy(mac_data, counter_bytes, 8);
     memcpy(mac_data + 8, nonce, SHIELD_NONCE_SIZE);
     memcpy(mac_data + 8 + SHIELD_NONCE_SIZE, ciphertext, plaintext_len);
@@ -813,6 +836,12 @@ uint8_t *shield_ratchet_encrypt(shield_ratchet_t *ctx, const uint8_t *plaintext,
     /* Format: counter(8) || nonce(16) || ciphertext || mac(16) */
     result_len = 8 + SHIELD_NONCE_SIZE + plaintext_len + SHIELD_MAC_SIZE;
     result = (uint8_t *)malloc(result_len);
+    if (!result) {
+        free(ciphertext);
+        shield_secure_wipe(message_key, SHIELD_KEY_SIZE);
+        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
+        return NULL;
+    }
     memcpy(result, counter_bytes, 8);
     memcpy(result + 8, nonce, SHIELD_NONCE_SIZE);
     memcpy(result + 8 + SHIELD_NONCE_SIZE, ciphertext, plaintext_len);
@@ -866,6 +895,11 @@ uint8_t *shield_ratchet_decrypt(shield_ratchet_t *ctx, const uint8_t *encrypted,
 
     /* Verify MAC */
     uint8_t *mac_data = (uint8_t *)malloc(8 + SHIELD_NONCE_SIZE + ciphertext_len);
+    if (!mac_data) {
+        shield_secure_wipe(message_key, SHIELD_KEY_SIZE);
+        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
+        return NULL;
+    }
     memcpy(mac_data, encrypted, 8);
     memcpy(mac_data + 8, nonce, SHIELD_NONCE_SIZE);
     memcpy(mac_data + 8 + SHIELD_NONCE_SIZE, ciphertext, ciphertext_len);
@@ -879,13 +913,26 @@ uint8_t *shield_ratchet_decrypt(shield_ratchet_t *ctx, const uint8_t *encrypted,
     }
 
     /* Decrypt */
-    keystream = (uint8_t *)malloc(ciphertext_len);
+    keystream = (uint8_t *)malloc(ciphertext_len ? ciphertext_len : 1);
+    if (!keystream) {
+        shield_secure_wipe(message_key, SHIELD_KEY_SIZE);
+        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
+        return NULL;
+    }
     generate_keystream(message_key, nonce, ciphertext_len, keystream);
 
-    plaintext = (uint8_t *)malloc(ciphertext_len);
+    plaintext = (uint8_t *)malloc(ciphertext_len ? ciphertext_len : 1);
+    if (!plaintext) {
+        shield_secure_wipe(keystream, ciphertext_len);
+        free(keystream);
+        shield_secure_wipe(message_key, SHIELD_KEY_SIZE);
+        if (err) *err = SHIELD_ERR_ALLOC_FAILED;
+        return NULL;
+    }
     for (i = 0; i < ciphertext_len; i++) {
         plaintext[i] = ciphertext[i] ^ keystream[i];
     }
+    shield_secure_wipe(keystream, ciphertext_len);
     free(keystream);
 
     /* Ratchet */
@@ -915,11 +962,17 @@ void shield_ratchet_wipe(shield_ratchet_t *ctx) {
 /* ============== TOTP Functions ============== */
 
 void shield_totp_init(shield_totp_t *ctx, const uint8_t *secret, size_t secret_len, int digits, int interval) {
-    ctx->secret = (uint8_t *)malloc(secret_len);
-    memcpy(ctx->secret, secret, secret_len);
-    ctx->secret_len = secret_len;
     ctx->digits = digits > 0 ? digits : 6;
     ctx->interval = interval > 0 ? interval : 30;
+    ctx->secret = (uint8_t *)malloc(secret_len ? secret_len : 1);
+    if (!ctx->secret) {
+        /* Fail closed: an inert context (generate emits "", verify returns
+         * false) instead of the previous NULL-deref crash in memcpy. */
+        ctx->secret_len = 0;
+        return;
+    }
+    memcpy(ctx->secret, secret, secret_len);
+    ctx->secret_len = secret_len;
 }
 
 shield_error_t shield_totp_generate_secret(uint8_t *secret, size_t secret_len) {
@@ -933,7 +986,7 @@ static inline uint32_t rotl32(uint32_t x, int n) {
     return (x << n) | (x >> (32 - n));
 }
 
-static void sha1_hash(const uint8_t *data, size_t len, uint8_t *hash) {
+static int sha1_hash(const uint8_t *data, size_t len, uint8_t *hash) {
     uint32_t h[5] = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
     uint8_t *padded;
     size_t padded_len;
@@ -941,6 +994,9 @@ static void sha1_hash(const uint8_t *data, size_t len, uint8_t *hash) {
 
     padded_len = ((len + 8) / 64 + 1) * 64;
     padded = (uint8_t *)calloc(padded_len, 1);
+    if (!padded) {
+        return -1;
+    }
     memcpy(padded, data, len);
     padded[len] = 0x80;
     uint64_t bits = len * 8;
@@ -982,16 +1038,19 @@ static void sha1_hash(const uint8_t *data, size_t len, uint8_t *hash) {
     }
 
     free(padded);
+    return 0;
 }
 
-static void hmac_sha1(const uint8_t *key, size_t key_len, const uint8_t *data, size_t data_len, uint8_t *mac) {
+static int hmac_sha1(const uint8_t *key, size_t key_len, const uint8_t *data, size_t data_len, uint8_t *mac) {
     uint8_t k_ipad[64], k_opad[64];
     uint8_t tk[20];
     uint8_t *tmp;
     size_t i;
 
     if (key_len > 64) {
-        sha1_hash(key, key_len, tk);
+        if (sha1_hash(key, key_len, tk) != 0) {
+            return -1;
+        }
         key = tk;
         key_len = 20;
     }
@@ -1005,16 +1064,29 @@ static void hmac_sha1(const uint8_t *key, size_t key_len, const uint8_t *data, s
     }
 
     tmp = (uint8_t *)malloc(64 + data_len);
+    if (!tmp) {
+        return -1;
+    }
     memcpy(tmp, k_ipad, 64);
     memcpy(tmp + 64, data, data_len);
-    sha1_hash(tmp, 64 + data_len, mac);
+    if (sha1_hash(tmp, 64 + data_len, mac) != 0) {
+        free(tmp);
+        return -1;
+    }
     free(tmp);
 
     tmp = (uint8_t *)malloc(64 + 20);
+    if (!tmp) {
+        return -1;
+    }
     memcpy(tmp, k_opad, 64);
     memcpy(tmp + 64, mac, 20);
-    sha1_hash(tmp, 64 + 20, mac);
+    if (sha1_hash(tmp, 64 + 20, mac) != 0) {
+        free(tmp);
+        return -1;
+    }
     free(tmp);
+    return 0;
 }
 
 void shield_totp_generate(const shield_totp_t *ctx, int64_t timestamp, char *code, size_t code_len) {
@@ -1025,6 +1097,14 @@ void shield_totp_generate(const shield_totp_t *ctx, int64_t timestamp, char *cod
     int64_t counter;
     int i;
 
+    if (code_len == 0) {
+        return;
+    }
+    if (!ctx->secret) {
+        /* Context init failed (fail-closed); emit an empty code. */
+        code[0] = '\0';
+        return;
+    }
     if (timestamp == 0) {
         timestamp = (int64_t)time(NULL);
     }
@@ -1035,7 +1115,12 @@ void shield_totp_generate(const shield_totp_t *ctx, int64_t timestamp, char *cod
         counter >>= 8;
     }
 
-    hmac_sha1(ctx->secret, ctx->secret_len, counter_bytes, 8, hash);
+    if (hmac_sha1(ctx->secret, ctx->secret_len, counter_bytes, 8, hash) != 0) {
+        /* Allocation failure inside HMAC-SHA1: fail closed with an empty code
+         * rather than deriving one from an uninitialized hash. */
+        code[0] = '\0';
+        return;
+    }
 
     int offset = hash[19] & 0x0f;
     truncated = ((uint32_t)(hash[offset] & 0x7f) << 24) |
@@ -1051,10 +1136,31 @@ void shield_totp_generate(const shield_totp_t *ctx, int64_t timestamp, char *cod
     snprintf(code, code_len, "%0*u", ctx->digits, truncated % modulo);
 }
 
+/* Constant-time comparison of a user-supplied code against a generated one.
+ * Both are compared as fixed 16-byte zero-padded buffers, so no per-position
+ * timing oracle exists (strcmp short-circuits on the first differing byte,
+ * which reduced a 6-digit code search well below 10^6 attempts). An empty
+ * generated code (fail-closed paths above) can never match a non-empty code. */
+static bool totp_code_equal(const char *code, const char *generated) {
+    uint8_t a[16] = {0};
+    uint8_t b[16] = {0};
+    size_t code_len = strlen(code);
+    size_t gen_len = strlen(generated);
+    if (code_len >= sizeof(a) || gen_len >= sizeof(b)) {
+        return false;
+    }
+    memcpy(a, code, code_len);
+    memcpy(b, generated, gen_len);
+    return shield_secure_compare(a, b, sizeof(a)) != 0;
+}
+
 bool shield_totp_verify(const shield_totp_t *ctx, const char *code, int64_t timestamp, int window) {
     char generated[16];
     int i;
 
+    if (!code || !ctx->secret || strlen(code) != (size_t)ctx->digits) {
+        return false;
+    }
     if (timestamp == 0) {
         timestamp = (int64_t)time(NULL);
     }
@@ -1064,12 +1170,12 @@ bool shield_totp_verify(const shield_totp_t *ctx, const char *code, int64_t time
 
     for (i = 0; i <= window; i++) {
         shield_totp_generate(ctx, timestamp - i * ctx->interval, generated, sizeof(generated));
-        if (strcmp(generated, code) == 0) {
+        if (totp_code_equal(code, generated)) {
             return true;
         }
         if (i > 0) {
             shield_totp_generate(ctx, timestamp + i * ctx->interval, generated, sizeof(generated));
-            if (strcmp(generated, code) == 0) {
+            if (totp_code_equal(code, generated)) {
                 return true;
             }
         }
@@ -1129,6 +1235,13 @@ void shield_signature_sign_timestamped(const shield_signature_t *ctx, const uint
     }
 
     sig_data = (uint8_t *)malloc(8 + message_len);
+    if (!sig_data) {
+        /* Void return: fail closed with an all-zero signature (which can only
+         * verify if the keyed HMAC of the message is 0^32) instead of a
+         * NULL-deref crash. */
+        memset(signature, 0, 40);
+        return;
+    }
     memcpy(sig_data, signature, 8);
     memcpy(sig_data + 8, message, message_len);
 
@@ -1160,6 +1273,9 @@ bool shield_signature_verify(const shield_signature_t *ctx, const uint8_t *messa
         }
 
         uint8_t *sig_data = (uint8_t *)malloc(8 + message_len);
+        if (!sig_data) {
+            return false;
+        }
         memcpy(sig_data, signature, 8);
         memcpy(sig_data + 8, message, message_len);
         shield_hmac_sha256(ctx->signing_key, SHIELD_KEY_SIZE, sig_data, 8 + message_len, expected);
@@ -1214,10 +1330,15 @@ shield_error_t shield_lamport_generate(shield_lamport_t *ctx) {
     return SHIELD_OK;
 }
 
-shield_error_t shield_lamport_sign(shield_lamport_t *ctx, const uint8_t *message, size_t message_len, uint8_t *signature) {
+shield_error_t shield_lamport_sign(shield_lamport_t *ctx, const uint8_t *message, size_t message_len, uint8_t *signature, size_t signature_len) {
     uint8_t msg_hash[32];
     int i;
 
+    /* Reject wrong-size buffers before consuming the one-time key: the
+     * previous signature wrote 8192 bytes into an unchecked pointer. */
+    if (!signature || signature_len != SHIELD_LAMPORT_SIGNATURE_SIZE) {
+        return SHIELD_ERR_INVALID_SIGNATURE;
+    }
     if (ctx->used) {
         return SHIELD_ERR_LAMPORT_KEY_USED;
     }
@@ -1236,10 +1357,19 @@ shield_error_t shield_lamport_sign(shield_lamport_t *ctx, const uint8_t *message
     return SHIELD_OK;
 }
 
-bool shield_lamport_verify(const uint8_t *message, size_t message_len, const uint8_t *signature, const uint8_t *public_key) {
+bool shield_lamport_verify(const uint8_t *message, size_t message_len, const uint8_t *signature, size_t signature_len, const uint8_t *public_key, size_t public_key_len) {
     uint8_t msg_hash[32];
     uint8_t hashed[32];
     int i;
+
+    /* The loop below reads signature[0..8191] and public_key[0..16383]; the
+     * previous signature had no way to check either bound, so an
+     * attacker-supplied short signature caused an out-of-bounds read. */
+    if (!signature || !public_key ||
+        signature_len != SHIELD_LAMPORT_SIGNATURE_SIZE ||
+        public_key_len != SHIELD_LAMPORT_PUBLIC_KEY_SIZE) {
+        return false;
+    }
 
     shield_sha256(message, message_len, msg_hash);
 
@@ -1303,6 +1433,9 @@ shield_error_t shield_recovery_init(shield_recovery_t *ctx, int count, int lengt
     memset(ctx->used, false, sizeof(ctx->used));
 
     for (i = 0; i < count; i++) {
+        /* Zero-fill so the fixed-length constant-time comparison in
+         * shield_recovery_verify never reads uninitialized bytes. */
+        memset(ctx->codes[i], 0, SHIELD_RECOVERY_CODE_LEN);
         if (shield_random_bytes(bytes, byte_len) != SHIELD_OK) {
             free(bytes);
             return SHIELD_ERR_RANDOM_FAILED;
@@ -1387,7 +1520,13 @@ bool shield_recovery_verify(shield_recovery_t *ctx, const char *code) {
     if (formatted[0] == '\0') return false;
 
     for (i = 0; i < ctx->count; i++) {
-        if (!ctx->used[i] && strcmp(ctx->codes[i], formatted) == 0) {
+        /* Fixed-length constant-time compare over the whole 10-byte slot
+         * ("XXXX-XXXX" + NUL): strcmp short-circuits on the first differing
+         * byte and leaks the matching prefix length through timing. */
+        if (!ctx->used[i] &&
+            shield_secure_compare((const uint8_t *)ctx->codes[i],
+                                  (const uint8_t *)formatted,
+                                  SHIELD_RECOVERY_CODE_LEN)) {
             ctx->used[i] = true;
             return true;
         }

@@ -102,6 +102,9 @@ pub struct RedundancySection {
     #[serde(default = "default_failover_timeout")]
     pub failover_timeout_ms: u64,
     pub virtual_ip: Option<String>,
+    pub psk: Option<String>,
+    #[serde(default = "default_redundancy_bind")]
+    pub bind_address: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -145,7 +148,7 @@ impl Default for LoggingSection {
 fn default_proxy_bind() -> String { "0.0.0.0:8443".to_string() }
 fn default_max_connections() -> usize { 10_000 }
 fn default_shutdown_timeout() -> u64 { 30 }
-fn default_dns_bind() -> String { "0.0.0.0:5353".to_string() }
+fn default_dns_bind() -> String { "127.0.0.1:5353".to_string() }
 fn default_dns_timeout() -> u64 { 2000 }
 fn default_health_interval() -> u64 { 10 }
 fn default_priority() -> u32 { 1 }
@@ -155,6 +158,7 @@ fn default_shield_password() -> String { String::new() }
 fn default_shield_service() -> String { "shield-proxy".to_string() }
 fn default_replay_ttl() -> u64 { 60 }
 fn default_peer_address() -> String { "127.0.0.1:8444".to_string() }
+fn default_redundancy_bind() -> String { "0.0.0.0:8444".to_string() }
 fn default_heartbeat_interval() -> u64 { 500 }
 fn default_failover_timeout() -> u64 { 3000 }
 fn default_true() -> bool { true }
@@ -162,6 +166,14 @@ fn default_metrics_bind() -> String { "0.0.0.0:9090".to_string() }
 fn default_metrics_path() -> String { "/metrics".to_string() }
 fn default_log_level() -> String { "info".to_string() }
 fn default_log_format() -> String { "text".to_string() }
+
+fn is_placeholder_secret(secret: &str) -> bool {
+    matches!(
+        secret,
+        "" | "change-me-in-production" | "change-me" | "changeme"
+            | "your-pre-shared-key-here" | "password" | "secret"
+    )
+}
 
 /// Configuration validation errors.
 #[derive(Debug, thiserror::Error)]
@@ -216,11 +228,29 @@ impl ProxyConfig {
                     upstream.name
                 )));
             }
-            if upstream.shield_encrypt && upstream.shield_key.is_none() && self.shield.password.is_empty() {
-                return Err(ConfigError::Validation(format!(
-                    "upstream '{}' has shield_encrypt=true but no key or password configured",
-                    upstream.name
-                )));
+            if upstream.shield_encrypt {
+                let effective_key = match upstream.shield_key.as_deref() {
+                    Some(key) if !key.is_empty() => key,
+                    _ => self.shield.password.as_str(),
+                };
+                if is_placeholder_secret(effective_key) {
+                    return Err(ConfigError::Validation(format!(
+                        "upstream '{}' has shield_encrypt=true but the effective key is empty or a known placeholder; set a strong shield_key or shield.password",
+                        upstream.name
+                    )));
+                }
+            }
+        }
+        if let Some(redundancy) = &self.redundancy {
+            if redundancy.enabled {
+                match redundancy.psk.as_deref() {
+                    Some(psk) if !is_placeholder_secret(psk) => {}
+                    _ => {
+                        return Err(ConfigError::Validation(
+                            "redundancy.enabled=true requires a high-entropy redundancy.psk".to_string(),
+                        ));
+                    }
+                }
             }
         }
         Ok(())
@@ -277,6 +307,8 @@ enabled = true
 peer_address = "10.0.0.2:8444"
 heartbeat_interval_ms = 250
 failover_timeout_ms = 2000
+bind_address = "0.0.0.0:8444"
+psk = "a-very-strong-and-unique-preshared-key-for-redundancy"
 
 [metrics]
 enabled = true
@@ -337,5 +369,48 @@ shield_encrypt = true
 "#;
         let config = ProxyConfig::from_toml(toml).unwrap();
         assert!(config.upstream[0].shield_encrypt);
+    }
+
+    #[test]
+    fn test_validation_rejects_placeholder_password() {
+        let toml = r#"
+[shield]
+password = "change-me-in-production"
+
+[[upstream]]
+name = "secure"
+address = "10.0.0.1:443"
+shield_encrypt = true
+"#;
+        let result = ProxyConfig::from_toml(toml);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("placeholder"), "expected 'placeholder' in: {err}");
+    }
+
+    #[test]
+    fn test_validation_rejects_empty_shield_key() {
+        let toml = r#"
+[[upstream]]
+name = "secure"
+address = "10.0.0.1:443"
+shield_encrypt = true
+shield_key = ""
+"#;
+        let result = ProxyConfig::from_toml(toml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validation_redundancy_requires_psk() {
+        let toml = r#"
+[redundancy]
+enabled = true
+peer_address = "10.0.0.2:8444"
+"#;
+        let result = ProxyConfig::from_toml(toml);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("psk"), "expected 'psk' in: {err}");
     }
 }

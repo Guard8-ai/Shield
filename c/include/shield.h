@@ -86,6 +86,10 @@ typedef struct {
     uint8_t verification_key[SHIELD_KEY_SIZE];
 } shield_signature_t;
 
+/* Lamport signature sizes: 256 bit-slots x 32-byte preimages / 64-byte hash pairs */
+#define SHIELD_LAMPORT_SIGNATURE_SIZE  (256 * 32)   /* 8192 bytes */
+#define SHIELD_LAMPORT_PUBLIC_KEY_SIZE (256 * 64)   /* 16384 bytes */
+
 /* Lamport signature context */
 typedef struct {
     uint8_t private_key[256][2][SHIELD_KEY_SIZE];
@@ -330,14 +334,24 @@ shield_error_t shield_lamport_generate(shield_lamport_t *ctx);
 
 /**
  * Sign message with Lamport signature (ONE TIME ONLY).
- * Signature is 256*32 = 8192 bytes.
+ * signature must point to a buffer of exactly SHIELD_LAMPORT_SIGNATURE_SIZE
+ * (8192) bytes and signature_len must equal that size, otherwise the call is
+ * rejected with SHIELD_ERR_INVALID_SIGNATURE and the one-time key is NOT
+ * consumed. API CHANGE (security fix): signature_len parameter added so the
+ * library can verify the caller's buffer size instead of writing 8192 bytes
+ * blindly.
  */
-shield_error_t shield_lamport_sign(shield_lamport_t *ctx, const uint8_t *message, size_t message_len, uint8_t *signature);
+shield_error_t shield_lamport_sign(shield_lamport_t *ctx, const uint8_t *message, size_t message_len, uint8_t *signature, size_t signature_len);
 
 /**
  * Verify Lamport signature.
+ * signature_len must be SHIELD_LAMPORT_SIGNATURE_SIZE (8192) and
+ * public_key_len must be SHIELD_LAMPORT_PUBLIC_KEY_SIZE (16384); any other
+ * length returns false. API CHANGE (security fix): length parameters added —
+ * the previous signature read 8192/16384 bytes unconditionally, so an
+ * attacker-supplied short signature buffer caused an out-of-bounds read.
  */
-bool shield_lamport_verify(const uint8_t *message, size_t message_len, const uint8_t *signature, const uint8_t *public_key);
+bool shield_lamport_verify(const uint8_t *message, size_t message_len, const uint8_t *signature, size_t signature_len, const uint8_t *public_key, size_t public_key_len);
 
 /**
  * Check if Lamport key is used.

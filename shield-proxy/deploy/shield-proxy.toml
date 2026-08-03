@@ -7,7 +7,8 @@ max_connections = 10000
 shutdown_timeout_secs = 30
 
 [dns]
-bind_address = "0.0.0.0:5353"
+# Bind to loopback only — change to 0.0.0.0:5353 only if DNS must be externally accessible
+bind_address = "127.0.0.1:5353"
 timeout_ms = 2000
 health_check_interval_secs = 10
 
@@ -44,10 +45,13 @@ replay_ttl_secs = 60
 # heartbeat_interval_ms = 500
 # failover_timeout_ms = 3000
 # virtual_ip = "10.0.0.100"
+# bind_address = "0.0.0.0:8444"   # address to bind for incoming heartbeats
+# psk = ""                         # REQUIRED when enabled=true: set a high-entropy pre-shared key
 
 [metrics]
 enabled = true
-bind_address = "0.0.0.0:9090"
+# Bind to loopback only — expose via reverse proxy or VPN for external scraping
+bind_address = "127.0.0.1:9090"
 path = "/metrics"
 
 [logging]

@@ -181,10 +181,12 @@ Shield Android classes are **thread-safe**. A single instance can be shared acro
 
 ## Cross-Platform Compatibility
 
-Shield Android produces byte-identical output to all other Shield implementations:
+Shield Android produces byte-identical output to all other Shield implementations **for the base v4 AEAD format, PQ hybrid KEX, and channel session-key derivation**:
 - Python, JavaScript, Rust, Go, C, Java, C#, Swift, Kotlin, WebAssembly
 
-Encrypt on Android, decrypt on any platform.
+Encrypt on Android, decrypt on any platform for those layers.
+
+> **Scope:** Advanced modules — ratchet (RatchetSession), stream cipher, group encryption — are **not cross-binding interoperable**; JVM peers (Android, Kotlin, Java) interoperate with each other but not with Rust, Python, or Go ratchet sessions. See [PROTOCOL.md §3.8](../PROTOCOL.md) for details.
 
 ## License
 

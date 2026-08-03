@@ -1,6 +1,10 @@
 using System;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+
+[assembly: InternalsVisibleTo("Shield.Tests")]
 
 namespace Dikestra.Shield
 {
@@ -99,9 +103,12 @@ namespace Dikestra.Shield
         }
 
         /// <summary>
-        /// Get the derived key.
+        /// Get the derived master key. Internal (test-only): exposing the master
+        /// key on the public surface defeats key encapsulation — the C port
+        /// removed its equivalent and Rust keeps it pub(crate). Reachable from
+        /// the test suite via InternalsVisibleTo.
         /// </summary>
-        public byte[] GetKey()
+        internal byte[] GetKey()
         {
             byte[] copy = new byte[KeySize];
             Array.Copy(_key, copy, KeySize);

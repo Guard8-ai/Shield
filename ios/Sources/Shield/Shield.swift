@@ -29,7 +29,7 @@ public final class Shield {
     private static let maxPadding = 128
     private static let minTimestampMs: Int64 = 1577836800000  // 2020-01-01
     private static let maxTimestampMs: Int64 = 4102444800000  // 2100-01-01
-    private static let defaultMaxAgeMs: Int64 = 60000
+    public static let defaultMaxAgeMs: Int64 = 60000
 
     // MARK: - Properties
 
@@ -92,8 +92,8 @@ public final class Shield {
     }
 
     /// Quick decrypt with pre-shared key.
-    public static func quickDecrypt(key: [UInt8], ciphertext: [UInt8]) throws -> [UInt8] {
-        let shield = try Shield(key: key, maxAgeMs: nil)
+    public static func quickDecrypt(key: [UInt8], ciphertext: [UInt8], maxAgeMs: Int64? = Shield.defaultMaxAgeMs) throws -> [UInt8] {
+        let shield = try Shield(key: key, maxAgeMs: maxAgeMs)
         return try shield.decrypt(ciphertext)
     }
 

@@ -182,7 +182,13 @@ class Shield private constructor(private val key: ByteArray) : AutoCloseable {
 
                     if (maxAgeMs != null) {
                         val nowMs = System.currentTimeMillis()
-                        val age = nowMs - timestampMs
+                        // Saturating subtraction (like the Rust core): a hostile timestamp
+                        // near Long.MIN_VALUE must not overflow to a small/negative age.
+                        val age = try {
+                            Math.subtractExact(nowMs, timestampMs)
+                        } catch (e: ArithmeticException) {
+                            Long.MAX_VALUE
+                        }
                         if (timestampMs > nowMs + 5000 || age > maxAgeMs) {
                             throw SecurityException("Authentication failed")
                         }
@@ -230,7 +236,11 @@ class Shield private constructor(private val key: ByteArray) : AutoCloseable {
         fun pbkdf2(password: String, salt: ByteArray, iterations: Int, keyLength: Int): ByteArray {
             val spec = PBEKeySpec(password.toCharArray(), salt, iterations, keyLength * 8)
             val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-            return factory.generateSecret(spec).encoded
+            try {
+                return factory.generateSecret(spec).encoded
+            } finally {
+                spec.clearPassword()
+            }
         }
 
         fun constantTimeEquals(a: ByteArray, b: ByteArray): Boolean {
@@ -266,9 +276,12 @@ class Shield private constructor(private val key: ByteArray) : AutoCloseable {
         decryptWithSeparatedKeys(encKey, macKey, ciphertext, DEFAULT_MAX_AGE_MS)
 
     /**
-     * Get the derived key.
+     * Get the derived master key.
+     *
+     * Internal: exposing the raw master key defeats the API's encapsulation and
+     * is only needed by same-module tests/conformance vectors.
      */
-    fun getKey(): ByteArray = key.copyOf()
+    internal fun getKey(): ByteArray = key.copyOf()
 
     /**
      * Wipe key from memory.

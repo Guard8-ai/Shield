@@ -1,4 +1,25 @@
-//! FIDO2 Manager - Main API for `WebAuthn` operations
+//! FIDO2 Manager — Main API for `WebAuthn` operations.
+//!
+//! # WARNING: NON-CONFORMANT — DO NOT USE IN PRODUCTION
+//!
+//! This implementation does **not** satisfy the `WebAuthn` L2/L3 security model.
+//! Missing properties (each is a separate phishing/bypass vector):
+//!
+//! 1. **Origin binding** — `clientDataJSON.origin` is never validated against
+//!    `WebAuthnConfig::allowed_origins`.  Any origin can register or authenticate
+//!    credentials for any relying party. *(backend-065)*
+//! 2. **rpId binding** — `authenticatorData.rpIdHash` is never compared against
+//!    `SHA-256(config.rp_id)`.  Credentials registered at one RP are accepted by
+//!    any other RP. *(backend-065)*
+//! 3. **clientDataJSON binding** — The authenticator signs a raw challenge; the
+//!    `clientDataJSON` wrapper (which binds origin + operation type + challenge) is
+//!    never included in the signed data.  This enables phishing and cross-origin
+//!    attacks. *(backend-065)*
+//! 4. **Attestation** — Authenticator identity is never verified; any device may
+//!    claim any authenticator. *(backend-065)*
+//!
+//! See [`validate_client_data`] for the stub that will enforce (1)–(3) once wired
+//! in, and the module-level docs for the migration path.
 
 use super::config::{CredentialStore, WebAuthnConfig};
 use super::credential::{ShieldCredentialStore, StoredCredential};
@@ -29,13 +50,29 @@ pub struct ChallengeData {
     pub user_id: Option<Vec<u8>>,
 }
 
-/// FIDO2 Manager for `WebAuthn` operations
+/// FIDO2 Manager for `WebAuthn` operations.
+///
+/// # Deprecated
+///
+/// This type does not implement the `WebAuthn` security model. It lacks origin
+/// binding, rpId binding, clientDataJSON binding, and attestation — all
+/// fundamental to `WebAuthn`'s phishing-resistance guarantees.
+///
+/// Migrate to [`webauthn-rs`](https://crates.io/crates/webauthn-rs) `0.5`.
+/// This type will be removed in Shield v5.0.
+#[deprecated(
+    since = "4.0.0",
+    note = "Fido2Manager does not implement WebAuthn origin/rpId/clientDataJSON binding \
+            or attestation. Migrate to the `webauthn-rs` crate (https://crates.io/crates/webauthn-rs). \
+            This type will be removed in Shield v5.0."
+)]
 pub struct Fido2Manager<S: CredentialStore> {
     config: WebAuthnConfig,
     store: S,
     challenges: HashMap<Vec<u8>, ChallengeData>,
 }
 
+#[allow(deprecated)]
 impl Fido2Manager<ShieldCredentialStore> {
     /// Create a new FIDO2 manager with Shield-encrypted storage
     pub fn new_with_shield(config: WebAuthnConfig, shield: Shield) -> Self {
@@ -47,6 +84,7 @@ impl Fido2Manager<ShieldCredentialStore> {
     }
 }
 
+#[allow(deprecated)]
 impl<S: CredentialStore> Fido2Manager<S> {
     /// Create a new FIDO2 manager with custom storage
     pub fn new(config: WebAuthnConfig, store: S) -> Self {
@@ -103,6 +141,26 @@ impl<S: CredentialStore> Fido2Manager<S> {
     ) -> Result<StoredCredential> {
         // Decode challenge
         let challenge = b64_decode(challenge_b64).map_err(|_| Fido2Error::InvalidChallenge)?;
+
+        // Reject empty challenges — fail-closed: an empty challenge must never succeed.
+        // (backend-065: explicit guard so this path can never be silently bypassed.)
+        if challenge.is_empty() {
+            return Err(Fido2Error::InvalidChallenge);
+        }
+
+        // TODO(backend-065): parse and validate clientDataJSON here.
+        // The caller should supply the raw clientDataJSON bytes from the browser's
+        // PublicKeyCredential.response.clientDataJSON field.  Call:
+        //     validate_client_data(&client_data_parsed, &self.config)?;
+        // This will enforce: type == "webauthn.create", origin ∈ allowed_origins,
+        // and challenge matches the server-issued challenge.
+
+        // TODO(backend-065): verify authenticatorData.rpIdHash ==
+        //     SHA-256(self.config.rp_id.as_bytes())
+        // to prevent cross-RP credential reuse.
+
+        // TODO(backend-065): verify attestation statement in authenticatorData.
+        // At minimum accept "none" and "self" attestation formats.
 
         // Verify challenge exists and not expired
         let challenge_data = self
@@ -200,6 +258,27 @@ impl<S: CredentialStore> Fido2Manager<S> {
         // Decode challenge
         let challenge = b64_decode(challenge_b64).map_err(|_| Fido2Error::InvalidChallenge)?;
 
+        // Reject empty challenges — fail-closed: an empty challenge must never succeed.
+        // (backend-065: explicit guard.)
+        if challenge.is_empty() {
+            return Err(Fido2Error::InvalidChallenge);
+        }
+
+        // TODO(backend-065): parse and validate clientDataJSON here.
+        // The caller should supply the raw clientDataJSON bytes from the browser's
+        // PublicKeyCredential.response.clientDataJSON field.  Call:
+        //     validate_client_data(&client_data_parsed, &self.config)?;
+        // This will enforce: type == "webauthn.get", origin ∈ allowed_origins,
+        // and challenge matches the server-issued challenge.
+
+        // TODO(backend-065): verify authenticatorData.rpIdHash ==
+        //     SHA-256(self.config.rp_id.as_bytes())
+        // to prevent cross-RP credential acceptance.
+
+        // TODO(backend-065): verify authenticatorData flags:
+        // - UP (user presence) bit must be set.
+        // - UV (user verification) bit must be set if userVerification == "required".
+
         // Verify challenge exists and not expired
         let challenge_data = self
             .challenges
@@ -268,6 +347,97 @@ impl<S: CredentialStore> Fido2Manager<S> {
     }
 }
 
+// ─── Stub validation types ────────────────────────────────────────────────────
+//
+// The types and function below are the scaffolding for proper WebAuthn
+// clientDataJSON validation (backend-065).  `validate_client_data` enforces the
+// three bindings that the rest of this module currently skips:
+//   • operation type  ("webauthn.create" / "webauthn.get")
+//   • origin          (must be in `WebAuthnConfig::allowed_origins`)
+//   • challenge       (must be non-empty; full binding to server state is done
+//                      by the caller via the challenge map)
+//
+// Wire this into `verify_registration` and `verify_authentication` once the
+// caller supplies the raw `clientDataJSON` bytes. (backend-065)
+
+/// Parsed representation of the `WebAuthn` `clientDataJSON` object.
+///
+/// In a conformant implementation the browser supplies this as a
+/// base64url-encoded JSON blob inside
+/// `PublicKeyCredential.response.clientDataJSON`.
+///
+/// Currently unused by `Fido2Manager` because `verify_registration` and
+/// `verify_authentication` do not yet accept `clientDataJSON` bytes.
+/// See `backend-065`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientData {
+    /// Must be `"webauthn.create"` for registration or `"webauthn.get"` for
+    /// authentication.
+    #[serde(rename = "type")]
+    pub operation_type: String,
+    /// The HTTP origin of the page that created the credential (e.g.
+    /// `"https://example.com"`).
+    pub origin: String,
+    /// The base64url-encoded challenge that the server issued.
+    pub challenge: String,
+    /// Whether cross-origin embedding is allowed (optional in spec).
+    #[serde(rename = "crossOrigin", default)]
+    pub cross_origin: bool,
+}
+
+/// Validate a parsed `ClientData` object against the relying-party config.
+///
+/// This is a **stub** — it enforces the three cheapest bindings:
+/// 1. `type` must match `expected_type` (`"webauthn.create"` or `"webauthn.get"`)
+/// 2. `origin` must appear in `config.allowed_origins`
+/// 3. `challenge` (base64url-decoded) must be non-empty
+///
+/// It does **not** yet verify the challenge against server state (the caller
+/// must do that via the challenge map) and does **not** yet hash and compare
+/// `rpIdHash` (see TODO in `verify_registration` / `verify_authentication`).
+///
+/// Wire this in once `verify_registration` and `verify_authentication` accept
+/// raw `clientDataJSON` bytes. (backend-065)
+pub fn validate_client_data(
+    client_data: &ClientData,
+    config: &WebAuthnConfig,
+    expected_type: &str,
+) -> std::result::Result<(), Fido2Error> {
+    // 1. Operation-type check ("webauthn.create" vs "webauthn.get")
+    if client_data.operation_type != expected_type {
+        return Err(Fido2Error::WebAuthn(format!(
+            "clientDataJSON.type mismatch: expected {:?}, got {:?}",
+            expected_type, client_data.operation_type
+        )));
+    }
+
+    // 2. Origin binding — TODO(backend-065): currently the only enforcement
+    //    point for origin; must be called from verify_registration /
+    //    verify_authentication once clientDataJSON is threaded through.
+    if !config.allowed_origins.contains(&client_data.origin) {
+        return Err(Fido2Error::WebAuthn(format!(
+            "clientDataJSON.origin {:?} not in allowed_origins",
+            client_data.origin
+        )));
+    }
+
+    // 3. Challenge must be non-empty (full server-state binding is done by
+    //    the caller via the challenge HashMap).
+    let challenge_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(&client_data.challenge)
+        .map_err(|_| Fido2Error::InvalidChallenge)?;
+    if challenge_bytes.is_empty() {
+        return Err(Fido2Error::InvalidChallenge);
+    }
+
+    // TODO(backend-065): return `challenge_bytes` to the caller so it can be
+    //   looked up in the challenge HashMap (avoids double-decode).
+
+    Ok(())
+}
+
+// ─── Public challenge / response types ───────────────────────────────────────
+
 /// Registration challenge sent to client
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationChallenge {
@@ -307,6 +477,7 @@ pub struct AuthenticationResult {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 

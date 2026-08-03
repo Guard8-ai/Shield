@@ -14,19 +14,20 @@
 //! fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 //!     let config = ChannelConfig::new("shared-secret", "my-service");
 //!
-//!     // Server thread
+//!     // Server thread. Use the `_tcp` constructors: they enforce the
+//!     // handshake timeout, so a stalled peer cannot block the thread forever.
 //!     let server_config = config.clone();
 //!     let server = std::thread::spawn(move || {
 //!         let listener = TcpListener::bind("127.0.0.1:9876").unwrap();
 //!         let (stream, _) = listener.accept().unwrap();
-//!         let mut ch = ShieldChannel::accept(stream, &server_config).unwrap();
+//!         let mut ch = ShieldChannel::accept_tcp(stream, &server_config).unwrap();
 //!         let msg = ch.recv().unwrap();
 //!         assert_eq!(msg, b"Hello server!");
 //!     });
 //!
 //!     // Client side
 //!     let stream = TcpStream::connect("127.0.0.1:9876")?;
-//!     let mut client = ShieldChannel::connect(stream, &config)?;
+//!     let mut client = ShieldChannel::connect_tcp(stream, &config)?;
 //!     client.send(b"Hello server!")?;
 //!
 //!     server.join().unwrap();
@@ -237,6 +238,13 @@ impl<S: Read + Write> ShieldChannel<S> {
     ///
     /// Performs PAKE handshake and establishes encrypted channel.
     ///
+    /// **Timeout warning:** this generic constructor cannot set I/O deadlines on
+    /// `stream`, so [`ChannelConfig`]'s handshake timeout is **not** enforced
+    /// here — a peer that stalls mid-handshake blocks the calling thread
+    /// indefinitely. For TCP, use [`ShieldChannel::connect_tcp`], which applies
+    /// the timeout; for other transports, configure read/write deadlines on the
+    /// stream before calling this.
+    ///
     /// # Arguments
     /// * `stream` - Underlying transport (TCP, etc.)
     /// * `config` - Channel configuration with shared password
@@ -286,6 +294,14 @@ impl<S: Read + Write> ShieldChannel<S> {
     /// Accept connection as server.
     ///
     /// Waits for client handshake and establishes encrypted channel.
+    ///
+    /// **Timeout warning:** this generic constructor cannot set I/O deadlines on
+    /// `stream`, so [`ChannelConfig`]'s handshake timeout is **not** enforced
+    /// here — a client that completes TCP and then stalls mid-handshake blocks
+    /// the accepting thread indefinitely (slowloris). For TCP, use
+    /// [`ShieldChannel::accept_tcp`], which applies the timeout; for other
+    /// transports, configure read/write deadlines on the stream before calling
+    /// this.
     ///
     /// # Arguments
     /// * `stream` - Underlying transport (TCP, etc.)

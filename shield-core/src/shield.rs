@@ -33,8 +33,8 @@ fn current_timestamp_ms() -> u64 {
     }
 }
 
-/// PBKDF2 iteration count (matches Python implementation).
-const PBKDF2_ITERATIONS: u32 = 100_000;
+/// PBKDF2 iteration count (interim value pending Argon2id migration; see ADR-001).
+const PBKDF2_ITERATIONS: u32 = 800_000;
 
 /// Nonce size in bytes.
 const NONCE_SIZE: usize = 16;

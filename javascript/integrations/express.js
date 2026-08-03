@@ -66,9 +66,14 @@ function shieldMiddleware(options) {
                     data: encryptedB64
                 });
             } catch (err) {
-                // On error, send original data
+                // Fail CLOSED (same policy as shieldMiddleware): never fall
+                // back to the plaintext response, and never surface internal
+                // error details to the client.
                 console.error('Shield encryption error:', err);
-                return originalJson(data);
+                if (typeof res.status === 'function') {
+                    res.status(500);
+                }
+                return originalJson({ encrypted: false, error: 'Encryption failed' });
             }
         };
 
@@ -96,14 +101,24 @@ function shieldProtected(options) {
         const originalJson = res.json.bind(res);
 
         res.json = (data) => {
-            const plaintext = Buffer.from(JSON.stringify(data));
-            const encrypted = shield.encrypt(plaintext);
-            const encryptedB64 = encrypted.toString('base64');
+            try {
+                const plaintext = Buffer.from(JSON.stringify(data));
+                const encrypted = shield.encrypt(plaintext);
+                const encryptedB64 = encrypted.toString('base64');
 
-            return originalJson({
-                encrypted: true,
-                data: encryptedB64
-            });
+                return originalJson({
+                    encrypted: true,
+                    data: encryptedB64
+                });
+            } catch (err) {
+                // Fail CLOSED: never fall back to the plaintext response, and
+                // never surface internal error details to the client.
+                console.error('Shield encryption error:', err);
+                if (typeof res.status === 'function') {
+                    res.status(500);
+                }
+                return originalJson({ encrypted: false, error: 'Encryption failed' });
+            }
         };
 
         next();
@@ -136,11 +151,18 @@ function shieldRequired(options) {
         try {
             const encrypted = Buffer.from(req.body.data, 'base64');
             const decrypted = shield.decrypt(encrypted);
+            if (decrypted === null) {
+                return res.status(400).json({
+                    error: 'Decryption failed'
+                });
+            }
             req.shieldData = JSON.parse(decrypted.toString());
             next();
         } catch (err) {
+            // Generic message only: err.message can leak internal state
+            // (parser errors, buffer lengths) to the attacker.
             return res.status(400).json({
-                error: `Decryption failed: ${err.message}`
+                error: 'Decryption failed'
             });
         }
     };
@@ -162,9 +184,9 @@ function createShield(password, service) {
  */
 function shieldErrorHandler(err, req, res, next) {
     if (err.name === 'ShieldError') {
+        // Generic error only; never echo err.message to the client.
         return res.status(400).json({
-            error: 'Encryption/decryption error',
-            message: err.message
+            error: 'Encryption/decryption error'
         });
     }
     next(err);

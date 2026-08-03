@@ -37,6 +37,8 @@ public enum PAKEExchange {
     /// - Parameter contributions: Key contributions from all parties
     /// - Returns: 32-byte shared session key
     public static func combine(_ contributions: [UInt8]...) -> [UInt8] {
+        precondition(!contributions.isEmpty,
+                     "PAKEExchange.combine requires at least one contribution")
         // Sort contributions for deterministic output
         let sorted = contributions.sorted { a, b in
             for i in 0..<min(a.count, b.count) {
@@ -203,6 +205,11 @@ public enum KeySplitter {
     /// - Throws: ShieldError if shares < 2
     public static func combine(_ shares: [[UInt8]]) throws -> [UInt8] {
         guard shares.count >= 2 else {
+            throw ShieldError.invalidKeySize
+        }
+
+        let shareLength = shares[0].count
+        guard shareLength > 0, shares.allSatisfy({ $0.count == shareLength }) else {
             throw ShieldError.invalidKeySize
         }
 

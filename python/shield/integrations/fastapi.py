@@ -170,8 +170,8 @@ def shield_protected(
                         encrypted = base64.b64decode(payload["data"])
                         decrypted = shield.decrypt(encrypted)
                         kwargs["body"] = json.loads(decrypted)
-                except (json.JSONDecodeError, KeyError, ValueError) as e:
-                    raise HTTPException(status_code=400, detail=f"Decryption failed: {e}")
+                except (json.JSONDecodeError, KeyError, ValueError):
+                    raise HTTPException(status_code=400, detail="Invalid request")
 
             # Call the actual endpoint
             result = await func(*args, **kwargs)

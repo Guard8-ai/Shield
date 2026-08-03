@@ -44,7 +44,7 @@ object DeviceFingerprint {
      *
      * @param context Application context
      * @param mode Fingerprint mode
-     * @return Fingerprint string (MD5 hex), or empty for NONE
+     * @return Fingerprint string (SHA-256 hex), or empty for NONE
      * @throws IllegalStateException if fingerprint unavailable
      */
     fun collect(context: Context, mode: FingerprintMode): String {
@@ -85,7 +85,7 @@ object DeviceFingerprint {
             Build.DEVICE,
             Build.PRODUCT
         )
-        return components.joinToString("-").md5()
+        return components.joinToString("-").sha256Hex()
     }
 
     /**
@@ -137,14 +137,14 @@ object DeviceFingerprint {
 
         require(components.isNotEmpty()) { "No device identifiers available" }
 
-        return components.joinToString("-").md5()
+        return components.joinToString("-").sha256Hex()
     }
 
     /**
-     * MD5 hash helper.
+     * SHA-256 hash helper.
      */
-    private fun String.md5(): String {
-        val md = MessageDigest.getInstance("MD5")
+    private fun String.sha256Hex(): String {
+        val md = MessageDigest.getInstance("SHA-256")
         val digest = md.digest(this.toByteArray())
         return digest.toHexString()
     }

@@ -68,7 +68,9 @@ pub use channel_async::AsyncShieldChannel;
 pub use error::{Result, ShieldError};
 pub use exchange::{KeySplitter, PAKEExchange, QRExchange};
 pub use fingerprint::FingerprintMode;
-pub use group::{BroadcastEncryption, EncryptedBroadcast, EncryptedGroupMessage, GroupEncryption};
+pub use group::{
+    BroadcastEncryption, EncryptedBroadcast, EncryptedGroupMessage, GroupEncryption, GroupKeyUpdate,
+};
 pub use identity::{Identity, IdentityProvider, SecureSession, Session};
 pub use ratchet::RatchetSession;
 pub use rotation::KeyRotationManager;

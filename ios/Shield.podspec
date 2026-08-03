@@ -20,14 +20,15 @@ Pod::Spec.new do |s|
   s.source           = { :git => 'https://github.com/Dikestra-ai/Shield.git', :tag => "v#{s.version}" }
   s.social_media_url = 'https://twitter.com/dikestraai'
 
-  s.ios.deployment_target = '13.0'
-  s.osx.deployment_target = '10.15'
-  s.tvos.deployment_target = '13.0'
-  s.watchos.deployment_target = '6.0'
+  s.ios.deployment_target = '14.0'
+  s.osx.deployment_target = '11.0'
+  s.tvos.deployment_target = '14.0'
+  s.watchos.deployment_target = '7.0'
 
   s.swift_versions = ['5.7', '5.8', '5.9']
 
   s.source_files = 'ios/Sources/Shield/**/*'
+  s.exclude_files = 'ios/Sources/Shield/PqHybrid.swift'
 
-  s.frameworks = 'Foundation', 'Security'
+  s.frameworks = 'Foundation', 'Security', 'CryptoKit'
 end

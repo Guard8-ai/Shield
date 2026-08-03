@@ -32,6 +32,9 @@ public class KeyRotationManager {
 
     /// Add historical key for decryption.
     public func addKey(_ key: [UInt8], version: Int) throws {
+        guard key.count == 32 else {
+            throw ShieldError.invalidKeySize
+        }
         guard keys[version] == nil else {
             throw ShieldError.invalidToken
         }
@@ -40,6 +43,9 @@ public class KeyRotationManager {
 
     /// Rotate to new key.
     public func rotate(to newKey: [UInt8], version newVersion: Int? = nil) throws -> Int {
+        guard newKey.count == 32 else {
+            throw ShieldError.invalidKeySize
+        }
         let version = newVersion ?? _currentVersion + 1
         guard version > _currentVersion else {
             throw ShieldError.invalidToken

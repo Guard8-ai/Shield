@@ -38,7 +38,9 @@ public class RecoveryCodes {
 
         for _ in 0..<count {
             var bytes = [UInt8](repeating: 0, count: byteCount)
-            _ = SecRandomCopyBytes(kSecRandomDefault, byteCount, &bytes)
+            guard SecRandomCopyBytes(kSecRandomDefault, byteCount, &bytes) == errSecSuccess else {
+                fatalError("RecoveryCodes: CSPRNG failure generating code (fail-closed)")
+            }
 
             var code = ""
             for byte in bytes {

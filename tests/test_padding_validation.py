@@ -22,43 +22,49 @@ from shield.core import Shield
 
 
 def test_reject_zero_padding():
-    """Test that padding length 0 is rejected."""
+    """Test that padding length 0 would be rejected (validates constraint exists in code)."""
     print("Testing rejection of zero padding...")
 
-    shield = Shield("test-password", "test.example.com", max_age_ms=60000)
+    from shield.core import MIN_PADDING
+
+    # Padding validation fires inside AEAD (after MAC verify), so we cannot
+    # inject bad padding without the key. Verify at the code level instead.
+    core_path = Path(__file__).parent.parent / "python" / "shield" / "core.py"
+    source = core_path.read_text()
+    assert "pad_len < MIN_PADDING" in source, "Missing pad_len < MIN_PADDING guard in core.py"
+    assert MIN_PADDING > 0, f"MIN_PADDING must be > 0, got {MIN_PADDING}"
+
+    # Behavioural: a legitimately encrypted message always decrypts correctly,
+    # so the padding check never rejects valid ciphertexts.
+    shield = Shield("test-password", "test.example.com", max_age_ms=None)
     plaintext = b"Test message"
-
-    # Encrypt normally to get a valid v2 message
     encrypted = shield.encrypt(plaintext)
+    decrypted = shield.decrypt(encrypted)
+    assert decrypted == plaintext, f"Legitimate message rejected: {decrypted!r}"
 
-    # Decrypt to get the decrypted inner data (to manipulate it)
-    # We'll manually craft a malicious message
-    # This is a bit tricky since we need to bypass MAC, but for testing
-    # we can verify the validation logic exists
-
-    # Create a malicious inner data with pad_len = 0
-    counter_bytes = struct.pack("<Q", 0)
-    timestamp_ms = int(__import__('time').time() * 1000)
-    timestamp_bytes = struct.pack("<Q", timestamp_ms)
-    pad_len_byte = struct.pack("B", 0)  # INVALID: should be 32-128
-
-    # Try to create a message with this (won't work due to MAC, but tests the concept)
-    # The actual test is that legitimate messages with pad_len 0 would be rejected
-    # if an attacker somehow bypassed MAC
-
-    print("  ✓ Zero padding test prepared")
+    print(f"  ✓ Zero-padding guard confirmed in source (MIN_PADDING={MIN_PADDING})")
 
 
 def test_reject_excessive_padding():
-    """Test that padding length > 128 is rejected."""
+    """Test that padding length > 128 would be rejected (validates constraint exists in code)."""
     print("Testing rejection of excessive padding...")
 
-    shield = Shield("test-password", "test.example.com", max_age_ms=60000)
+    from shield.core import MAX_PADDING
 
-    # Similar concept: pad_len = 255 should be rejected
-    # The validation happens during decrypt after MAC verification
+    core_path = Path(__file__).parent.parent / "python" / "shield" / "core.py"
+    source = core_path.read_text()
+    assert "pad_len > MAX_PADDING" in source, "Missing pad_len > MAX_PADDING guard in core.py"
+    assert MAX_PADDING <= 255, f"MAX_PADDING must be <= 255 (fits in one byte), got {MAX_PADDING}"
 
-    print("  ✓ Excessive padding test prepared")
+    # Behavioural: legitimate messages never exceed MAX_PADDING and always
+    # decrypt correctly.
+    shield = Shield("test-password", "test.example.com", max_age_ms=None)
+    plaintext = b"Another test"
+    encrypted = shield.encrypt(plaintext)
+    decrypted = shield.decrypt(encrypted)
+    assert decrypted == plaintext, f"Legitimate message rejected: {decrypted!r}"
+
+    print(f"  ✓ Excessive-padding guard confirmed in source (MAX_PADDING={MAX_PADDING})")
 
 
 def test_valid_padding_range():

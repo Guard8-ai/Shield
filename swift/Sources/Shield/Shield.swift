@@ -101,12 +101,12 @@ public class Shield {
     }
 
     /// Quick decrypt with explicit key.
-    public static func quickDecrypt(key: [UInt8], ciphertext: [UInt8]) throws -> [UInt8] {
+    public static func quickDecrypt(key: [UInt8], ciphertext: [UInt8], maxAgeMs: Int64? = Shield.defaultMaxAgeMs) throws -> [UInt8] {
         guard key.count == keySize else {
             throw ShieldError.invalidKeySize
         }
         let subkeys = deriveSubkeys(key)
-        return try decryptWithSeparatedKeys(subkeys.enc, macKey: subkeys.mac, ciphertext: ciphertext, maxAgeMs: nil)
+        return try decryptWithSeparatedKeys(subkeys.enc, macKey: subkeys.mac, ciphertext: ciphertext, maxAgeMs: maxAgeMs)
     }
 
     private static func encryptWithSeparatedKeys(_ encKey: [UInt8], macKey: [UInt8], plaintext: [UInt8]) throws -> [UInt8] {

@@ -5,6 +5,7 @@ FROM ubuntu:22.04
 
 LABEL maintainer="Dikestra.ai <admin@gibraltarcloud.dev>"
 LABEL description="Shield encryption library development environment"
+LABEL dev-only=true
 
 # Avoid prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive

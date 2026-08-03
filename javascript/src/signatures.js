@@ -76,6 +76,11 @@ class SymmetricSignature {
      * @returns {boolean}
      */
     verify(message, signature, verificationKey, maxAge = 300) {
+        // crypto.timingSafeEqual throws RangeError on length mismatch;
+        // wrong-length attacker input must yield false, not an exception.
+        if (verificationKey.length !== this.verificationKey.length) {
+            return false;
+        }
         if (!crypto.timingSafeEqual(verificationKey, this.verificationKey)) {
             return false;
         }
@@ -95,11 +100,17 @@ class SymmetricSignature {
             const expected = crypto.createHmac('sha256', this.signingKey)
                 .update(sigData)
                 .digest();
+            if (sig.length !== expected.length) {
+                return false;
+            }
             return crypto.timingSafeEqual(sig, expected);
         } else {
             const expected = crypto.createHmac('sha256', this.signingKey)
                 .update(message)
                 .digest();
+            if (signature.length !== expected.length) {
+                return false;
+            }
             return crypto.timingSafeEqual(signature, expected);
         }
     }

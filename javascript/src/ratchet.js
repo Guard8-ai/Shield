@@ -85,9 +85,10 @@ class RatchetSession {
      * @returns {Buffer|null} Decrypted message, or null if failed
      */
     decrypt(ciphertext) {
-        // Ratchet receive chain
+        // Compute the next chain state locally; do NOT commit it yet.
+        // Advancing the chain before authentication would let a single
+        // forged/garbage packet permanently desync the session (DoS).
         const [newChain, msgKey] = this._ratchetChain(this._recvChain);
-        this._recvChain = newChain;
 
         const result = this._decryptWithKey(msgKey, ciphertext);
         if (result === null) {
@@ -101,6 +102,8 @@ class RatchetSession {
             return null;
         }
 
+        // Commit state only after MAC and counter verification succeed.
+        this._recvChain = newChain;
         this._recvCounter++;
         return plaintext;
     }

@@ -240,7 +240,9 @@ Breaking requires 2^256 operations - no shortcut exists.
 
 ## Cross-Language Compatibility
 
-Shield Kotlin produces byte-identical output to Python, JavaScript, Rust, Go, Java, C#, and all other implementations. Encrypt in Kotlin, decrypt in any other language.
+Shield Kotlin produces byte-identical output to Python, JavaScript, Rust, Go, Java, C#, and all other implementations **for the base v4 AEAD format, PQ hybrid KEX, and channel session-key derivation**. Encrypt in Kotlin, decrypt in any other language for those layers.
+
+> **Scope:** Advanced modules — ratchet (RatchetSession), stream cipher, group encryption — are **not cross-binding interoperable**; JVM peers (Kotlin, Android, Java) interoperate with each other but not with Rust, Python, or Go ratchet sessions. See [PROTOCOL.md §3.8](../PROTOCOL.md) for details.
 
 ## Requirements
 

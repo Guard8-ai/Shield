@@ -16,6 +16,14 @@ services:
         cd /shield/go && go test ./... &&
         echo '=== All tests passed! ==='
       "
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: "1.0"
 
   # Rust development
   rust:
@@ -25,6 +33,14 @@ services:
       - cargo-cache:/root/.cargo/registry
     working_dir: /shield/shield-core
     command: cargo watch -x "test --features async"
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: "1.0"
 
   # Python development
   python:
@@ -37,6 +53,14 @@ services:
         pip install -e '.[dev]' &&
         python -m pytest --watch
       "
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: "1.0"
 
   # JavaScript development
   javascript:
@@ -45,6 +69,14 @@ services:
       - ./javascript:/app
     working_dir: /app
     command: npm run test:watch
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: "1.0"
 
   # Interoperability tests
   interop:
@@ -53,6 +85,14 @@ services:
       - .:/shield
     working_dir: /shield/tests
     command: python3 run_interop_tests.py
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: "1.0"
 
   # Example: FastAPI server with Shield
   fastapi-example:
@@ -70,6 +110,20 @@ services:
         cd /app/examples/fastapi &&
         uvicorn main:app --host 0.0.0.0 --port 8000 --reload
       "
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: "1.0"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   cargo-cache:

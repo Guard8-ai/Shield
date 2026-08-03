@@ -18,6 +18,7 @@ import hmac
 import hashlib
 import struct
 import time
+from collections import OrderedDict
 from typing import Optional, Union
 
 # Key derivation iterations (higher = more secure, slower)
@@ -36,6 +37,11 @@ MAX_PADDING = 128
 # Timestamp range for v2 detection (2020-2100 in milliseconds)
 MIN_TIMESTAMP_MS = 1_577_836_800_000
 MAX_TIMESTAMP_MS = 4_102_444_800_000
+
+# Maximum number of derived master keys kept per instance. The cache is keyed
+# by attacker-controllable header salts, so it must be bounded (LRU eviction)
+# or a flood of distinct salts would grow memory without limit.
+KEY_CACHE_MAX = 16
 
 
 class Shield:
@@ -87,9 +93,46 @@ class Shield:
         self._mac_key = hmac.new(self._key, b"shield-authenticate", hashlib.sha256).digest()
         self._counter = 0
         self._max_age_ms = max_age_ms
+        # Bounded LRU cache of derived subkeys, keyed by (enc_key, mac_key) pair.
+        # Salts from ciphertexts that fail authentication are never cached, so
+        # attacker-chosen garbage values cannot occupy cache slots.
+        self._key_cache: OrderedDict = OrderedDict()
+
+    def _cache_get(self, cache_key: bytes) -> Optional[tuple]:
+        """Look up cached subkeys, refreshing LRU position."""
+        entry = self._key_cache.pop(cache_key, None)
+        if entry is not None:
+            self._key_cache[cache_key] = entry  # re-insert as most recently used
+        return entry
+
+    def _cache_put(self, cache_key: bytes, value: tuple) -> None:
+        """Insert subkeys, evicting the LRU entry beyond the cap."""
+        self._key_cache.pop(cache_key, None)
+        self._key_cache[cache_key] = value
+        while len(self._key_cache) > KEY_CACHE_MAX:
+            # OrderedDict preserves insertion order: first key is the LRU entry.
+            self._key_cache.popitem(last=False)
+
+    def _derive_key_uncached(self, salt: bytes) -> bytes:
+        """
+        Derive a master key from the instance password and the given salt.
+
+        This is the raw (uncached) derivation — callers that want caching
+        should use _derive_key() instead.
+        """
+        return hashlib.pbkdf2_hmac("sha256", self._key, salt, 1)
+
+    def _derive_key(self, salt: bytes) -> bytes:
+        """Return the master key for *salt*, reading from or populating the LRU cache."""
+        cached = self._cache_get(salt)
+        if cached is not None:
+            return cached
+        master = self._derive_key_uncached(salt)
+        self._cache_put(salt, master)
+        return master
 
     @classmethod
-    def with_key(cls, key: bytes) -> "Shield":
+    def with_key(cls, key: bytes, max_age_ms: Optional[int] = 60_000) -> "Shield":
         """
         Create Shield instance with a pre-shared key (no password derivation).
 
@@ -110,7 +153,8 @@ class Shield:
         instance._enc_key = hmac.new(key, b"shield-encrypt", hashlib.sha256).digest()
         instance._mac_key = hmac.new(key, b"shield-authenticate", hashlib.sha256).digest()
         instance._counter = 0
-        instance._max_age_ms = 60_000
+        instance._max_age_ms = max_age_ms
+        instance._key_cache = OrderedDict()
         return instance
 
     @classmethod

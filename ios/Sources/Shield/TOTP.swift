@@ -72,7 +72,9 @@ public final class TOTP {
     /// - Returns: Random secret bytes
     public static func generateSecret(length: Int = 20) -> [UInt8] {
         var bytes = [UInt8](repeating: 0, count: length)
-        _ = SecRandomCopyBytes(kSecRandomDefault, length, &bytes)
+        guard SecRandomCopyBytes(kSecRandomDefault, length, &bytes) == errSecSuccess else {
+            fatalError("TOTP: CSPRNG failure generating secret (fail-closed)")
+        }
         return bytes
     }
 
@@ -277,7 +279,9 @@ public final class RecoveryCodes {
     public static func generateCodes(count: Int = 10, length: Int = 8) -> [String] {
         (0..<count).map { _ in
             var bytes = [UInt8](repeating: 0, count: length / 2)
-            _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+            guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+                fatalError("RecoveryCodes: CSPRNG failure generating code (fail-closed)")
+            }
             let hex = bytes.map { String(format: "%02X", $0) }.joined()
             return "\(hex.prefix(4))-\(hex.suffix(4))"
         }

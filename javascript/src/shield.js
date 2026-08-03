@@ -23,6 +23,11 @@ const MAX_PADDING = 128;
 const MIN_TIMESTAMP_MS = 1577836800000;
 const MAX_TIMESTAMP_MS = 4102444800000;
 
+// Maximum entries in the per-instance salt -> derived-key cache. Without a
+// bound, an attacker feeding ciphertexts that each carry a unique header
+// salt would grow the cache without limit (memory DoS).
+const KEY_CACHE_MAX = 128;
+
 /**
  * Generate keystream using SHA256 (AES-256-CTR equivalent).
  */

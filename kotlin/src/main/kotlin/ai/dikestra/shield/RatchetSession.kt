@@ -8,7 +8,12 @@ import javax.crypto.spec.SecretKeySpec
 /**
  * Ratcheting session for forward secrecy.
  *
- * Compatible with Shield Rust core (shield-core crate).
+ * NOT byte-compatible with the Shield Rust core (shield-core crate) ratchet.
+ * The Rust ratchet derives chain/message keys with HMAC-SHA256, uses separate
+ * encrypt/authenticate subkeys, and encrypts the counter; this implementation
+ * uses raw SHA256(key || label) derivation, a single message key, and a
+ * SHA-256-based keystream. Only peers running this same JVM implementation
+ * can interoperate.
  *
  * Each encrypt/decrypt advances the key chain,
  * destroying previous keys automatically.
@@ -54,7 +59,9 @@ class RatchetSession(
     init {
         require(rootKey.size == KEY_SIZE) { "Invalid key size" }
 
-        // Match Rust core labels exactly: "send"/"recv"
+        // Labels "send"/"recv" are the same strings the Rust core uses, but the
+        // derivation differs (raw SHA-256 here vs HMAC there), so the resulting
+        // chains are NOT compatible with the Rust core.
         val (sendLabel, recvLabel) = if (isInitiator) {
             "send".toByteArray() to "recv".toByteArray()
         } else {
@@ -78,7 +85,8 @@ class RatchetSession(
      *   will produce different ciphertext each time.
      */
     fun encrypt(plaintext: ByteArray): ByteArray {
-        // Ratchet BEFORE encrypt (matches Rust core)
+        // Ratchet BEFORE encrypt (same ordering as the Rust core, but the output
+        // is not byte-compatible with it)
         val (newChain, msgKey) = ratchetChain(sendChain)
         sendChain = newChain
 
@@ -144,7 +152,9 @@ class RatchetSession(
 
         /**
          * Ratchet chain forward, returning (new_chain_key, message_key).
-         * Matches Rust core: derives both new chain ("chain") and message key ("message").
+         * Derives the new chain ("chain") and message key ("message") with raw
+         * SHA256(chainKey || label) — NOT the Rust core's HMAC-based derivation,
+         * so the keys differ from the Rust ratchet.
          */
         private fun ratchetChain(chainKey: ByteArray): Pair<ByteArray, ByteArray> {
             val md = MessageDigest.getInstance("SHA-256")
@@ -188,7 +198,8 @@ class RatchetSession(
                 ciphertext[i] = (data[i].toInt() xor keystream[i].toInt()).toByte()
             }
 
-            // HMAC over nonce || ciphertext (matches Rust core)
+            // HMAC over nonce || ciphertext, keyed with the single message key
+            // (the Rust core instead uses a separate authenticate subkey)
             val mac = Mac.getInstance("HmacSHA256")
             mac.init(SecretKeySpec(key, "HmacSHA256"))
             mac.update(nonce)

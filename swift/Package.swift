@@ -20,6 +20,9 @@ let package = Package(
             dependencies: []),
         .testTarget(
             name: "ShieldTests",
-            dependencies: ["Shield"]),
+            dependencies: ["Shield"],
+            resources: [
+                .copy("Resources")
+            ]),
     ]
 )

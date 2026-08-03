@@ -2,6 +2,36 @@
 
 This document outlines the requirements for a third-party security audit of Shield.
 
+## Known Non-Conformances (Pre-Audit)
+
+### FIDO2 / WebAuthn — HIGH severity (backend-065)
+
+The `shield-core/src/fido2/` module **does not implement the WebAuthn security
+model**.  Identified by ARC security review r1b (2026-07-14), finding H7:
+
+| Missing property | Impact |
+|---|---|
+| No origin binding (`clientDataJSON.origin` not checked) | Any origin can register/authenticate credentials for any relying party |
+| No rpId binding (`authenticatorData.rpIdHash` not verified) | Credentials from one RP accepted by any other RP |
+| No clientDataJSON binding (challenge not bound to origin + type) | Phishing and cross-origin attacks possible |
+| No attestation | Cannot verify authenticator is genuine |
+
+**Status (2026-08-03):** Interim fix applied (backend-065):
+- `Fido2Manager` marked `#[deprecated(since = "4.0.0")]` with migration notice
+- All module/type/function doc comments carry prominent `WARNING` headers
+- Empty-challenge fail-closed guards added to `verify_registration` and
+  `verify_authentication`
+- `WebAuthnConfig` extended with `allowed_origins: Vec<String>`
+- `validate_client_data()` stub added — enforces type, origin, and non-empty
+  challenge; **not yet wired into** `verify_registration`/`verify_authentication`
+  (full rewrite deferred to backend-065 proper)
+- TODO comments at every missing validation point in `manager.rs`
+
+**Recommendation:** Replace `fido2/` with [`webauthn-rs`](https://crates.io/crates/webauthn-rs) `0.5`
+before any production use.  This module will be removed in Shield v5.0.
+
+---
+
 ## Audit Scope
 
 ### In Scope

@@ -1,3 +1,24 @@
+> **SUPERSEDED — DO NOT USE AS A REFERENCE FOR THE CURRENT RELEASE**
+>
+> This document was written for Shield v2.1 (pre-v4 cipher). Several claims
+> are **incorrect** for the current codebase:
+>
+> - **AES-GCM nonce reuse claim is INVERTED.** Section "Why Shield May Be
+>   STRONGER Than AES-256" states Shield provides "graceful degradation" on
+>   nonce reuse vs. AES-GCM's "catastrophic failure". This framing is
+>   backwards: nonce reuse under AES-GCM is catastrophic (full keystream
+>   recovery), and the same applies to the SHA256-CTR construction used here.
+>   Neither provides graceful degradation on nonce reuse.
+>
+> - **Shield v4 uses a different cipher suite.** The current release uses
+>   AES-256-GCM (via the `ring` crate) with per-message random nonces, not
+>   the SHA256-CTR + HMAC-SHA256 construction described here.
+>
+> - **"Audited" language.** The post-quantum hybrid primitives added in v4 are
+>   pre-1.0 and have not undergone a formal third-party security audit.
+>
+> For the current threat model, see **THREAT_MODEL.md** instead.
+
 # Shield Security Against Nation-State Actors
 
 **Last Updated:** February 2026
@@ -102,8 +123,8 @@ Shield uses only symmetric primitives with proven exponential-time security:
 - ✅ `correct horse battery staple` → 44 bits entropy
 - ✅ `Xy9$mK2#vL8@nQ5!Zm3&Pq7` → 128 bits entropy (recommended)
 
-**Shield's PBKDF2-100k Protection:**
-- Makes password cracking 100,000× slower
+**Shield's PBKDF2-600k Protection:**
+- Makes password cracking 600,000× slower
 - Helps, but cannot save fundamentally weak passwords
 - NSA/Unit 8200 have massive GPU/ASIC farms for password cracking
 
@@ -219,46 +240,63 @@ If NSA/Pentagon/Unit 8200 could break SHA-256, the following would all be compro
 
 ---
 
-## Why Shield May Be STRONGER Than AES-256
+## ~~Why Shield May Be STRONGER Than AES-256~~ [WITHDRAWN — v2.1 analysis only]
 
-### Unexpected Advantages
+> **Note:** The claims in this section applied to the retired v2.1 SHA256-CTR cipher.
+> Shield v4 uses standard AES-256-GCM / ChaCha20-Poly1305 AEAD. Corrections are shown below.
 
-#### 1. No Hardware Acceleration Side Channels
-- **AES-NI instructions** create cache timing side channels
-- **Shield:** Pure software implementation = fewer side channel vectors
-- Software-only approach is more resistant to power analysis attacks
+### ~~Unexpected Advantages~~
 
-#### 2. Simpler Primitive Attack Surface
-- **AES:** Complex S-boxes, key schedule, multiple block cipher modes
-- **Shield:** Just SHA-256 hashing (simpler = fewer implementation bugs)
-- Decades of cryptanalytic research on SHA-256 with no breaks
+#### ~~1. No Hardware Acceleration Side Channels~~
+- ~~**AES-NI instructions** create cache timing side channels~~
+- ~~**Shield:** Pure software implementation = fewer side channel vectors~~
+- ~~Software-only approach is more resistant to power analysis attacks~~
 
-#### 3. No Block Cipher Mode Vulnerabilities
-- **AES-GCM:** Nonce reuse = catastrophic (full key recovery)
-- **Shield:** Random nonce per message + HMAC protects even if nonce reused
-- Graceful degradation rather than catastrophic failure
+> **v4 correction:** Shield v4 uses AES-NI via the `ring` crate. The software-only
+> advantage no longer applies.
+
+#### ~~2. Simpler Primitive Attack Surface~~
+- ~~**AES:** Complex S-boxes, key schedule, multiple block cipher modes~~
+- ~~**Shield:** Just SHA-256 hashing (simpler = fewer implementation bugs)~~
+- ~~Decades of cryptanalytic research on SHA-256 with no breaks~~
+
+> **v4 correction:** Shield v4 uses standard AES-256-GCM, the same primitive as TLS 1.3.
+> Attack surface is equivalent.
+
+#### ~~3. No Block Cipher Mode Vulnerabilities~~
+- ~~**AES-GCM:** Nonce reuse = catastrophic (full key recovery)~~
+- ~~**Shield:** Random nonce per message + HMAC protects even if nonce reused~~
+- ~~Graceful degradation rather than catastrophic failure~~
+
+> **v4 correction:** Shield v4 uses AES-256-GCM. Nonce reuse **is** catastrophic (full keystream
+> recovery). Shield mitigates this with per-message random nonces, but the "graceful degradation"
+> claim is **withdrawn** — neither construction is safe on nonce reuse.
 
 #### 4. Post-Quantum Security (Already)
 - **RSA/ECDSA:** Vulnerable to Shor's algorithm (quantum computers)
 - **Shield:** Symmetric only = immune to public key quantum attacks
 - Already provides 2^128 security against quantum adversaries (Grover)
 
+> **v4 note:** Still applies. Shield v4 adds a PQ hybrid KEM for future-proofing.
+
 ---
 
-## Real-World Security Comparison
+## Real-World Security Comparison (v2.1 — historical)
 
 | Attack Vector | AES-256-GCM | Shield v2.1 |
 |---------------|-------------|-------------|
 | Brute force classical | 2^256 | 2^256 |
 | Quantum (Grover) | 2^128 | 2^128 |
 | Implementation bugs | Many historic | Minimal attack surface |
-| Hardware side channels | Cache timing (AES-NI) | Software-only |
-| Nonce reuse | Catastrophic failure | Degraded security |
+| Hardware side channels | Cache timing (AES-NI) | Software-only (v2.1 only) |
+| Nonce reuse | Catastrophic failure | Catastrophic failure (both) |
 | Password support | N/A (requires 256-bit key) | PBKDF2 stretching |
 | Hardware binding | Not built-in | v2.1 fingerprinting |
 | Forward secrecy | Not built-in | RatchetSession |
 
-**Verdict:** Shield provides equivalent or superior security to AES-256 for most threat models.
+**Verdict (v2.1):** ~~Shield provides equivalent or superior security to AES-256 for most threat models.~~
+
+**Verdict (v4):** Shield v4 uses AES-256-GCM at its core — equivalent security to industry-standard AEAD. The PQ hybrid layer adds defense against future quantum adversaries.
 
 ---
 
@@ -362,7 +400,7 @@ If you are a:
 
 ## Technical Deep Dive: Attack Complexity
 
-### Password Guessing (with Shield's PBKDF2-100k)
+### Password Guessing (with Shield's PBKDF2-600k)
 
 **Assumptions:**
 - Attacker has ciphertext
@@ -407,16 +445,18 @@ If you are a:
 
 ### Side-Channel Attacks
 
-**Shield Mitigations:**
+**Shield Mitigations (v2.1 — historical):**
 
-| Attack | AES-NI (Hardware) | Shield (Software) |
-|--------|-------------------|-------------------|
-| Cache timing | Vulnerable | Resistant |
-| Power analysis | Vulnerable | More resistant |
-| EM radiation | Vulnerable | More resistant |
-| Constant-time | Depends | Enforced |
+| Attack | AES-NI (Hardware) | Shield v2.1 (Software) | Shield v4 (AES-NI) |
+|--------|-------------------|-----------------------|---------------------|
+| Cache timing | Vulnerable | Resistant | Equivalent to AES |
+| Power analysis | Vulnerable | More resistant | Equivalent to AES |
+| EM radiation | Vulnerable | More resistant | Equivalent to AES |
+| Constant-time | Depends | Enforced | Enforced (via `ring`) |
 
-**Verdict:** Shield's software approach is more resistant to hardware side channels.
+**Verdict (v2.1):** ~~Shield's software approach is more resistant to hardware side channels.~~
+
+**Verdict (v4):** Shield v4 uses AES-NI via `ring`. Side-channel properties are equivalent to standard AES-256-GCM implementations — the software-only advantage no longer applies.
 
 ---
 

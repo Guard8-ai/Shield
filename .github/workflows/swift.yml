@@ -1,0 +1,68 @@
+name: Swift / iOS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'swift/**'
+      - 'ios/**'
+      - 'tests/v4_test_vectors.json'
+      - '.github/workflows/swift.yml'
+  pull_request:
+    paths:
+      - 'swift/**'
+      - 'ios/**'
+      - 'tests/v4_test_vectors.json'
+      - '.github/workflows/swift.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  swift-test:
+    name: Swift Package Tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Sync v4 test vectors into Swift test resources
+        run: |
+          mkdir -p swift/Tests/ShieldTests/Resources
+          cp tests/v4_test_vectors.json swift/Tests/ShieldTests/Resources/v4_test_vectors.json
+          echo "Vectors copied:"
+          ls -la swift/Tests/ShieldTests/Resources/
+
+      - name: Build Swift package
+        run: swift build --package-path swift/
+
+      - name: Run Swift tests (including v4 vector conformance)
+        run: swift test --package-path swift/ -v
+        # Fails the job if any test fails, including VectorTests
+
+  ios-simulator:
+    name: iOS/macOS Package Tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Sync v4 test vectors into iOS test resources
+        run: |
+          mkdir -p ios/Tests/ShieldTests/Resources
+          cp tests/v4_test_vectors.json ios/Tests/ShieldTests/Resources/v4_test_vectors.json
+          echo "Vectors copied:"
+          ls -la ios/Tests/ShieldTests/Resources/
+
+      - name: Run iOS/macOS package tests (including v4 vector conformance)
+        run: swift test --package-path ios/ -v
+        # Runs on macOS via the Package.swift platform declarations.
+        # Fails the job if any vector mismatch or decryption error is detected.
+
+      - name: Confirm vector test file present
+        run: |
+          test -f tests/v4_test_vectors.json && echo "v4_test_vectors.json exists" || exit 1

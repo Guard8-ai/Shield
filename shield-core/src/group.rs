@@ -115,6 +115,16 @@ fn decrypt_block(key: &[u8; 32], encrypted: &[u8]) -> Result<Vec<u8>> {
     Ok(plaintext)
 }
 
+/// Returned by `remove_member` so callers can distribute the new group key
+/// to remaining members. The removed member is NOT included.
+///
+/// If `keys` is empty, all members have been removed and the group should be dissolved.
+#[derive(Serialize, Deserialize)]
+pub struct GroupKeyUpdate {
+    /// The new group key, encrypted per-member (same format as `EncryptedGroupMessage.keys`).
+    pub keys: HashMap<String, String>,
+}
+
 /// Encrypted group message format.
 #[derive(Serialize, Deserialize)]
 pub struct EncryptedGroupMessage {
@@ -149,14 +159,34 @@ impl GroupEncryption {
         self.members.insert(member_id.to_string(), shared_key);
     }
 
-    /// Remove member from group.
-    pub fn remove_member(&mut self, member_id: &str) -> bool {
-        if let Some(mut key) = self.members.remove(member_id) {
-            key.zeroize();
-            true
-        } else {
-            false
+    /// Remove a member from the group and rotate the group key.
+    ///
+    /// The removed member is excluded from the returned `GroupKeyUpdate`, so
+    /// distributing it to all remaining members effectively revokes the removed
+    /// member's read access. Returns `None` if the member was not in the group.
+    ///
+    /// If `GroupKeyUpdate.keys` is empty (last member removed), the caller
+    /// should dissolve the group.
+    pub fn remove_member(&mut self, member_id: &str) -> Result<Option<GroupKeyUpdate>> {
+        let mut removed_key = match self.members.remove(member_id) {
+            Some(k) => k,
+            None => return Ok(None),
+        };
+        removed_key.zeroize();
+
+        // Rotate the group key — removed member held the old one.
+        let mut old_key: [u8; 32] = crate::random::random_bytes()?;
+        std::mem::swap(&mut self.group_key, &mut old_key);
+        old_key.zeroize();
+
+        // Encrypt the new group key for each remaining member.
+        let mut keys = HashMap::new();
+        for (id, member_key) in &self.members {
+            let encrypted_key = encrypt_block(member_key, &self.group_key)?;
+            keys.insert(id.clone(), URL_SAFE_NO_PAD.encode(&encrypted_key));
         }
+
+        Ok(Some(GroupKeyUpdate { keys }))
     }
 
     /// Get member list.
@@ -197,6 +227,9 @@ impl GroupEncryption {
             .map_err(|_| ShieldError::InvalidFormat)?;
 
         let group_key_vec = decrypt_block(member_key, &encrypted_key_bytes)?;
+        if group_key_vec.len() != 32 {
+            return Err(ShieldError::InvalidFormat);
+        }
         let mut group_key = [0u8; 32];
         group_key.copy_from_slice(&group_key_vec);
 
@@ -354,6 +387,9 @@ impl BroadcastEncryption {
             .decode(&member_data.key)
             .map_err(|_| ShieldError::InvalidFormat)?;
         let sg_key_vec = decrypt_block(member_key, &sg_key_enc)?;
+        if sg_key_vec.len() != 32 {
+            return Err(ShieldError::InvalidFormat);
+        }
         let mut sg_key = [0u8; 32];
         sg_key.copy_from_slice(&sg_key_vec);
 
@@ -367,6 +403,9 @@ impl BroadcastEncryption {
             )
             .map_err(|_| ShieldError::InvalidFormat)?;
         let msg_key_vec = decrypt_block(&sg_key, &msg_key_enc)?;
+        if msg_key_vec.len() != 32 {
+            return Err(ShieldError::InvalidFormat);
+        }
         let mut msg_key = [0u8; 32];
         msg_key.copy_from_slice(&msg_key_vec);
 
@@ -428,12 +467,53 @@ mod tests {
     #[test]
     fn test_group_remove_member() {
         let mut group = GroupEncryption::new(None).unwrap();
-        group.add_member("alice", [1u8; 32]);
-        group.add_member("bob", [2u8; 32]);
+        let alice_key: [u8; 32] = [1u8; 32];
+        let bob_key: [u8; 32] = [2u8; 32];
+        group.add_member("alice", alice_key);
+        group.add_member("bob", bob_key);
 
-        assert_eq!(group.members().len(), 2);
-        group.remove_member("bob");
-        assert_eq!(group.members().len(), 1);
+        // Encrypt a message with the original group key
+        let plaintext = b"secret group message";
+        let encrypted = group.encrypt(plaintext).unwrap();
+
+        // Remove bob and rotate the key
+        let update = group.remove_member("bob").unwrap();
+        assert!(
+            update.is_some(),
+            "remove_member should return Some(GroupKeyUpdate) for an existing member"
+        );
+        let update = update.unwrap();
+
+        // Alice should be in the update (remaining member)
+        assert!(
+            update.keys.contains_key("alice"),
+            "Alice should receive the new key"
+        );
+        // Bob should NOT be in the update
+        assert!(
+            !update.keys.contains_key("bob"),
+            "Bob should NOT receive the new key"
+        );
+
+        // Messages encrypted BEFORE removal can still be decrypted (old key still valid for historical messages)
+        let decrypted = GroupEncryption::decrypt_as_member(&encrypted, "alice", &alice_key).unwrap();
+        assert_eq!(decrypted, plaintext);
+
+        // Messages encrypted AFTER removal with the new key cannot be decrypted by bob
+        let new_encrypted = group.encrypt(plaintext).unwrap();
+        assert!(
+            GroupEncryption::decrypt_as_member(&new_encrypted, "bob", &bob_key).is_err(),
+            "Bob should NOT be able to decrypt post-removal messages"
+        );
+
+        // Alice can still decrypt post-removal messages (she's still a member)
+        let decrypted =
+            GroupEncryption::decrypt_as_member(&new_encrypted, "alice", &alice_key).unwrap();
+        assert_eq!(decrypted, plaintext);
+
+        // Removing a non-existent member returns None
+        let result = group.remove_member("charlie").unwrap();
+        assert!(result.is_none());
     }
 
     #[test]

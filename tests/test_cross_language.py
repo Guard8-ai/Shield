@@ -2,9 +2,41 @@
 """
 Shield Cross-Language Interoperability Tests
 
-Verifies that ciphertext from one language can be decrypted in another.
-This is CRITICAL for the 1.0.0 release claim: "Encrypt in any language, decrypt in any other."
+Verifies that ciphertext produced by one binding can be decrypted by another,
+for the three bindings covered here: Python, JavaScript (Node.js), and Go.
+
+Scope: this test covers Python↔JS and Python↔Go (base v4 AEAD format and
+quick-key mode). The other 9 bindings (Rust, Kotlin, Java, Android, iOS/Swift,
+C, C#, WASM, and browser) each run their own conformance suites against the
+shared v4_test_vectors.json. Cross-language ratchet/stream/group compatibility
+is NOT tested here — those modules are not yet byte-compatible across all
+bindings (see PROTOCOL.md §3.8).
 """
+
+# ---------------------------------------------------------------------------
+# RATCHET CROSS-LANGUAGE SCOPE NOTE
+#
+# Ratchet cross-language tests are limited to WITHIN-FAMILY pairs only.
+# Shield's ratchet module has three mutually incompatible wire-format families:
+#
+#   Family A  —  Rust, WASM
+#       Chain KDF: HMAC-SHA256(root, label)
+#       Counter: encrypted inside ciphertext
+#
+#   Family B  —  Python, JavaScript, Kotlin, Android, iOS
+#       Chain KDF: SHA256(root || label) with "send"/"recv" labels
+#       Counter: encrypted inside ciphertext
+#
+#   Family C  —  Go, Java, Swift, C#, C
+#       Chain KDF: SHA256(root || label) with "init_send"/"init_recv" labels
+#       Counter: cleartext 8-byte prefix
+#
+# Attempting to decrypt a Family-B ciphertext with a Family-C session (or any
+# other cross-family combination) is expected to fail and MUST NOT be tested
+# here. See tests/README.md and tests/ratchet_vectors.json for the formal
+# family definitions and test vectors. Full realignment is tracked in
+# backend-064.
+# ---------------------------------------------------------------------------
 
 import sys
 import os

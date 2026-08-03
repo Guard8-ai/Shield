@@ -113,14 +113,21 @@ namespace Dikestra.Shield
 
             while (pos + 4 <= encrypted.Length)
             {
-                int encLen = BitConverter.ToInt32(encrypted, pos);
+                // Read the chunk length as unsigned: the value is attacker
+                // controlled, and as Int32 a length near int.MaxValue made
+                // pos + encLen overflow negative, bypassing the bounds check
+                // and reaching new byte[encLen] (OOM / OverflowException DoS).
+                uint encLenU = BitConverter.ToUInt32(encrypted, pos);
                 pos += 4;
 
-                if (encLen == 0)
+                if (encLenU == 0)
                     break; // End marker
 
-                if (pos + encLen > encrypted.Length)
+                // 0 <= encLen <= encrypted.Length - pos (the subtraction of
+                // non-negative ints cannot wrap, so no overflow bypass).
+                if (encLenU > (uint)(encrypted.Length - pos))
                     throw new ArgumentException("Incomplete chunk");
+                int encLen = (int)encLenU;
 
                 byte[] encryptedChunk = new byte[encLen];
                 Array.Copy(encrypted, pos, encryptedChunk, 0, encLen);
@@ -197,10 +204,16 @@ namespace Dikestra.Shield
 
             while (input.Read(lenBytes, 0, 4) == 4)
             {
-                int encLen = BitConverter.ToInt32(lenBytes, 0);
-                if (encLen == 0)
+                // Unsigned read + explicit bound: as Int32 a negative length
+                // reached new byte[encLen] (OverflowException DoS).
+                uint encLenU = BitConverter.ToUInt32(lenBytes, 0);
+                if (encLenU == 0)
                     break;
 
+                if (encLenU > int.MaxValue ||
+                    encLenU > (ulong)(input.Length - input.Position))
+                    throw new IOException("Incomplete chunk");
+                int encLen = (int)encLenU;
                 byte[] encrypted = new byte[encLen];
                 if (input.Read(encrypted, 0, encLen) != encLen)
                     throw new IOException("Incomplete chunk");

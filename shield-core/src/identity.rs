@@ -586,7 +586,7 @@ impl SecureSession {
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
 
-        if now - self.last_rotation >= self.rotation_interval {
+        if now.saturating_sub(self.last_rotation) >= self.rotation_interval {
             self.key_version += 1;
             let new_key = Self::derive_session_key(&self.master_key, self.key_version);
             self.keys.insert(self.key_version, new_key);

@@ -174,20 +174,27 @@ class SecureKeyStore(private val context: Context) {
             return Shield.withKey(existingKey)
         }
 
-        // Create new Shield and store its key
-        val shield = Shield.create(password, service)
-        // Note: We can't access the key directly, so we derive it again for storage
-        val key = deriveKey(password, service)
+        // Derive a fresh key from the password using a random salt, persist it,
+        // and return a Shield bound to exactly that key. First call and every
+        // later call therefore operate in the same pre-shared-key mode (0x13)
+        // with the same key, so data written before a restart stays decryptable.
+        val salt = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
+        val key = deriveKey(password, service, salt)
         storeKey(alias, key)
-        return shield
+        return Shield.withKey(key)
     }
 
-    private fun deriveKey(password: String, service: String): ByteArray {
-        val salt = java.security.MessageDigest.getInstance("SHA-256")
-            .digest(service.toByteArray(Charsets.UTF_8))
+    private fun deriveKey(password: String, service: String, salt: ByteArray): ByteArray {
+        // Salt layout matches Shield.create: random_salt(16) || service bytes,
+        // so the derived key is per-service and not precomputable.
+        val pbkdf2Salt = salt + service.toByteArray(Charsets.UTF_8)
         val factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-        val spec = javax.crypto.spec.PBEKeySpec(password.toCharArray(), salt, 100_000, 256)
-        return factory.generateSecret(spec).encoded
+        val spec = javax.crypto.spec.PBEKeySpec(password.toCharArray(), pbkdf2Salt, 600_000, 256)
+        try {
+            return factory.generateSecret(spec).encoded
+        } finally {
+            spec.clearPassword()
+        }
     }
 
     private fun ByteArray.toHexString(): String = joinToString("") { "%02x".format(it) }

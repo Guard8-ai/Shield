@@ -67,14 +67,27 @@ export function installFetchHook(
         return response;
       }
 
-      // Check if client has valid key
+      // Check if client has valid key. Fail closed: a recognized encrypted
+      // envelope must never reach the application as if it were plain data.
       if (!client.isValid()) {
-        console.warn('Shield: Key expired or not set, returning encrypted response');
-        return response;
+        console.warn('Shield: Key expired or not set, failing closed');
+        return shieldErrorResponse();
       }
 
-      // Decrypt the envelope
-      const decryptedText = client.decryptEnvelope(text);
+      // Decrypt the envelope. On failure return an error Response instead
+      // of the still-encrypted envelope, so response.json() consumers get
+      // an explicit error rather than ciphertext masquerading as data.
+      let decryptedText: string;
+      try {
+        decryptedText = client.decryptEnvelope(text);
+      } catch (error) {
+        if (onError) {
+          onError(error as Error, response);
+        } else {
+          console.error('Shield decryption error:', error);
+        }
+        return shieldErrorResponse();
+      }
 
       // Create new response with decrypted body
       return new Response(decryptedText, {
@@ -88,8 +101,7 @@ export function installFetchHook(
       } else {
         console.error('Shield decryption error:', error);
       }
-      // Return original response on error
-      return response;
+      return shieldErrorResponse();
     }
   };
 
@@ -114,6 +126,18 @@ export function uninstallFetchHook(): void {
  */
 export function isFetchHookInstalled(): boolean {
   return isInstalled;
+}
+
+/**
+ * Fail-closed error response returned when a recognized encrypted envelope
+ * cannot be decrypted (missing/expired key or decryption failure).
+ */
+function shieldErrorResponse(): Response {
+  return new Response(JSON.stringify({ error: 'Shield decryption failed' }), {
+    status: 502,
+    statusText: 'Shield Decryption Failed',
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 /**

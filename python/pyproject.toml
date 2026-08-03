@@ -26,7 +26,11 @@ classifiers = [
     "Topic :: Security :: Cryptography",
 ]
 requires-python = ">=3.8"
-dependencies = []
+# core.py imports `cryptography` unconditionally (AEAD primitives), so it is a
+# hard runtime dependency: without it `import shield` raises ImportError.
+dependencies = [
+    "cryptography>=46.0",
+]
 
 [project.optional-dependencies]
 dev = [

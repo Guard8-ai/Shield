@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"time"
 )
 
 // Protocol constants
@@ -70,8 +71,23 @@ type ShieldChannel struct {
 	service string
 }
 
+// applyHandshakeDeadline enforces HandshakeTimeoutMs by setting a read/write
+// deadline on the underlying connection (when it is a net.Conn) for the
+// duration of the handshake. The returned func clears the deadline.
+func applyHandshakeDeadline(conn io.ReadWriteCloser, timeoutMs int64) func() {
+	nc, ok := conn.(net.Conn)
+	if !ok || timeoutMs <= 0 {
+		return func() {}
+	}
+	_ = nc.SetDeadline(time.Now().Add(time.Duration(timeoutMs) * time.Millisecond))
+	return func() { _ = nc.SetDeadline(time.Time{}) }
+}
+
 // Connect initiates a client connection with PAKE handshake.
 func Connect(conn io.ReadWriteCloser, config *ChannelConfig) (*ShieldChannel, error) {
+	clearDeadline := applyHandshakeDeadline(conn, config.HandshakeTimeoutMs)
+	defer clearDeadline()
+
 	ch := &ShieldChannel{conn: conn, service: config.Service}
 
 	// Step 1: Generate client salt and send ClientHello
@@ -123,6 +139,9 @@ func Connect(conn io.ReadWriteCloser, config *ChannelConfig) (*ShieldChannel, er
 
 // Accept waits for a client connection with PAKE handshake.
 func Accept(conn io.ReadWriteCloser, config *ChannelConfig) (*ShieldChannel, error) {
+	clearDeadline := applyHandshakeDeadline(conn, config.HandshakeTimeoutMs)
+	defer clearDeadline()
+
 	ch := &ShieldChannel{conn: conn, service: config.Service}
 
 	// Step 1: Receive ClientHello

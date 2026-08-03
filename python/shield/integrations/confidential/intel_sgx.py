@@ -409,9 +409,7 @@ class SealedStorage:
                     seal_key = f.read(16)
 
                 from shield import Shield
-                s = Shield.__new__(Shield)
-                s._key = hashlib.sha256(seal_key).digest()
-                s._service = f"sgx-sealed-{self.seal_to}"
+                s = Shield.with_key(hashlib.sha256(seal_key).digest(), max_age_ms=None)
 
                 return s.encrypt(data)
             except Exception as e:
@@ -446,11 +444,15 @@ class SealedStorage:
                     seal_key = f.read(16)
 
                 from shield import Shield
-                s = Shield.__new__(Shield)
-                s._key = hashlib.sha256(seal_key).digest()
-                s._service = f"sgx-sealed-{self.seal_to}"
+                s = Shield.with_key(hashlib.sha256(seal_key).digest(), max_age_ms=None)
 
-                return s.decrypt(sealed_data)
+                result = s.decrypt(sealed_data)
+                if result is None:
+                    raise AttestationError(
+                        "authentication failed",
+                        code="UNSEAL_ERROR",
+                    )
+                return result
             except Exception as e:
                 raise AttestationError(
                     f"Failed to unseal data: {e}",

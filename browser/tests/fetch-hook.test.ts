@@ -148,7 +148,7 @@ describe('Fetch Hook', () => {
       expect(data).toEqual({ decrypted: true });
     });
 
-    it('should pass through if client key is invalid', async () => {
+    it('should fail closed with an error response if client key is invalid', async () => {
       const client = createMockClient({ isValid: false });
       const encryptedEnvelope = { encrypted: true, data: 'ciphertext' };
       globalThis.fetch = vi.fn().mockResolvedValue(
@@ -160,9 +160,10 @@ describe('Fetch Hook', () => {
       const response = await fetch('/api/test');
       const data = await response.json();
 
-      expect(data).toEqual(encryptedEnvelope);
+      expect(response.status).toBe(502);
+      expect(data).toEqual({ error: 'Shield decryption failed' });
       expect(consoleSpy).toHaveBeenCalledWith(
-        'Shield: Key expired or not set, returning encrypted response'
+        'Shield: Key expired or not set, failing closed'
       );
       consoleSpy.mockRestore();
     });
@@ -182,7 +183,7 @@ describe('Fetch Hook', () => {
       expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
     });
 
-    it('should return original response on decryption error', async () => {
+    it('should return an error response on decryption error', async () => {
       const client = createMockClient({ throwOnDecrypt: true });
       const encryptedEnvelope = { encrypted: true, data: 'invalid' };
       globalThis.fetch = vi.fn().mockResolvedValue(
@@ -194,8 +195,9 @@ describe('Fetch Hook', () => {
       const response = await fetch('/api/test');
       const data = await response.json();
 
-      // Should return original encrypted envelope on error
-      expect(data).toEqual(encryptedEnvelope);
+      // Must NOT hand the application the still-encrypted envelope.
+      expect(response.status).toBe(502);
+      expect(data).toEqual({ error: 'Shield decryption failed' });
     });
 
     it('should handle invalid JSON gracefully', async () => {

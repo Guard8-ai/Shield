@@ -25,7 +25,10 @@ let package = Package(
         .testTarget(
             name: "ShieldTests",
             dependencies: ["Shield"],
-            path: "Tests/ShieldTests"
+            path: "Tests/ShieldTests",
+            resources: [
+                .copy("Resources")
+            ]
         ),
     ]
 )

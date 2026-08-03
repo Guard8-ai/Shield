@@ -14,6 +14,8 @@ import (
 const (
 	// DefaultChunkSize is the default streaming chunk size.
 	DefaultChunkSize = 64 * 1024
+	// maxEncryptedChunkLen is the maximum allowed encrypted chunk length (64 MiB).
+	maxEncryptedChunkLen = 64 * 1024 * 1024
 )
 
 // StreamCipher provides streaming encryption for large data.
@@ -97,10 +99,13 @@ func (sc *StreamCipher) Decrypt(ciphertext []byte) ([]byte, error) {
 			return nil, ErrCiphertextTooShort
 		}
 
-		chunkLen := binary.LittleEndian.Uint32(ciphertext[offset : offset+4])
+		chunkLen := uint64(binary.LittleEndian.Uint32(ciphertext[offset : offset+4]))
 		offset += 4
 
-		if offset+int(chunkLen) > len(ciphertext) {
+		if chunkLen > maxEncryptedChunkLen {
+			return nil, ErrMessageTooLarge
+		}
+		if chunkLen > uint64(len(ciphertext)-offset) {
 			return nil, ErrCiphertextTooShort
 		}
 

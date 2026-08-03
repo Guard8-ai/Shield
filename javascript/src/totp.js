@@ -104,12 +104,18 @@ class TOTP {
         }
         const counter = Math.floor(timestamp / this.interval);
 
+        const codeBuf = Buffer.from(code);
+
         for (let offset = -window; offset <= window; offset++) {
-            const expected = this._hotp(counter + offset);
-            if (crypto.timingSafeEqual(
-                Buffer.from(code),
-                Buffer.from(expected)
-            )) {
+            const expected = Buffer.from(this._hotp(counter + offset));
+            // crypto.timingSafeEqual throws RangeError on length mismatch;
+            // a wrong-length code must return false, not throw. Every
+            // expected code has the same length (this.digits), so a
+            // mismatched length can never match in any window.
+            if (codeBuf.length !== expected.length) {
+                return false;
+            }
+            if (crypto.timingSafeEqual(codeBuf, expected)) {
                 return true;
             }
         }

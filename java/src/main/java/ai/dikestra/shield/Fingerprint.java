@@ -40,7 +40,7 @@ public class Fingerprint {
      * Collect hardware fingerprint.
      *
      * @param mode Fingerprint mode
-     * @return Fingerprint string (MD5 hex), or empty for NONE
+     * @return Fingerprint string (SHA-256 hex), or empty for NONE
      * @throws Exception If hardware identifiers cannot be collected
      */
     public static String collect(FingerprintMode mode) throws Exception {
@@ -75,9 +75,9 @@ public class Fingerprint {
                 throw new Exception("Hardware fingerprint unavailable");
             }
 
-            // Create MD5 hash of combined components
+            // Create SHA-256 hash of combined components
             String combined = String.join("-", components);
-            return md5(combined);
+            return sha256Hex(combined);
         }
 
         throw new IllegalArgumentException("Unknown fingerprint mode: " + mode);
@@ -184,7 +184,7 @@ public class Fingerprint {
             for (String line : content.split("\n")) {
                 if (line.startsWith("processor") && line.contains("0")) {
                     // Use first processor as identifier (hashed)
-                    return md5(line);
+                    return sha256Hex(line);
                 }
             }
         } else if (os.contains("mac")) {
@@ -198,7 +198,7 @@ public class Fingerprint {
                 if (cpuInfo != null) {
                     cpuInfo = cpuInfo.trim();
                     if (!cpuInfo.isEmpty()) {
-                        return md5(cpuInfo);
+                        return sha256Hex(cpuInfo);
                     }
                 }
             }
@@ -208,10 +208,10 @@ public class Fingerprint {
     }
 
     /**
-     * MD5 hash helper.
+     * SHA-256 hash helper.
      */
-    private static String md5(String input) throws Exception {
-        MessageDigest md = MessageDigest.getInstance("MD5");
+    private static String sha256Hex(String input) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
         byte[] digest = md.digest(input.getBytes());
 
         StringBuilder hex = new StringBuilder();

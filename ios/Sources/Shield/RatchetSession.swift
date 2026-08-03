@@ -50,7 +50,10 @@ public final class RatchetSession {
     /// - Parameters:
     ///   - rootKey: 32-byte shared secret from key exchange
     ///   - isInitiator: True if this party initiated the session
+    /// - Precondition: `rootKey` must be exactly 32 bytes.
     public init(rootKey: [UInt8], isInitiator: Bool) {
+        precondition(rootKey.count == 32,
+                     "RatchetSession requires a 32-byte root key (got \(rootKey.count))")
         // Derive separate send/receive chains
         let (sendLabel, recvLabel): ([UInt8], [UInt8])
         if isInitiator {
@@ -102,9 +105,8 @@ public final class RatchetSession {
     ///   Messages must be decrypted in order. Out-of-order
     ///   messages will fail authentication.
     public func decrypt(_ ciphertext: [UInt8]) -> [UInt8]? {
-        // Ratchet receive chain
+        // Derive next chain state but don't commit yet
         let (newChain, msgKey) = ratchetChain(recvChain)
-        recvChain = newChain
 
         // Decrypt with message key
         guard let (plaintext, counter) = decryptWithKey(msgKey, encrypted: ciphertext) else {
@@ -116,6 +118,8 @@ public final class RatchetSession {
             return nil
         }
 
+        // Commit chain advance AFTER successful verify
+        recvChain = newChain
         _recvCounter += 1
         return plaintext
     }
@@ -137,7 +141,9 @@ public final class RatchetSession {
     private func encryptWithKey(_ key: [UInt8], plaintext: [UInt8], counter: UInt64) -> [UInt8] {
         // Generate random nonce
         var nonce = [UInt8](repeating: 0, count: Self.nonceSize)
-        _ = SecRandomCopyBytes(kSecRandomDefault, Self.nonceSize, &nonce)
+        guard SecRandomCopyBytes(kSecRandomDefault, Self.nonceSize, &nonce) == errSecSuccess else {
+            fatalError("RatchetSession: CSPRNG failure generating nonce (fail-closed)")
+        }
 
         // Counter as 8-byte little-endian
         var counterBytes = [UInt8](repeating: 0, count: 8)

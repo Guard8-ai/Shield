@@ -490,6 +490,18 @@ impl GCPSecretManager {
     }
 }
 
+/// Verify that attestation report_data matches the expected challenge.
+///
+/// Returns `false` if the challenge is empty, preventing accidental acceptance
+/// of any report when no challenge was provided.
+fn report_data_matches(report_data_hex: &str, challenge: &[u8]) -> bool {
+    if challenge.is_empty() {
+        return false;
+    }
+    let expected_hex = hex::encode(challenge);
+    report_data_hex.to_lowercase() == expected_hex.to_lowercase()
+}
+
 /// Decode base64url (no padding).
 fn base64_url_decode(input: &str) -> Result<Vec<u8>, AttestationError> {
     // Add padding if needed

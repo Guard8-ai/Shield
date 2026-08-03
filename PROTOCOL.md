@@ -223,7 +223,7 @@ while need_more_bytes:
     32-byte keystream block
 ```
 
-> **Note (cross-language wire format):** The core `Shield` and `StreamCipher` keystream use raw SHA256 for cross-language interoperability. Internal-only modules (ratchet, rotation, group, identity, exchange, signatures) use HMAC-SHA256 as keyed PRF — see Section 3.8.
+> **Note (cross-language wire format):** The core `Shield` and `StreamCipher` keystream use raw SHA256 for cross-language interoperability. Internal-only modules (ratchet, rotation, group, identity, exchange, signatures) use HMAC-SHA256 as keyed PRF **in the Rust reference core only** — see Section 3.8.
 
 ## 3. ShieldChannel Protocol
 
@@ -322,7 +322,7 @@ Counter = message sequence number (big-endian)
 
 ### 3.8 Key Ratcheting
 
-After each message (using HMAC-SHA256 as keyed PRF):
+**Rust reference only:** After each message (using HMAC-SHA256 as keyed PRF):
 
 ```
 new_chain_key = HMAC-SHA256(chain_key, "chain")
@@ -335,7 +335,7 @@ Keystream generation in ratchet messages also uses HMAC-SHA256:
 keystream_block[i] = HMAC-SHA256(message_key, nonce || counter_i)
 ```
 
-> **v2.1 upgrade (Rust):** All internal modules (ratchet, rotation, group, identity, exchange, signatures) replaced raw `SHA256(key||data)` patterns with `HMAC-SHA256(key, data)` for formal PRF security (Bellare 2006), length-extension resistance, and NIST SP 800-108 compliance.
+> **v2.1 upgrade (Rust only):** The Rust binding's internal modules (ratchet, rotation, group, identity, exchange, signatures) replaced raw `SHA256(key||data)` patterns with `HMAC-SHA256(key, data)` for formal PRF security (Bellare 2006), length-extension resistance, and NIST SP 800-108 compliance. Other language bindings (Python, JavaScript, Go, etc.) continue to use `SHA256(key||data)` in their internal PRF calls and are **NOT byte-compatible** with the Rust reference for ratchet/stream/group modules. Only the base v4 AEAD wire format, PQ hybrid KEX, and channel session-key derivation are vector-locked across all bindings.
 
 ### 3.9 Sync Channel Timeout (v2.1)
 

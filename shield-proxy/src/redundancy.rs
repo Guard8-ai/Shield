@@ -66,11 +66,12 @@ impl RedundancyManager {
         let config = self.config.clone();
         let metrics = self.metrics.clone();
 
-        // Bind a UDP socket for heartbeat communication
-        let socket = match UdpSocket::bind("0.0.0.0:0").await {
+        // Bind a UDP socket for heartbeat communication on the configured port
+        // so that the peer can send heartbeats back to a known address (F3).
+        let socket = match UdpSocket::bind(&config.bind_address).await {
             Ok(s) => Arc::new(s),
             Err(e) => {
-                error!("Failed to bind heartbeat socket: {e}");
+                error!(bind = %config.bind_address, "Failed to bind heartbeat socket: {e}");
                 return;
             }
         };
@@ -242,6 +243,8 @@ mod tests {
             heartbeat_interval_ms: 500,
             failover_timeout_ms: 3000,
             virtual_ip: None,
+            psk: Some("test-psk-value".to_string()),
+            bind_address: "127.0.0.1:0".to_string(),
         };
         let metrics = MetricsCollector::new();
         let mgr = RedundancyManager::new(config, metrics);
@@ -252,5 +255,90 @@ mod tests {
     fn test_heartbeat_size() {
         let hb = encode_heartbeat(Role::Active, 0);
         assert_eq!(hb.len(), HEARTBEAT_SIZE);
+    }
+
+    /// Integration test: verify that a heartbeat sent from one socket is received
+    /// on the configured port of a peer socket. This exercises the F3 fix — the
+    /// receive socket must be bound to a known port, not an ephemeral :0.
+    #[tokio::test]
+    async fn test_heartbeat_delivery_integration() {
+        use tokio::net::UdpSocket;
+        use std::time::Duration;
+
+        // Bind receiver on a known local port (let OS pick to avoid conflicts).
+        let receiver = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let receiver_addr = receiver.local_addr().unwrap();
+
+        // Sender sends to the receiver's configured address (not :0).
+        let sender = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+        let heartbeat = encode_heartbeat(Role::Active, 7);
+        sender.send_to(&heartbeat, receiver_addr).await.unwrap();
+
+        // Receive with a short timeout — if socket were bound to :0 (ephemeral)
+        // the send would target a wrong port and this would time out.
+        let mut buf = [0u8; HEARTBEAT_SIZE];
+        let result = time::timeout(
+            Duration::from_millis(500),
+            receiver.recv_from(&mut buf),
+        )
+        .await;
+
+        assert!(result.is_ok(), "recv timed out — heartbeat never arrived (F3 regression)");
+        let (len, _src) = result.unwrap().unwrap();
+        assert_eq!(len, HEARTBEAT_SIZE, "received packet has wrong size");
+
+        let decoded = decode_heartbeat(&buf[..len]);
+        assert!(decoded.is_some(), "received heartbeat failed to decode");
+        let (role, seq) = decoded.unwrap();
+        assert_eq!(role, Role::Active);
+        assert_eq!(seq, 7);
+    }
+
+    /// Integration test: verify that when no peer heartbeats are received within
+    /// the failover timeout, the redundancy manager promotes itself to Active
+    /// (single-node failover — no split-brain without a peer).
+    #[tokio::test]
+    async fn test_failover_promotes_to_active() {
+        use std::time::Duration;
+
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = socket.local_addr().unwrap();
+        let socket = Arc::new(socket);
+
+        let role = Arc::new(AtomicU8::new(Role::Standby as u8));
+
+        // Use a very short failover timeout for test speed.
+        let config = RedundancySection {
+            enabled: true,
+            peer_address: local_addr.to_string(), // unused — we won't send
+            heartbeat_interval_ms: 100,
+            failover_timeout_ms: 100,
+            virtual_ip: None,
+            psk: Some("integration-test-psk".to_string()),
+            bind_address: local_addr.to_string(),
+        };
+        let metrics = MetricsCollector::new();
+
+        let role_clone = Arc::clone(&role);
+        let socket_clone = Arc::clone(&socket);
+        let config_clone = config.clone();
+        let metrics_clone = metrics.clone();
+
+        // Run receiver in background; it will time out and promote to Active.
+        let handle = tokio::spawn(async move {
+            heartbeat_receiver(socket_clone, role_clone, &config_clone, &metrics_clone).await;
+        });
+
+        // Wait slightly longer than the failover timeout.
+        time::sleep(Duration::from_millis(300)).await;
+
+        assert_eq!(
+            Role::from_u8(role.load(std::sync::atomic::Ordering::Relaxed)),
+            Role::Active,
+            "node should have promoted to Active after peer silence"
+        );
+
+        handle.abort();
     }
 }

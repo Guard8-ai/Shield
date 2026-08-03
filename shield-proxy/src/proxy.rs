@@ -1,14 +1,14 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use tokio::io;
+use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 
 use crate::config::ProxyConfig;
 use crate::metrics::MetricsCollector;
 use crate::protocol::ProtocolDetector;
-use crate::transport::ShieldTransport;
+use crate::transport::{ShieldTransport, RELAY_IDLE_TIMEOUT};
 
 /// Core TCP proxy server.
 pub struct ProxyServer {
@@ -67,7 +67,12 @@ impl ProxyServer {
 
                     tokio::spawn(async move {
                         // Detect protocol
-                        let protocol = ProtocolDetector::detect(&client_stream).await;
+                        let Some(protocol) = ProtocolDetector::detect(&client_stream).await else {
+                            warn!(addr = %client_addr, "No data within handshake timeout, closing connection");
+                            active.fetch_sub(1, Ordering::Relaxed);
+                            metrics.set_connections_active(active.load(Ordering::Relaxed) as u64);
+                            return;
+                        };
                         info!(
                             addr = %client_addr,
                             protocol = %protocol,
@@ -171,13 +176,42 @@ impl ProxyServer {
 
 /// Plain bidirectional forwarding without encryption.
 async fn forward_plain(
-    mut client: tokio::net::TcpStream,
-    mut upstream: tokio::net::TcpStream,
+    client: tokio::net::TcpStream,
+    upstream: tokio::net::TcpStream,
     metrics: &MetricsCollector,
 ) -> Result<(), io::Error> {
-    let (bytes_up, bytes_down) = io::copy_bidirectional(&mut client, &mut upstream).await?;
-    metrics.add_bytes_forwarded(bytes_up + bytes_down);
-    Ok(())
+    let (client_read, client_write) = client.into_split();
+    let (upstream_read, upstream_write) = upstream.into_split();
+
+    let metrics_up = metrics.clone();
+    let up = tokio::spawn(async move {
+        plain_pipe(client_read, upstream_write, &metrics_up).await
+    });
+    let metrics_down = metrics.clone();
+    let down = tokio::spawn(async move {
+        plain_pipe(upstream_read, client_write, &metrics_down).await
+    });
+
+    crate::transport::join_pipes(up, down).await
+}
+
+async fn plain_pipe(
+    mut source: tokio::net::tcp::OwnedReadHalf,
+    mut dest: tokio::net::tcp::OwnedWriteHalf,
+    metrics: &MetricsCollector,
+) -> Result<(), io::Error> {
+    let mut buf = vec![0u8; 32 * 1024];
+    loop {
+        let n = tokio::time::timeout(RELAY_IDLE_TIMEOUT, source.read(&mut buf))
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "relay idle timeout"))??;
+        if n == 0 {
+            let _ = dest.shutdown().await;
+            return Ok(());
+        }
+        dest.write_all(&buf[..n]).await?;
+        metrics.add_bytes_forwarded(n as u64);
+    }
 }
 
 #[cfg(test)]

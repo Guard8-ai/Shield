@@ -80,7 +80,11 @@ class Shield private constructor(private val key: ByteArray) {
 
             val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
             val spec = PBEKeySpec(password.toCharArray(), salt, iterations, KEY_SIZE * 8)
-            val key = factory.generateSecret(spec).encoded
+            val key = try {
+                factory.generateSecret(spec).encoded
+            } finally {
+                spec.clearPassword()
+            }
 
             return Shield(key)
         }
@@ -219,7 +223,13 @@ class Shield private constructor(private val key: ByteArray) {
 
                     if (maxAgeMs != null) {
                         val nowMs = System.currentTimeMillis()
-                        val age = nowMs - timestampMs
+                        // Saturating subtraction (like the Rust core): a hostile timestamp
+                        // near Long.MIN_VALUE must not overflow to a small/negative age.
+                        val age = try {
+                            Math.subtractExact(nowMs, timestampMs)
+                        } catch (e: ArithmeticException) {
+                            Long.MAX_VALUE
+                        }
                         if (timestampMs > nowMs + 5000 || age > maxAgeMs) {
                             throw ShieldException.AuthenticationFailed()
                         }
@@ -334,7 +344,11 @@ object ShieldUtils {
             keyLength * 8
         )
         val factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-        return factory.generateSecret(spec).encoded
+        try {
+            return factory.generateSecret(spec).encoded
+        } finally {
+            spec.clearPassword()
+        }
     }
 }
 

@@ -7,10 +7,11 @@ WORKDIR /build/shield-proxy
 RUN cargo build --release
 
 # Stage 2: Runtime (minimal image)
-FROM gcr.io/distroless/cc-debian12
+FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=builder /build/shield-proxy/target/release/shield-proxy /usr/local/bin/shield-proxy
 COPY shield-proxy/deploy/shield-proxy.toml /etc/shield-proxy/config.toml
 ENV SHIELD_PROXY_CONFIG=/etc/shield-proxy/config.toml
 ENV RUST_LOG=info
 EXPOSE 8443 5353/udp 9090
+USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/shield-proxy"]

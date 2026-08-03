@@ -14,8 +14,11 @@ public class GroupEncryption {
     private var members: [String: [UInt8]] = [:]
 
     /// Create group encryption with generated group key.
-    public init() {
-        self.groupKey = Shield.randomBytes(32) ?? [UInt8](repeating: 0, count: 32)
+    public init() throws {
+        guard let key = Shield.randomBytes(32) else {
+            throw ShieldError.randomGenerationFailed
+        }
+        self.groupKey = key
     }
 
     /// Create group encryption with specified group key.
@@ -86,9 +89,12 @@ public class GroupEncryption {
     }
 
     /// Rotate the group key.
-    public func rotateKey() -> [UInt8] {
+    public func rotateKey() throws -> [UInt8] {
+        guard let newKey = Shield.randomBytes(32) else {
+            throw ShieldError.randomGenerationFailed
+        }
         let oldKey = groupKey
-        groupKey = Shield.randomBytes(32) ?? [UInt8](repeating: 0, count: 32)
+        groupKey = newKey
         return oldKey
     }
 

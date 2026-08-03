@@ -21,6 +21,7 @@ pub struct NitroAttestationProvider {
     expected_pcrs: HashMap<u8, String>,
     max_age_seconds: u64,
     verify_certificate: bool,
+    expected_report_data: Option<Vec<u8>>,
 }
 
 impl NitroAttestationProvider {
@@ -30,7 +31,17 @@ impl NitroAttestationProvider {
             expected_pcrs: HashMap::new(),
             max_age_seconds: 300,
             verify_certificate: true,
+            expected_report_data: None,
         }
+    }
+
+    /// Set expected report data (challenge) that must be present in the attestation document.
+    ///
+    /// An empty expected value is rejected to prevent accidental acceptance of any report.
+    #[must_use]
+    pub fn with_expected_report_data(mut self, expected: impl Into<Vec<u8>>) -> Self {
+        self.expected_report_data = Some(expected.into());
+        self
     }
 
     /// Add an expected PCR value.
@@ -186,6 +197,23 @@ impl AttestationProvider for NitroAttestationProvider {
         }
         if doc.public_key.is_some() {
             claims.insert("has_public_key".into(), serde_json::json!(true));
+        }
+
+        // Verify expected report data (challenge) if configured
+        if let Some(ref expected) = self.expected_report_data {
+            if expected.is_empty() {
+                return Err(AttestationError::InvalidFormat(
+                    "Empty expected report data (challenge) rejected".to_string(),
+                ));
+            }
+            let actual = doc.user_data.as_deref().unwrap_or(&[]);
+            if actual != expected.as_slice() {
+                return Ok(AttestationResult::failure(
+                    self.tee_type(),
+                    "Report data (user_data) does not match expected challenge",
+                )
+                .with_raw_evidence(evidence.to_vec()));
+            }
         }
 
         // Verify PCR measurements

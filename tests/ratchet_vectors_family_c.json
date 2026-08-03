@@ -1,0 +1,42 @@
+{
+  "schema_version": "1",
+  "family": "C",
+  "bindings": [
+    "go",
+    "java",
+    "swift",
+    "csharp",
+    "c"
+  ],
+  "description": "SHA256 chain, single key, counter in cleartext prefix",
+  "chain_algorithm": "SHA256(root || label)",
+  "chain_step": "msg_key=SHA256(chain||'message'), new_chain=SHA256(chain||'ratchet')",
+  "keystream": "SHA256(msg_key || nonce || block_ctr_le32)",
+  "mac_input": "HMAC-SHA256(msg_key, ctr_le64||nonce||ciphertext)[:16]",
+  "counter_placement": "cleartext_prefix_8_bytes (little-endian uint64)",
+  "frame_layout": "counter_le64(8) || nonce(16) || ciphertext(len(plaintext)) || mac_truncated_16(16)",
+  "init_labels": {
+    "initiator_send": "init_send",
+    "initiator_recv": "init_recv"
+  },
+  "vectors": [
+    {
+      "description": "Alice (initiator) encrypts first message to Bob",
+      "root_key": "4242424242424242424242424242424242424242424242424242424242424242",
+      "is_initiator": true,
+      "counter": 0,
+      "plaintext_hex": "48656c6c6f2c20536869656c6421",
+      "plaintext_utf8": "Hello, Shield!",
+      "fixed_nonce_hex": "000102030405060708090a0b0c0d0e0f",
+      "intermediate": {
+        "send_key_after_init": "fceb6302a3faaf57c5c73e0648bd84a0290f6165d16a1ceb7b09e0c05ee796b4",
+        "msg_key": "692c73454cd7b0af629aedc60463d0a386a673eec08ed13e9b81c985a3301dbb",
+        "new_send_key_after_ratchet": "ec3a0aa5f4869177fc0161d045d1842b9a9c630cf1f23b6411b5358a9c833a0a"
+      },
+      "ciphertext_hex": "0000000000000000000102030405060708090a0b0c0d0e0f520aa470b1da54a604fe81d863995d617c84d5f48a2be0c02a601f55b501",
+      "ciphertext_base64": "AAAAAAAAAAAAAQIDBAUGBwgJCgsMDQ4PUgqkcLHaVKYE/oHYY5ldYXyE1fSKK+DAKmAfVbUB",
+      "frame_layout": "counter_le64(8) || nonce(16) || ciphertext(len(plaintext)) || hmac_sha256_truncated_16(16)",
+      "note": "nonce is fixed for test vector reproducibility; production uses random nonce"
+    }
+  ]
+}

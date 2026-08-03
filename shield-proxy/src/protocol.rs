@@ -1,6 +1,8 @@
 use std::fmt;
+use std::time::Duration;
 
 use tokio::net::TcpStream;
+use tokio::time::timeout;
 use tracing::debug;
 
 /// Detected protocol type from initial connection bytes.
@@ -27,6 +29,8 @@ impl fmt::Display for Protocol {
     }
 }
 
+pub const DETECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Protocol detection using non-destructive peek.
 pub struct ProtocolDetector;
 
@@ -43,13 +47,17 @@ impl ProtocolDetector {
     /// Peek at the first bytes of a TCP stream to detect the protocol.
     ///
     /// This is non-destructive: the bytes remain in the stream for normal reading.
-    pub async fn detect(stream: &TcpStream) -> Protocol {
+    pub async fn detect(stream: &TcpStream) -> Option<Protocol> {
         let mut buf = [0u8; 512];
-        match stream.peek(&mut buf).await {
-            Ok(n) if n >= 2 => classify(&buf[..n]),
-            _ => {
+        match timeout(DETECT_TIMEOUT, stream.peek(&mut buf)).await {
+            Err(_elapsed) => {
+                debug!("No initial bytes within detect timeout");
+                None
+            }
+            Ok(Ok(n)) if n >= 2 => Some(classify(&buf[..n])),
+            Ok(_) => {
                 debug!("Could not peek stream, defaulting to TCP");
-                Protocol::Tcp
+                Some(Protocol::Tcp)
             }
         }
     }

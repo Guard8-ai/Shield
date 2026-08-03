@@ -1,36 +1,40 @@
-//! FIDO2/WebAuthn passwordless authentication module
+//! FIDO2 / `WebAuthn` integration.
 //!
-//! This module provides FIDO2/WebAuthn support with Shield-encrypted credential storage.
-//! It enables passwordless authentication using hardware security keys, platform authenticators
-//! (Face ID, Touch ID, Windows Hello), and biometrics.
+//! # Security Notice — DEPRECATED
 //!
-//! # Features
+//! This module does NOT implement the `WebAuthn` security model correctly:
 //!
-//! - **Registration**: Create and store FIDO2 credentials
-//! - **Authentication**: Verify users with stored credentials
-//! - **Shield Integration**: Credentials encrypted with EXPTIME-secure encryption
-//! - **Replay Protection**: Signature counter validation prevents replay attacks
-//! - **Challenge Management**: Secure challenge generation and validation
+//! - **No origin binding**: `clientDataJSON.origin` is not validated against
+//!   the relying party's expected origin. Any origin can register and
+//!   authenticate credentials.
+//! - **No rpId binding**: `authenticatorData.rpIdHash` is not verified.
+//!   Credentials from one relying party are accepted by any other.
+//! - **No clientDataJSON binding**: the challenge is not bound to the HTTP
+//!   origin + operation type, leaving this implementation vulnerable to
+//!   phishing and cross-origin attacks.
+//! - **No attestation**: the authenticator's identity cannot be verified.
 //!
-//! # Example
+//! These are not minor implementation details — they are fundamental
+//! violations of the `WebAuthn` L2/L3 security model.
 //!
-//! ```rust
-//! use shield_core::{Shield, fido2::{Fido2Manager, WebAuthnConfig}};
+//! # Migration
 //!
-//! let config = WebAuthnConfig::new("example.com", "My App", "https://example.com");
-//! let shield = Shield::new("master_password", "fido2.myapp");
-//! let mut manager = Fido2Manager::new_with_shield(config, shield);
+//! Use [`webauthn-rs`](https://crates.io/crates/webauthn-rs) instead:
 //!
-//! // Registration: generate challenge, then verify with credential
-//! let challenge = manager.generate_registration_challenge(
-//!     b"user123", "alice", "Alice",
-//! ).unwrap();
-//! let cred_id = b"credential_123".to_vec();
-//! let pubkey = b"public_key_data".to_vec();
-//! let _credential = manager.verify_registration(
-//!     &challenge.challenge, cred_id, pubkey,
-//! ).unwrap();
+//! ```toml
+//! [dependencies]
+//! webauthn-rs = "0.5"
 //! ```
+//!
+//! The `webauthn-rs` crate implements the full `WebAuthn` L2 specification
+//! including origin binding, rpId verification, clientDataJSON signing,
+//! and attestation verification.
+//!
+//! # Status
+//!
+//! This module is retained for backwards compatibility with existing users
+//! during the deprecation period. It will be removed in Shield v5.0.
+//! Do not use for new implementations.
 
 pub mod config;
 pub mod credential;
@@ -41,6 +45,6 @@ pub use config::{CredentialStore, WebAuthnConfig};
 pub use credential::{ShieldCredentialStore, StoredCredential};
 pub use error::{Fido2Error, Result};
 pub use manager::{
-    AllowedCredential, AuthenticationChallenge, AuthenticationResult, Fido2Manager,
-    RegistrationChallenge,
+    validate_client_data, AllowedCredential, AuthenticationChallenge, AuthenticationResult,
+    ClientData, Fido2Manager, RegistrationChallenge,
 };

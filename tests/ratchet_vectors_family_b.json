@@ -1,0 +1,41 @@
+{
+  "schema_version": "1",
+  "family": "B",
+  "bindings": [
+    "python",
+    "javascript",
+    "kotlin",
+    "android",
+    "ios"
+  ],
+  "description": "SHA256 chain, single key, counter encrypted inside ciphertext",
+  "chain_algorithm": "SHA256(root || label)",
+  "chain_step": "new_chain=SHA256(chain||'chain'), msg_key=SHA256(chain||'message')",
+  "keystream": "SHA256(msg_key || nonce || block_ctr_le32)",
+  "mac_input": "HMAC-SHA256(msg_key, nonce||ciphertext)[:16]",
+  "counter_placement": "encrypted (first 8 bytes of XOR input, little-endian uint64)",
+  "frame_layout": "nonce(16) || ciphertext(8+len(plaintext)) || mac_truncated_16(16)",
+  "init_labels": {
+    "initiator_send": "send",
+    "initiator_recv": "recv"
+  },
+  "vectors": [
+    {
+      "description": "Alice (initiator) encrypts first message to Bob",
+      "root_key": "4242424242424242424242424242424242424242424242424242424242424242",
+      "is_initiator": true,
+      "counter": 0,
+      "plaintext_hex": "48656c6c6f2c20536869656c6421",
+      "plaintext_utf8": "Hello, Shield!",
+      "fixed_nonce_hex": "000102030405060708090a0b0c0d0e0f",
+      "intermediate": {
+        "send_chain_after_init": "a66abef2b14d721d5c471973c513c326a6529106ec5075b1cc0091c2edfc2f49",
+        "msg_key": "81dce693c77c542e9f7dfaca073346663fc381ed8d31cabcabc99704123c6fef",
+        "new_send_chain": "ca18a3b342174c14c8f0280c9e0719bbf1a47f1849a3158fc243dc657c756502"
+      },
+      "ciphertext_hex": "000102030405060708090a0b0c0d0e0f10acdd9cdf0eb43fd38c160b94659216b7ed1502335f81114f287d01cc12ace22fff43a664ca",
+      "ciphertext_base64": "AAECAwQFBgcICQoLDA0ODxCs3ZzfDrQ/04wWC5Rlkha37RUCM1+BEU8ofQHMEqziL/9DpmTK",
+      "note": "nonce is fixed for test vector reproducibility; production uses random nonce"
+    }
+  ]
+}

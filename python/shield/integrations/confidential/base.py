@@ -270,9 +270,7 @@ class TEEKeyManager:
             Encrypted data with attestation binding
         """
         key = await self.get_key(attestation_evidence, "encryption")
-        temp_shield = Shield.__new__(Shield)
-        temp_shield._key = key
-        temp_shield._service = self.shield._service
+        temp_shield = Shield.with_key(key, max_age_ms=None)
 
         encrypted = temp_shield.encrypt(data)
 
@@ -324,9 +322,13 @@ class TEEKeyManager:
 
         key = await self.get_key(attestation_evidence, "encryption")
 
-        temp_shield = Shield.__new__(Shield)
-        temp_shield._key = key
-        temp_shield._service = self.shield._service
+        temp_shield = Shield.with_key(key, max_age_ms=None)
 
         encrypted = base64.b64decode(envelope["encrypted"])
-        return temp_shield.decrypt(encrypted)
+        result = temp_shield.decrypt(encrypted)
+        if result is None:
+            raise AttestationError(
+                "Decryption authentication failed",
+                code="DECRYPTION_FAILED",
+            )
+        return result
