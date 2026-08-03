@@ -9,7 +9,7 @@
 //! - **Deterministic Encryption**: Same vector always produces same ciphertext (required for indexing)
 //! - **Similarity Search**: L2, cosine, and inner product distance metrics
 //! - **HNSW/IVFFlat Indexes**: Fast approximate nearest neighbor search
-//! - **Shield Integration**: Maintains EXPTIME-secure encryption
+//! - **Shield Integration**: Maintains authenticated symmetric encryption
 //! - **MAC Protection**: Prevents tampering with encrypted vectors
 //!
 //! # Example

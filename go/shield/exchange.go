@@ -21,7 +21,16 @@ var (
 	ErrInvalidShareCount = errors.New("shield: invalid share count")
 )
 
-// PAKEExchange provides Password-Authenticated Key Exchange.
+// PAKEExchange is a pre-shared-key handshake helper (NOT a true PAKE despite
+// the name).
+//
+// SECURITY: This is not a true PAKE. The values exchanged are derived
+// deterministically from the shared secret via PBKDF2, so a recorded handshake
+// permits an OFFLINE DICTIONARY ATTACK against a low-entropy secret (PBKDF2
+// iterations only slow each guess). Safe ONLY with a high-entropy shared secret
+// (>=128 bits). For password-based or forward-secret key establishment, use the
+// X25519 + ML-KEM-768 hybrid KEX (pqhybrid) instead. Type name retained for API
+// compatibility.
 type PAKEExchange struct {
 	password     string
 	identity     string
@@ -42,8 +51,10 @@ func NewPAKEExchange(password, identity string) (*PAKEExchange, error) {
 	}
 
 	// Derive password verifier
+	// PAKE verifier must be reproducible from the shared password+identity by
+	// both parties. CR-2: 600,000 iterations (OWASP 2023 floor).
 	salt := sha256.Sum256([]byte("pake:" + identity))
-	verifier := pbkdf2.Key([]byte(password), salt[:], 100000, KeySize, sha256.New)
+	verifier := pbkdf2.Key([]byte(password), salt[:], 600000, KeySize, sha256.New)
 
 	// Public value = H(verifier || privateValue)
 	h := sha256.New()
@@ -58,7 +69,7 @@ func NewPAKEExchange(password, identity string) (*PAKEExchange, error) {
 func (pe *PAKEExchange) DeriveKey(peerPublic []byte) []byte {
 	// Derive password verifier
 	salt := sha256.Sum256([]byte("pake:" + pe.identity))
-	verifier := pbkdf2.Key([]byte(pe.password), salt[:], 100000, KeySize, sha256.New)
+	verifier := pbkdf2.Key([]byte(pe.password), salt[:], 600000, KeySize, sha256.New)
 
 	// Shared secret = H(verifier || sorted(myPublic, peerPublic))
 	// Sorting ensures both parties derive the same key
@@ -100,19 +111,38 @@ func (pe *PAKEExchange) CreateProof(peerPublic []byte) []byte {
 	return mac.Sum(nil)
 }
 
-// PAKEDerive derives a PAKE contribution from password and salt.
+// PAKEDerive derives a handshake contribution from a shared secret and salt.
 // This is the static function used by ShieldChannel.
+//
+// SECURITY: NOT a true PAKE despite the name. The contribution
+// HMAC(PBKDF2(secret, salt), role) is sent on the wire together with the salt,
+// so a recorded handshake permits an OFFLINE DICTIONARY ATTACK against a
+// low-entropy secret (PBKDF2 iterations only slow each guess). Safe ONLY with a
+// high-entropy shared secret (>=128 bits). For password-based or forward-secret
+// key establishment, use the X25519 + ML-KEM-768 hybrid KEX (pqhybrid) instead.
 func PAKEDerive(password string, salt []byte, role string, iterations int) []byte {
-	context := []byte("SHIELD-PAKE-" + role)
-	fullSalt := append(salt, context...)
-	return pbkdf2.Key([]byte(password), fullSalt, iterations, KeySize, sha256.New)
+	// Contribution = HMAC-SHA256(PBKDF2(secret, salt), role). Keyed HMAC over
+	// the role (not PBKDF2 with the role folded into the salt) matches the Rust
+	// source of truth byte-for-byte. Locked by tests/channel_session_vectors.json.
+	baseKey := pbkdf2.Key([]byte(password), salt, iterations, KeySize, sha256.New)
+	mac := hmac.New(sha256.New, baseKey)
+	mac.Write([]byte(role))
+	return mac.Sum(nil)
 }
 
 // PAKECombine combines two contributions to produce a shared key.
+//
+// Sorts the two contributions so the result is independent of argument order,
+// then combines with a keyed HMAC: HMAC-SHA256(sorted[0], sorted[1]). Matches
+// the Rust source of truth byte-for-byte (not SHA256(local || remote)).
 func PAKECombine(local, remote []byte) []byte {
-	combined := append(local, remote...)
-	h := sha256.Sum256(combined)
-	return h[:]
+	first, second := local, remote
+	if bytes.Compare(local, remote) > 0 {
+		first, second = remote, local
+	}
+	mac := hmac.New(sha256.New, first)
+	mac.Write(second)
+	return mac.Sum(nil)
 }
 
 // QRExchange provides QR code-based key exchange.

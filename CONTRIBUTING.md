@@ -214,7 +214,7 @@ def test_new_language_roundtrip():
    KEY_SIZE = 32
    NONCE_SIZE = 16
    MAC_SIZE = 16
-   ITERATIONS = 100_000
+   ITERATIONS = 600_000
    ```
 
 4. **Write tests**: Minimum 15 tests covering core functionality
@@ -232,7 +232,7 @@ def test_new_language_roundtrip():
 ### Do NOT
 
 - Introduce asymmetric cryptography (RSA, ECDSA, etc.)
-- Reduce iteration count below 100,000
+- Reduce iteration count below 600,000
 - Use non-constant-time comparisons for security checks
 - Log or print key material
 - Cache decrypted data unnecessarily

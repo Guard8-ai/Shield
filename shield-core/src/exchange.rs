@@ -1,6 +1,40 @@
 //! Key exchange without public-key cryptography.
 //!
-//! Provides PAKE, QR exchange, and key splitting.
+//! Provides a pre-shared-key handshake helper ([`PAKEExchange`]), QR exchange,
+//! and key splitting.
+//!
+//! # Security note: this is NOT a true PAKE
+//!
+//! The type [`PAKEExchange`] is named for historical/API-compatibility reasons,
+//! but it does **not** provide the security guarantee of a real
+//! Password-Authenticated Key Exchange (such as `SPAKE2`, `CPace`, or `OPAQUE`). A true
+//! PAKE leaks *no* offline-checkable function of the password to a network
+//! observer, so a weak password stays safe even if the entire handshake is
+//! recorded.
+//!
+//! This helper instead derives each party's contribution as a *deterministic*
+//! function of the shared secret and a salt:
+//! `contribution = HMAC(PBKDF2(secret, salt), role)`. Both the salt and the
+//! contribution travel on the wire (see [`crate::channel`]). An eavesdropper who
+//! records a handshake can therefore mount an **offline dictionary attack**: for
+//! each guessed password they recompute the contribution and compare. PBKDF2
+//! (600 000 iterations) raises the cost per guess but does not remove the
+//! attack — it is fundamentally not preventable in a symmetric-only design.
+//!
+//! ## When this is safe to use
+//!
+//! Use [`PAKEExchange`] / [`crate::channel::ShieldChannel`] **only with a
+//! high-entropy shared secret** (for example a 256-bit random key, or a
+//! diceware passphrase with ≥128 bits of entropy). With a high-entropy secret
+//! the offline search is computationally infeasible and the handshake is sound.
+//!
+//! ## When NOT to use it
+//!
+//! Do **not** use it to bootstrap a session from a low-entropy human password,
+//! and do not rely on it for forward secrecy against compromise of the shared
+//! secret. For those cases use the X25519 + ML-KEM-768 hybrid key exchange
+//! (`pqhybrid`, behind the `pq` feature), which is a real asymmetric KEX and
+//! does not expose a password to offline guessing.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ring::hmac;
@@ -9,12 +43,19 @@ use std::num::NonZeroU32;
 
 use crate::error::{Result, ShieldError};
 
-/// Password-Authenticated Key Exchange.
+/// Pre-shared-key handshake helper.
+///
+/// **Not a true PAKE** despite the name. The contribution it derives,
+/// `HMAC(PBKDF2(secret, salt), role)`, is sent on the wire together with the
+/// salt, so a recorded handshake permits an offline dictionary attack against a
+/// low-entropy secret. Safe **only** with a high-entropy pre-shared secret. See
+/// the [module-level security note](crate::exchange) and use the `pqhybrid`
+/// X25519+ML-KEM KEX for the password / forward-secret case.
 pub struct PAKEExchange;
 
 impl PAKEExchange {
-    /// Default PBKDF2 iterations.
-    pub const ITERATIONS: u32 = 200_000;
+    /// Default PBKDF2 iterations (CR-2: OWASP 2023 floor).
+    pub const ITERATIONS: u32 = 600_000;
 
     /// Derive key contribution from password.
     #[must_use]
@@ -38,9 +79,19 @@ impl PAKEExchange {
         result
     }
 
-    /// Combine key contributions into session key using HMAC-SHA256.
-    #[must_use]
-    pub fn combine(contributions: &[[u8; 32]]) -> [u8; 32] {
+    /// Combine key contributions into a session key using HMAC-SHA256.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ShieldError::InvalidFormat`] if fewer than two contributions
+    /// are supplied: a combine of zero or one contribution is meaningless, and
+    /// indexing an empty list would otherwise panic (a denial-of-service risk
+    /// for a caller that passes an externally-influenced list).
+    pub fn combine(contributions: &[[u8; 32]]) -> Result<[u8; 32]> {
+        if contributions.len() < 2 {
+            return Err(ShieldError::InvalidFormat);
+        }
+
         let mut sorted: Vec<&[u8; 32]> = contributions.iter().collect();
         sorted.sort();
 
@@ -54,7 +105,7 @@ impl PAKEExchange {
         let tag = hmac::sign(&hmac_key, &data);
         let mut result = [0u8; 32];
         result.copy_from_slice(&tag.as_ref()[..32]);
-        result
+        Ok(result)
     }
 
     /// Generate random salt.
@@ -186,9 +237,25 @@ mod tests {
         let client = PAKEExchange::derive("password", &salt, "client", None);
         let server = PAKEExchange::derive("password", &salt, "server", None);
 
-        let shared1 = PAKEExchange::combine(&[client, server]);
-        let shared2 = PAKEExchange::combine(&[server, client]);
+        let shared1 = PAKEExchange::combine(&[client, server]).unwrap();
+        let shared2 = PAKEExchange::combine(&[server, client]).unwrap();
         assert_eq!(shared1, shared2);
+    }
+
+    #[test]
+    fn test_pake_combine_empty_is_error_not_panic() {
+        // RT2-10: combine() previously indexed sorted[0] unconditionally and
+        // panicked (DoS) on empty input. It must now return an error.
+        assert!(PAKEExchange::combine(&[]).is_err());
+    }
+
+    #[test]
+    fn test_pake_combine_single_is_error() {
+        // A single contribution is meaningless to "combine" and must be rejected
+        // rather than returning HMAC(c, "").
+        let salt = PAKEExchange::generate_salt().unwrap();
+        let only = PAKEExchange::derive("password", &salt, "client", None);
+        assert!(PAKEExchange::combine(&[only]).is_err());
     }
 
     #[test]

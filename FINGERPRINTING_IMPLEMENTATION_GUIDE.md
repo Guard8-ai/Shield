@@ -54,8 +54,8 @@ shield_with_fingerprint(&ctx, password, service, SHIELD_FP_COMBINED) -> shield_e
 ```
 fingerprint = collect_hardware_fingerprint(mode)
 combined_password = password + ":" + fingerprint
-salt = SHA256(service)
-key = PBKDF2-SHA256(combined_password, salt, 100000 iterations, 32 bytes)
+salt = random_salt(16)  # random per instance, stored in ciphertext header
+key = PBKDF2-SHA256(combined_password, salt, 600000 iterations, 32 bytes)
 ```
 
 **Note**: Empty fingerprint (mode=None) → combined_password = password (backward compatible)

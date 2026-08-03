@@ -174,11 +174,21 @@ pub trait AttestationProvider: Send + Sync {
     ///
     /// # Arguments
     /// * `evidence` - Raw attestation evidence (format depends on TEE type)
+    /// * `expected_report_data` - The fresh, server-issued challenge that the TEE
+    ///   must have bound into its report-data / nonce field. When `Some`, the
+    ///   provider MUST reject any evidence whose report-data does not match this
+    ///   value (anti-replay, freshness). When `None`, no challenge binding is
+    ///   enforced (use only for offline/best-effort inspection, never for key
+    ///   release).
     ///
     /// # Returns
     /// * `Ok(AttestationResult)` - Verification result with measurements and claims
     /// * `Err(AttestationError)` - If verification fails
-    async fn verify(&self, evidence: &[u8]) -> Result<AttestationResult, AttestationError>;
+    async fn verify(
+        &self,
+        evidence: &[u8],
+        expected_report_data: Option<&[u8]>,
+    ) -> Result<AttestationResult, AttestationError>;
 
     /// Generate attestation evidence for this TEE.
     ///
@@ -346,6 +356,10 @@ impl TEEKeyManager {
     /// # Arguments
     /// * `attestation_evidence` - Raw attestation evidence
     /// * `key_id` - Identifier for the key to retrieve
+    /// * `expected_report_data` - The fresh server-issued challenge the TEE must
+    ///   have bound into its report-data. Pass the random nonce you handed the
+    ///   enclave for this session; `None` disables freshness binding and must not
+    ///   be used in production key release.
     ///
     /// # Returns
     /// * `Ok([u8; 32])` - Derived key bytes
@@ -354,8 +368,12 @@ impl TEEKeyManager {
         &self,
         attestation_evidence: &[u8],
         key_id: &str,
+        expected_report_data: Option<&[u8]>,
     ) -> Result<[u8; 32], AttestationError> {
-        let result = self.provider.verify(attestation_evidence).await?;
+        let result = self
+            .provider
+            .verify(attestation_evidence, expected_report_data)
+            .await?;
 
         if !self.policy.evaluate(&result) {
             return Err(AttestationError::PolicyViolation(
@@ -396,8 +414,11 @@ impl TEEKeyManager {
         &self,
         data: &[u8],
         attestation_evidence: &[u8],
+        expected_report_data: Option<&[u8]>,
     ) -> Result<Vec<u8>, AttestationError> {
-        let key = self.get_key(attestation_evidence, "encryption").await?;
+        let key = self
+            .get_key(attestation_evidence, "encryption", expected_report_data)
+            .await?;
         Shield::encrypt_with_key(&key, data)
             .map_err(|e| AttestationError::IoError(format!("Encryption failed: {e}")))
     }
@@ -407,8 +428,11 @@ impl TEEKeyManager {
         &self,
         encrypted: &[u8],
         attestation_evidence: &[u8],
+        expected_report_data: Option<&[u8]>,
     ) -> Result<Vec<u8>, AttestationError> {
-        let key = self.get_key(attestation_evidence, "encryption").await?;
+        let key = self
+            .get_key(attestation_evidence, "encryption", expected_report_data)
+            .await?;
         Shield::decrypt_with_key(&key, encrypted)
             .map_err(|e| AttestationError::IoError(format!("Decryption failed: {e}")))
     }

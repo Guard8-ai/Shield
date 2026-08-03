@@ -1,5 +1,5 @@
 /**
- * Shield - EXPTIME-Secure Encryption Library
+ * Shield - Authenticated Symmetric Encryption Library
  * TypeScript declarations
  */
 

@@ -15,15 +15,17 @@ namespace Dikestra.Shield
         public string UserId { get; }
         public string DisplayName { get; }
         public byte[] VerificationKey { get; }
+        public byte[] Salt { get; }
         public long CreatedAt { get; }
         public Dictionary<string, object> Attributes { get; }
 
         public Identity(string userId, string displayName, byte[] verificationKey,
-                        long createdAt, Dictionary<string, object> attributes = null)
+                        byte[] salt, long createdAt, Dictionary<string, object> attributes = null)
         {
             UserId = userId;
             DisplayName = displayName;
             VerificationKey = verificationKey;
+            Salt = salt;
             CreatedAt = createdAt;
             Attributes = attributes ?? new Dictionary<string, object>();
         }
@@ -63,7 +65,8 @@ namespace Dikestra.Shield
     /// </summary>
     public class IdentityProvider
     {
-        private const int PBKDF2_ITERATIONS = 100000;
+        // CR-2: 600,000 PBKDF2-HMAC-SHA256 iterations (OWASP 2023 floor).
+        private const int PBKDF2_ITERATIONS = 600000;
 
         private readonly byte[] _providerKey;
         private readonly int _tokenTtl;
@@ -94,11 +97,15 @@ namespace Dikestra.Shield
             if (_identities.ContainsKey(userId))
                 throw new ArgumentException($"User {userId} already exists");
 
-            byte[] verificationKey = DeriveVerificationKey(userId, password);
+            // CR-1: per-user random salt (not a hash of the public userId),
+            // stored on the identity so Authenticate() can re-derive.
+            byte[] salt = Shield.RandomBytes(16);
+            byte[] verificationKey = DeriveVerificationKey(salt, password);
             var identity = new Identity(
                 userId,
                 displayName,
                 verificationKey,
+                salt,
                 DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 attributes
             );
@@ -121,7 +128,7 @@ namespace Dikestra.Shield
             if (!_identities.TryGetValue(userId, out var identity))
                 return null;
 
-            byte[] verificationKey = DeriveVerificationKey(userId, password);
+            byte[] verificationKey = DeriveVerificationKey(identity.Salt, password);
             if (!Shield.ConstantTimeEquals(verificationKey, identity.VerificationKey, 32))
                 return null;
 
@@ -282,11 +289,9 @@ namespace Dikestra.Shield
 
         // Private helpers
 
-        private byte[] DeriveVerificationKey(string userId, string password)
+        private byte[] DeriveVerificationKey(byte[] salt, string password)
         {
             using var sha256 = SHA256.Create();
-            byte[] salt = sha256.ComputeHash(Encoding.UTF8.GetBytes($"user:{userId}"));
-
             using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, PBKDF2_ITERATIONS, HashAlgorithmName.SHA256);
             byte[] userKey = pbkdf2.GetBytes(32);
 

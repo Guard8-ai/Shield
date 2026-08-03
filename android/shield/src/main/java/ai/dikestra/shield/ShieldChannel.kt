@@ -3,6 +3,7 @@ package ai.dikestra.shield
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.Socket
+import java.security.MessageDigest
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -10,9 +11,16 @@ import javax.crypto.spec.SecretKeySpec
  * Shield Secure Channel - TLS/SSH-like secure transport using symmetric crypto.
  *
  * Provides encrypted bidirectional communication with:
- * - PAKE-based handshake (no certificates needed)
+ * - Pre-shared-key handshake (no certificates needed; NOT a true PAKE)
  * - Forward secrecy via key ratcheting
  * - Message authentication and replay protection
+ *
+ * SECURITY: The handshake is a pre-shared-key exchange, NOT a true PAKE. Each
+ * party's contribution HMAC(PBKDF2(secret, salt), role) is sent on the wire with
+ * the salt, so a recorded handshake permits an OFFLINE DICTIONARY ATTACK against
+ * a low-entropy secret. Safe ONLY with a high-entropy shared secret (>=128 bits);
+ * for password-based or forward-secret setup use the X25519 + ML-KEM-768 hybrid
+ * KEX (pqhybrid) instead.
  *
  * Example:
  * ```kotlin
@@ -50,7 +58,10 @@ class ShieldChannel private constructor(
         /**
          * Connect as client (initiator).
          *
-         * Performs PAKE handshake and establishes encrypted channel.
+         * Performs the pre-shared-key handshake (NOT a true PAKE) and
+         * establishes an encrypted channel. Safe ONLY with a high-entropy shared
+         * secret (>=128 bits); a recorded handshake otherwise allows an offline
+         * dictionary attack.
          *
          * @param socket Underlying transport
          * @param config Channel configuration with shared password
@@ -159,12 +170,24 @@ class ShieldChannel private constructor(
             remoteContribution: ByteArray
         ): ByteArray {
             val baseKey = PAKEExchange.combine(localContribution, remoteContribution)
-            val passwordKey = PAKEExchange.derive(
+            // PBKDF2-derived secret (not exchanged): already a 32-byte key
+            // stretched from the password via PBKDF2 (600k), not the raw password.
+            val derivedKey = PAKEExchange.derive(
                 config.password, salt, "session", config.iterations
             )
 
-            val combined = baseKey + passwordKey
-            return ShieldUtils.sha256(combined)
+            // Final session key = HMAC-SHA256(base_key, derived_key || service).
+            // Binding the service identifier provides domain separation: the same
+            // shared secret used for two different services derives two different
+            // session keys, so a credential provisioned for one service cannot
+            // establish a channel for another. derived_key is a fixed 32 bytes,
+            // so the concatenation is unambiguous across implementations.
+            // Keyed HMAC (not SHA256(key || data)) avoids length-extension and
+            // matches the Rust source of truth byte-for-byte.
+            val macInput = derivedKey + config.service.toByteArray(Charsets.UTF_8)
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(baseKey, "HmacSHA256"))
+            return mac.doFinal(macInput)
         }
 
         private fun sendHandshake(output: OutputStream, msgType: Byte, data: ByteArray) {
@@ -211,7 +234,9 @@ class ShieldChannel private constructor(
             mac.init(SecretKeySpec(sessionKey, "HmacSHA256"))
             val expected = mac.doFinal(label.toByteArray(Charsets.UTF_8)).copyOfRange(0, 16)
 
-            require(received.contentEquals(expected)) { "Authentication failed" }
+            // Constant-time MAC comparison: MessageDigest.isEqual does not
+            // short-circuit on content (length is fixed at 16 above).
+            require(MessageDigest.isEqual(received, expected)) { "Authentication failed" }
         }
 
         private fun writeFrame(output: OutputStream, data: ByteArray) {
@@ -317,7 +342,7 @@ class ShieldChannel private constructor(
  *
  * @param password Shared password for PAKE
  * @param service Service identifier for domain separation
- * @param iterations PBKDF2 iterations (default: 200000)
+ * @param iterations PBKDF2 iterations (default: 600000)
  * @param handshakeTimeoutMs Handshake timeout in milliseconds (default: 30000)
  */
 data class ChannelConfig(

@@ -1,7 +1,9 @@
 package ai.dikestra.shield;
 
+import javax.crypto.Mac;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
+import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -11,20 +13,28 @@ import java.util.*;
  * Key Exchange - Key exchange without public-key crypto.
  *
  * Methods:
- * 1. PAKE: Password-Authenticated Key Exchange
+ * 1. PAKE: pre-shared-key handshake (NOT a true PAKE; see PAKE below)
  * 2. QR: QR codes, base64 for manual exchange
  * 3. Key Splitting: XOR-based secret sharing
  */
 public class Exchange {
 
     /**
-     * Password-Authenticated Key Exchange.
+     * Pre-shared-key handshake (NOT a true PAKE despite the name).
      *
-     * Both parties derive a shared key from a common password.
-     * Uses role binding to prevent reflection attacks.
+     * Both parties derive a shared key from a common pre-shared secret, with
+     * role binding to prevent reflection attacks.
+     *
+     * <p>SECURITY: The handshake contribution HMAC(PBKDF2(secret, salt), role)
+     * is sent on the wire together with the salt, so a recorded handshake
+     * permits an OFFLINE DICTIONARY ATTACK against a low-entropy secret (PBKDF2
+     * iterations only slow each guess). Safe ONLY with a high-entropy shared
+     * secret (&gt;=128 bits). For password-based or forward-secret key
+     * establishment, use the X25519 + ML-KEM-768 hybrid KEX (pqhybrid) instead.
+     * Type name retained for API compatibility.
      */
     public static class PAKE {
-        public static final int DEFAULT_ITERATIONS = 200000;
+        public static final int DEFAULT_ITERATIONS = 600000; // CR-2: OWASP 2023 floor
 
         /**
          * Derive key contribution from password.
@@ -32,7 +42,7 @@ public class Exchange {
          * @param password Shared password between parties
          * @param salt Public salt (can be exchanged openly)
          * @param role Role identifier ('alice', 'bob', 'initiator', etc.)
-         * @param iterations PBKDF2 iterations (default: 200000)
+         * @param iterations PBKDF2 iterations (default: 600000)
          * @return 32-byte key contribution
          */
         public static byte[] derive(String password, byte[] salt, String role, int iterations) {
@@ -41,10 +51,12 @@ public class Exchange {
                 PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), salt, iterations, 256);
                 byte[] baseKey = factory.generateSecret(spec).getEncoded();
 
-                MessageDigest md = MessageDigest.getInstance("SHA-256");
-                md.update(baseKey);
-                md.update(role.getBytes(StandardCharsets.UTF_8));
-                return md.digest();
+                // Keyed HMAC-SHA256(baseKey, role), matching the Rust source of
+                // truth byte-for-byte (not SHA256(baseKey || role)) and avoiding
+                // length-extension. Locked by tests/channel_session_vectors.json.
+                Mac mac = Mac.getInstance("HmacSHA256");
+                mac.init(new SecretKeySpec(baseKey, "HmacSHA256"));
+                return mac.doFinal(role.getBytes(StandardCharsets.UTF_8));
             } catch (Exception e) {
                 throw new RuntimeException("Failed to derive key", e);
             }
@@ -72,11 +84,14 @@ public class Exchange {
                     return a.length - b.length;
                 });
 
-                MessageDigest md = MessageDigest.getInstance("SHA-256");
-                for (byte[] contrib : sorted) {
-                    md.update(contrib);
+                // HMAC-SHA256(sorted[0], sorted[1] || sorted[2] ...), matching
+                // the Rust source of truth byte-for-byte (not SHA256(concat)).
+                Mac mac = Mac.getInstance("HmacSHA256");
+                mac.init(new SecretKeySpec(sorted.get(0), "HmacSHA256"));
+                for (int i = 1; i < sorted.size(); i++) {
+                    mac.update(sorted.get(i));
                 }
-                return md.digest();
+                return mac.doFinal();
             } catch (Exception e) {
                 throw new RuntimeException("Failed to combine keys", e);
             }

@@ -262,6 +262,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_endpoint() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
         let metrics = MetricsCollector::new();
 
         let app = Router::new()
@@ -281,7 +283,6 @@ mod tests {
         let client = tokio::net::TcpStream::connect(addr).await.unwrap();
         let (mut read, mut write) = client.into_split();
 
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         write.write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n").await.unwrap();
 
         let mut buf = vec![0u8; 4096];

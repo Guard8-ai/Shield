@@ -1,6 +1,6 @@
 # Shield WebAssembly Module
 
-EXPTIME-secure encryption for browsers and any WebAssembly runtime.
+Authenticated symmetric encryption for browsers and any WebAssembly runtime.
 
 This crate re-exports WASM bindings from `shield-core`, providing a single source of truth for all Shield cryptographic implementations.
 

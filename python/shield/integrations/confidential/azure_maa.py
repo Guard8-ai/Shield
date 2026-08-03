@@ -35,10 +35,12 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 from shield.integrations.confidential.base import (
+    ATTESTATION_NOT_VERIFIED_MESSAGE,
     AttestationError,
     AttestationProvider,
     AttestationResult,
     TEEType,
+    warn_insecure_attestation_demo,
 )
 
 IMDS_ENDPOINT = "http://169.254.169.254/metadata"
@@ -68,13 +70,17 @@ class MAAAttestationProvider(AttestationProvider):
         allowed_tee_types: Optional[List[str]] = None,
         tenant_id: Optional[str] = None,
         verify_signature: bool = True,
+        allow_insecure_demo: bool = False,
     ):
         self.attestation_uri = attestation_uri.rstrip("/")
         self.expected_measurements = expected_measurements or {}
         self.allowed_tee_types = allowed_tee_types or ["sevsnpvm", "sgx"]
         self.tenant_id = tenant_id
         self.verify_signature = verify_signature
+        self.allow_insecure_demo = allow_insecure_demo
         self._maa_client = None
+        if allow_insecure_demo:
+            warn_insecure_attestation_demo("Azure MAA")
 
     @property
     def tee_type(self) -> TEEType:
@@ -204,6 +210,18 @@ class MAAAttestationProvider(AttestationProvider):
                     error=f"Measurement {name} mismatch",
                     raw_evidence=evidence,
                 )
+
+        # FAIL-CLOSED: the JWS signature is never verified here, so we must not
+        # claim verified=True from unverified evidence (RT2-4).
+        if not self.allow_insecure_demo:
+            return AttestationResult(
+                verified=False,
+                tee_type=self.tee_type,
+                measurements=measurements,
+                claims=claims,
+                error=ATTESTATION_NOT_VERIFIED_MESSAGE.format(tee="Azure MAA"),
+                raw_evidence=evidence,
+            )
 
         return AttestationResult(
             verified=True,

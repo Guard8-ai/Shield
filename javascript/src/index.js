@@ -1,8 +1,8 @@
 /**
- * Shield - EXPTIME-Secure Encryption Library
+ * Shield - Authenticated Symmetric Encryption Library
  *
- * Symmetric cryptography with proven exponential-time security.
- * Breaking requires 2^256 operations - no shortcut exists.
+ * Symmetric authenticated encryption with 256-bit keys (~128-bit post-quantum security).
+ * Brute-forcing a full 256-bit key requires 2^256 operations; this relies on the standard assumption that SHA-256/HMAC have no exploitable structure (an assumption, not a mathematical proof).
  *
  * @example
  * const { Shield, quickEncrypt, quickDecrypt } = require('@dikestra/shield');

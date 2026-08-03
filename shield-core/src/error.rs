@@ -79,4 +79,8 @@ pub enum ShieldError {
     /// Hardware fingerprint unavailable.
     #[error("hardware fingerprint unavailable (VM or restricted access)")]
     FingerprintUnavailable,
+
+    /// Post-quantum hybrid key exchange failure.
+    #[error("post-quantum key exchange error: {0}")]
+    PostQuantum(String),
 }

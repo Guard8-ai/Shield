@@ -1,6 +1,10 @@
 //! Async Shield Channel - Tokio-based async secure transport.
 //!
-//! Provides the same security as [`crate::channel::ShieldChannel`] but with async I/O.
+//! Provides the same security — and the same limits — as
+//! [`crate::channel::ShieldChannel`] but with async I/O. In particular the
+//! handshake is a **pre-shared-key handshake, not a true PAKE**, and is safe
+//! only with a high-entropy shared secret; see the
+//! [security limits](crate::channel) on the sync channel.
 //!
 //! # Example
 //!
@@ -103,7 +107,7 @@ impl HandshakeState {
             .ok_or_else(|| ShieldError::ChannelError("handshake incomplete".into()))?;
 
         // Include password-derived key in session key computation
-        let base_key = PAKEExchange::combine(&[self.local_contribution, remote]);
+        let base_key = PAKEExchange::combine(&[self.local_contribution, remote])?;
 
         let password_key = PAKEExchange::derive(
             config.password(),
@@ -112,10 +116,17 @@ impl HandshakeState {
             Some(config.iterations()),
         );
 
-        // Final session key = HMAC-SHA256(base_key, password_key)
-        // Using keyed HMAC instead of SHA256(key || data) to prevent length-extension
+        // Final session key = HMAC-SHA256(base_key, password_key || service).
+        // The service identifier provides domain separation so the same shared
+        // secret yields different session keys for different services. Must stay
+        // byte-identical to the sync `ShieldChannel` and the other bindings.
+        // `password_key` is a fixed 32 bytes, so the concatenation is
+        // unambiguous. Keyed HMAC avoids length-extension.
         let hmac_key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &base_key);
-        let tag = ring::hmac::sign(&hmac_key, &password_key);
+        let mut mac_input = Vec::with_capacity(password_key.len() + config.service().len());
+        mac_input.extend_from_slice(&password_key);
+        mac_input.extend_from_slice(config.service().as_bytes());
+        let tag = ring::hmac::sign(&hmac_key, &mac_input);
         let mut result = [0u8; 32];
         result.copy_from_slice(&tag.as_ref()[..32]);
         Ok(result)
@@ -135,7 +146,8 @@ pub struct AsyncShieldChannel<S> {
 impl<S: AsyncRead + AsyncWrite + Unpin> AsyncShieldChannel<S> {
     /// Connect as client (initiator).
     ///
-    /// Performs async PAKE handshake and establishes encrypted channel.
+    /// Performs the async pre-shared-key handshake and establishes an encrypted
+    /// channel (not a true PAKE — high-entropy shared secret only).
     /// Enforces the configured handshake timeout (default 30s).
     pub async fn connect(stream: S, config: &ChannelConfig) -> Result<Self> {
         let timeout_dur = std::time::Duration::from_millis(config.handshake_timeout_ms());
@@ -441,6 +453,32 @@ mod tests {
     use tokio::io::duplex;
 
     type DuplexChannel = AsyncShieldChannel<tokio::io::DuplexStream>;
+
+    #[test]
+    fn test_async_session_key_conformance_vector() {
+        // Must match the sync `ShieldChannel` golden vector byte-for-byte so
+        // async and sync Rust peers interoperate. Same fixed inputs as
+        // channel::tests::test_session_key_conformance_vector. (The Go/Python/JS
+        // bindings use a different, SHA256-based derivation and do not share it.)
+        let state = HandshakeState {
+            salt: [0x01; 16],
+            local_contribution: [0x02; 32],
+            remote_contribution: Some([0x03; 32]),
+            is_initiator: true,
+        };
+        let config = ChannelConfig::new("conformance-secret", "shield.conformance");
+
+        let key = state.compute_session_key(&config).unwrap();
+        let expected: [u8; 32] = [
+            0xc8, 0x18, 0x54, 0xce, 0x5f, 0xcb, 0xcf, 0x6f, 0x4d, 0xb6, 0x8b, 0x2a, 0x8b, 0x38,
+            0x93, 0x66, 0x23, 0x2b, 0x17, 0x07, 0xfa, 0x05, 0x7a, 0x72, 0x51, 0xd6, 0x53, 0x6b,
+            0xf5, 0x29, 0x18, 0x3d,
+        ];
+        assert_eq!(
+            key, expected,
+            "async session key conformance vector mismatch"
+        );
+    }
 
     #[tokio::test]
     async fn test_async_channel_handshake() {

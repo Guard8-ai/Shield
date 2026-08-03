@@ -6,14 +6,16 @@ public struct Identity {
     public let userId: String
     public let displayName: String
     public let verificationKey: [UInt8]
+    public let salt: [UInt8]
     public let createdAt: Int64
     public var attributes: [String: Any]
 
     public init(userId: String, displayName: String, verificationKey: [UInt8],
-                createdAt: Int64, attributes: [String: Any] = [:]) {
+                salt: [UInt8], createdAt: Int64, attributes: [String: Any] = [:]) {
         self.userId = userId
         self.displayName = displayName
         self.verificationKey = verificationKey
+        self.salt = salt
         self.createdAt = createdAt
         self.attributes = attributes
     }
@@ -50,7 +52,7 @@ public struct Session {
 /// Provides user registration, session management, and service tokens
 /// using only symmetric cryptography (no public-key certificates).
 public class IdentityProvider {
-    private static let pbkdf2Iterations = 100000
+    private static let pbkdf2Iterations = 600000 // CR-2: OWASP 2023 floor
 
     private let providerKey: [UInt8]
     private let tokenTtl: Int
@@ -81,11 +83,17 @@ public class IdentityProvider {
             throw ShieldError.invalidToken
         }
 
-        let verificationKey = deriveVerificationKey(userId: userId, password: password)
+        // CR-1: per-user random salt (not a hash of the public userId),
+        // stored on the identity so authenticate() can re-derive.
+        guard let salt = Shield.randomBytes(16) else {
+            throw ShieldError.invalidToken
+        }
+        let verificationKey = deriveVerificationKey(salt: salt, password: password)
         let identity = Identity(
             userId: userId,
             displayName: displayName,
             verificationKey: verificationKey,
+            salt: salt,
             createdAt: Int64(Date().timeIntervalSince1970),
             attributes: attributes
         )
@@ -108,7 +116,7 @@ public class IdentityProvider {
             return nil
         }
 
-        let verificationKey = deriveVerificationKey(userId: userId, password: password)
+        let verificationKey = deriveVerificationKey(salt: identity.salt, password: password)
         guard Shield.constantTimeEquals(verificationKey, identity.verificationKey) else {
             return nil
         }
@@ -260,10 +268,7 @@ public class IdentityProvider {
 
     // Private helpers
 
-    private func deriveVerificationKey(userId: String, password: String) -> [UInt8] {
-        let saltInput = "user:\(userId)".data(using: .utf8)!
-        let salt = Shield.sha256(Array(saltInput))
-
+    private func deriveVerificationKey(salt: [UInt8], password: String) -> [UInt8] {
         let userKey = pbkdf2(password: password, salt: salt, iterations: IdentityProvider.pbkdf2Iterations, keyLength: 32)
 
         var verifyInput = Array("verify:".utf8)

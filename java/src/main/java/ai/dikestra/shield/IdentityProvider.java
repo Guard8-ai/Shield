@@ -16,7 +16,7 @@ import java.util.*;
  * using only symmetric cryptography (no public-key certificates).
  */
 public class IdentityProvider {
-    private static final int PBKDF2_ITERATIONS = 100000;
+    private static final int PBKDF2_ITERATIONS = 600000; // CR-2: OWASP 2023 floor
     private static final SecureRandom random = new SecureRandom();
 
     private final byte[] providerKey;
@@ -30,14 +30,16 @@ public class IdentityProvider {
         public final String userId;
         public final String displayName;
         public final byte[] verificationKey;
+        public final byte[] salt;
         public final long createdAt;
         public final Map<String, Object> attributes;
 
         public Identity(String userId, String displayName, byte[] verificationKey,
-                        long createdAt, Map<String, Object> attributes) {
+                        byte[] salt, long createdAt, Map<String, Object> attributes) {
             this.userId = userId;
             this.displayName = displayName;
             this.verificationKey = verificationKey;
+            this.salt = salt;
             this.createdAt = createdAt;
             this.attributes = attributes != null ? new HashMap<>(attributes) : new HashMap<>();
         }
@@ -105,11 +107,16 @@ public class IdentityProvider {
             throw new IllegalArgumentException("User " + userId + " already exists");
         }
 
-        byte[] verificationKey = deriveVerificationKey(userId, password);
+        // CR-1: per-user random salt (not a hash of the public userId),
+        // stored on the identity so authenticate() can re-derive.
+        byte[] salt = new byte[16];
+        random.nextBytes(salt);
+        byte[] verificationKey = deriveVerificationKey(salt, password);
         Identity identity = new Identity(
                 userId,
                 displayName,
                 verificationKey,
+                salt,
                 System.currentTimeMillis() / 1000,
                 attributes
         );
@@ -138,7 +145,7 @@ public class IdentityProvider {
             return null;
         }
 
-        byte[] verificationKey = deriveVerificationKey(userId, password);
+        byte[] verificationKey = deriveVerificationKey(identity.salt, password);
         if (!constantTimeEquals(verificationKey, identity.verificationKey)) {
             return null;
         }
@@ -316,10 +323,9 @@ public class IdentityProvider {
 
     // Private helpers
 
-    private byte[] deriveVerificationKey(String userId, String password) {
+    private byte[] deriveVerificationKey(byte[] salt, String password) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] salt = md.digest(("user:" + userId).getBytes(StandardCharsets.UTF_8));
 
             SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
             PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), salt, PBKDF2_ITERATIONS, 256);

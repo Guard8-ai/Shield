@@ -172,7 +172,7 @@ jobs:
           body: |
             ## Shield ${{ github.ref_name }}
 
-            EXPTIME-secure encryption library release.
+            Authenticated symmetric encryption library release.
 
             ### CLI Downloads
 

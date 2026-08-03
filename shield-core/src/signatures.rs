@@ -46,13 +46,16 @@ impl SymmetricSignature {
     /// Derive from password and identity.
     #[must_use]
     pub fn from_password(password: &str, identity: &str) -> Self {
+        // Deterministic by design: same password+identity must reproduce the
+        // same signing key on any device, so the salt is a domain-separated
+        // hash of the (public) identity. CR-2: 600,000 iterations.
         let salt_data = format!("sign:{identity}");
         let salt = ring::digest::digest(&ring::digest::SHA256, salt_data.as_bytes());
 
         let mut key = [0u8; 32];
         ring::pbkdf2::derive(
             ring::pbkdf2::PBKDF2_HMAC_SHA256,
-            NonZeroU32::new(100_000).unwrap(),
+            NonZeroU32::new(600_000).unwrap(),
             salt.as_ref(),
             password.as_bytes(),
             &mut key,

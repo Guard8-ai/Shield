@@ -122,7 +122,7 @@ class SecureKeyStoreTest {
         val salt = java.security.MessageDigest.getInstance("SHA-256")
             .digest(service.toByteArray(Charsets.UTF_8))
         val factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-        val spec = javax.crypto.spec.PBEKeySpec(password.toCharArray(), salt, 100_000, 256)
+        val spec = javax.crypto.spec.PBEKeySpec(password.toCharArray(), salt, 600_000, 256)
         return factory.generateSecret(spec).encoded
     }
 }

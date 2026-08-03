@@ -724,7 +724,7 @@ Set up alerts for:
 
 ### Q: Can this be cracked?
 
-**A:** Combined with TEE (AWS Nitro, Azure SEV), it's essentially uncrackable. Even without TEE, requires breaking nation-state-resistant encryption + license server + hardware binding.
+**A:** Combined with TEE (AWS Nitro, Azure SEV), it is computationally infeasible to crack with current and foreseeable technology. Even without TEE, requires breaking strong symmetric encryption + license server + hardware binding.
 
 ### Q: How do I handle refunds?
 
@@ -797,7 +797,7 @@ Set up alerts for:
    - Add customer dashboard
    - Enable monitoring/alerts
 
-**Start monetizing your software with unbreakable protection!** 💰🔒
+**Start monetizing your software with strong protection!** 💰🔒
 
 ---
 

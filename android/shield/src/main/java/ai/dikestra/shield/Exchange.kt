@@ -4,26 +4,36 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
 import android.util.Base64
+import javax.crypto.Mac
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * Key Exchange - Key exchange without public-key crypto.
  *
  * Methods:
- * 1. PAKE: Password-Authenticated Key Exchange
+ * 1. PAKE: pre-shared-key handshake (NOT a true PAKE; see PAKEExchange below)
  * 2. QR: QR codes, base64 for manual exchange
  * 3. Key Splitting: XOR-based secret sharing
  */
 
 /**
- * Password-Authenticated Key Exchange.
+ * Pre-shared-key handshake (NOT a true PAKE despite the name).
  *
- * Both parties derive a shared key from a common password.
- * Uses role binding to prevent reflection attacks.
+ * Both parties derive a shared key from a common pre-shared secret, with role
+ * binding to prevent reflection attacks.
+ *
+ * SECURITY: The handshake contribution HMAC(PBKDF2(secret, salt), role) is sent
+ * on the wire together with the salt, so a recorded handshake permits an OFFLINE
+ * DICTIONARY ATTACK against a low-entropy secret (PBKDF2 iterations only slow
+ * each guess). Safe ONLY with a high-entropy shared secret (>=128 bits). For
+ * password-based or forward-secret key establishment, use the X25519 +
+ * ML-KEM-768 hybrid KEX (pqhybrid) instead. Type name retained for API
+ * compatibility.
  */
 object PAKEExchange {
-    const val DEFAULT_ITERATIONS = 200000
+    const val DEFAULT_ITERATIONS = 600000 // CR-2: OWASP 2023 floor
     private val random = SecureRandom()
 
     /**
@@ -32,7 +42,7 @@ object PAKEExchange {
      * @param password Shared password between parties
      * @param salt Public salt (can be exchanged openly)
      * @param role Role identifier ('alice', 'bob', 'initiator', etc.)
-     * @param iterations PBKDF2 iterations (default: 200000)
+     * @param iterations PBKDF2 iterations (default: 600000)
      * @return 32-byte key contribution
      */
     fun derive(password: String, salt: ByteArray, role: String, iterations: Int = DEFAULT_ITERATIONS): ByteArray {
@@ -40,10 +50,12 @@ object PAKEExchange {
         val spec = PBEKeySpec(password.toCharArray(), salt, iterations, 256)
         val baseKey = factory.generateSecret(spec).encoded
 
-        val md = MessageDigest.getInstance("SHA-256")
-        md.update(baseKey)
-        md.update(role.toByteArray(StandardCharsets.UTF_8))
-        return md.digest()
+        // Keyed HMAC-SHA256(baseKey, role), matching the Rust source of truth
+        // byte-for-byte (not SHA256(baseKey || role)) and avoiding
+        // length-extension. Locked by tests/channel_session_vectors.json.
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(baseKey, "HmacSHA256"))
+        return mac.doFinal(role.toByteArray(StandardCharsets.UTF_8))
     }
 
     /**
@@ -62,11 +74,14 @@ object PAKEExchange {
             a.size - b.size
         }
 
-        val md = MessageDigest.getInstance("SHA-256")
-        for (contrib in sorted) {
-            md.update(contrib)
+        // HMAC-SHA256(sorted[0], sorted[1] || sorted[2] ...), matching the Rust
+        // source of truth byte-for-byte (not SHA256(concat)).
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(sorted[0], "HmacSHA256"))
+        for (i in 1 until sorted.size) {
+            mac.update(sorted[i])
         }
-        return md.digest()
+        return mac.doFinal()
     }
 
     /**

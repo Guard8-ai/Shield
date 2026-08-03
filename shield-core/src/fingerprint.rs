@@ -61,7 +61,7 @@ pub fn collect_fingerprint(mode: FingerprintMode) -> Result<String> {
 #[cfg(target_os = "windows")]
 fn get_motherboard_serial() -> Result<String> {
     let output = Command::new("wmic")
-        .args(&["baseboard", "get", "serialnumber", "/value"])
+        .args(["baseboard", "get", "serialnumber", "/value"])
         .output()
         .map_err(|_| ShieldError::FingerprintUnavailable)?;
 
@@ -128,7 +128,7 @@ fn get_motherboard_serial() -> Result<String> {
 #[cfg(target_os = "windows")]
 fn get_cpu_id() -> Result<String> {
     let output = Command::new("wmic")
-        .args(&["cpu", "get", "ProcessorId", "/value"])
+        .args(["cpu", "get", "ProcessorId", "/value"])
         .output()
         .map_err(|_| ShieldError::FingerprintUnavailable)?;
 

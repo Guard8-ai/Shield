@@ -1,11 +1,21 @@
 """
 Confidential Computing Integrations for Shield
 
-Provides attestation verification and TEE-aware key management for:
+Provides attestation evidence parsing and TEE-aware key management for:
 - AWS Nitro Enclaves
 - GCP Confidential VMs (AMD SEV-SNP)
 - Azure Confidential Containers (MAA)
 - Intel SGX (Gramine/Occlum)
+
+.. warning::
+    **These Python providers are FAIL-CLOSED and do NOT cryptographically verify
+    attestation.** They parse evidence and compare measurement fields, but they
+    do **not** verify the quote/token signature or certificate chain. By default
+    ``verify()`` therefore returns ``verified=False`` (so forged evidence cannot
+    release keys via ``TEEKeyManager``). The production-grade, signature-and-cert
+    -chain-verifying implementation is the **Rust ``shield-core`` confidential
+    module**. Pass ``allow_insecure_demo=True`` to a provider only to accept
+    unverified evidence in a non-production test/demo (it warns loudly).
 
 Usage:
     from shield.integrations.confidential import (

@@ -5,7 +5,7 @@
 
 [package]
 name = "shield-proxy"
-version = "2.2.0"
+version = "2.3.0"
 edition = "2021"
 authors = ["Eliran Sabag"]
 description = "Transparent proxy with Shield encryption, DNS failover, and hot redundancy"
@@ -19,6 +19,9 @@ path = "src/main.rs"
 [dependencies]
 # Shield encryption core
 shield-core = { path = "../shield-core", default-features = false, features = ["std"] }
+
+# Audited primitives (HMAC-SHA256 for authenticated HA heartbeats)
+ring = "0.17"
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }

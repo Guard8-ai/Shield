@@ -41,7 +41,8 @@ class SymmetricSignature {
         const salt = crypto.createHash('sha256')
             .update(`sign:${identity}`)
             .digest();
-        const key = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256');
+        // Deterministic by design (reproducible signing identity); CR-2: 600k iters.
+        const key = crypto.pbkdf2Sync(password, salt, 600000, 32, 'sha256');
         return new SymmetricSignature(key);
     }
 

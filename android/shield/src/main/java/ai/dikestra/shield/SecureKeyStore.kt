@@ -189,12 +189,8 @@ class SecureKeyStore(private val context: Context) {
         // so the derived key is per-service and not precomputable.
         val pbkdf2Salt = salt + service.toByteArray(Charsets.UTF_8)
         val factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-        val spec = javax.crypto.spec.PBEKeySpec(password.toCharArray(), pbkdf2Salt, 600_000, 256)
-        try {
-            return factory.generateSecret(spec).encoded
-        } finally {
-            spec.clearPassword()
-        }
+        val spec = javax.crypto.spec.PBEKeySpec(password.toCharArray(), salt, 600_000, 256)
+        return factory.generateSecret(spec).encoded
     }
 
     private fun ByteArray.toHexString(): String = joinToString("") { "%02x".format(it) }

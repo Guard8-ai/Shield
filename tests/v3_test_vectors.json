@@ -1,0 +1,107 @@
+{
+  "version": "3.0",
+  "description": "Shield v3 cross-language test vectors. Encryption is randomized (random salt + nonce + padding), so vectors are pre-encrypted ciphertexts that every language DECRYPTS to a known plaintext. Generated once with the verified Python implementation (python/shield/core.py).",
+  "format": {
+    "password_mode": "version(0x02) || salt(16) || nonce(16) || ciphertext || mac(16)",
+    "key_mode": "version(0x12) || nonce(16) || ciphertext || mac(16)",
+    "mac": "HMAC-SHA256(mac_key, version || [salt] || nonce || ciphertext) truncated to 16 bytes",
+    "inner_layout": "counter(8) || timestamp_ms(8) || pad_len(1) || padding(32-128) || plaintext"
+  },
+  "note_on_freshness": "These ciphertexts carry a fixed timestamp and will age out of the default 60s freshness window. Decrypt them with the freshness window disabled (max_age_ms=None / nil), mirroring python/tests which uses max_age_ms=None for pre-generated ciphertext.",
+  "decrypt_vectors": [
+    {
+      "name": "password_basic",
+      "mode": "password",
+      "version_byte": "0x02",
+      "password": "test-password-123",
+      "service": "test.example.com",
+      "plaintext_hex": "48656c6c6f2c20536869656c6420763221",
+      "ciphertext_b64": "Aj9SmEDvUDymlUrY+C3xwcqsNROqGnu2DcvlV90LjaDdBUs4lbXOEnZ1jbDT4OsFWvoOOVPfX18HqWK1XEUl+zDySZZo8MR1rb54VFVU7XAuEXGFPEJtg/Kkj0FESiPnvqYdwknXSdajiGZJRbIxwd3L84/S+6doG4UO6R/Ze0Xe5N1bFAHLNTipFqnnY92rf8Oahg==",
+      "expected_ciphertext_len": 148
+    },
+    {
+      "name": "password_empty_plaintext",
+      "mode": "password",
+      "version_byte": "0x02",
+      "password": "empty-test",
+      "service": "empty.example.com",
+      "plaintext_hex": "",
+      "ciphertext_b64": "Agy50UehZ0SNCv4Rwd7qUasYZppXeF6hcMWYknrm7dS9fCWOgKgADcTQgBB5IDI/bLWuDzD4DJcSUR6KUPvlgWgKHBklyNMw2+ZBbTBuVqd+lXYQap/HuSaGq/GhdWMjgE8i/Z/4uNUI3gKOI/uAfAPC1HdnJ+AkkkKuTDV84GVtnnSRLhw=",
+      "expected_ciphertext_len": 134
+    },
+    {
+      "name": "password_repeated_bytes",
+      "mode": "password",
+      "version_byte": "0x02",
+      "password": "large-test",
+      "service": "large.example.com",
+      "plaintext_hex": "41414141414141414141",
+      "ciphertext_b64": "As7bqm/ccsUnRspi8OAj3tP/5jfeRL3TmVxmnj9vd4dD66s4WUVCOn4KgATY05bPsA83FwRIsSypDCeSNh15x/LNXJQhNuRfHsmUfnlsWNmjNel0ax0SDkNTcvNqxQt1IkUlbOs92dfWw42gfQbAiVgHYI49HkjFB3Xd5uun4OLYfM6thaPb+NbRQzivAT/hZLhs6hZ2N97gqxAFZYSZr4pO3sq6uEtrjY9lxLIvk8Cr70ABiUGKVce/",
+      "expected_ciphertext_len": 186
+    },
+    {
+      "name": "password_unicode",
+      "mode": "password",
+      "version_byte": "0x02",
+      "password": "pw-unicode",
+      "service": "unicode.example.com",
+      "plaintext_hex": "477275657373652c20536869656c642120e29ca8",
+      "ciphertext_b64": "AuzJkklBmQ2H8IlkedKAZzw4NLLKzkAXiEiR2nKx7EIMM3QkGYOrwjF7OMU4dUljNDDjdobExN57Vo7EJgXrforhLs4Vy8oMlr7jhFsif6Vjh9J4uAcNd1WU0VcCyML+nhIrThJqTin9bI4wSjTqgJ+/Mn8MT6F7jb+2E2w4khFFpxoVYQ==",
+      "expected_ciphertext_len": 133
+    },
+    {
+      "name": "key_basic",
+      "mode": "key",
+      "version_byte": "0x12",
+      "key_hex": "0102030405060708091011121314151617181920212223242526272829303132",
+      "plaintext_hex": "48656c6c6f2066726f6d20536869656c642063726f73732d6c616e6775616765207465737421",
+      "ciphertext_b64": "EttAqeGRsfJtcB54kZa4GqO1cdgkEqEo+ynE9an9VxzN6Kxi+rv4nadLj75VN0hfGE0l+9Prx3hgSY+8A5XzpJhRjP9ZSIWqk7+GZe+l9cvRdxiQPxB2JYZz81hKV+isCO9jaiBG8WqnGo18+Yy/QeFtgve/ZNd6k+pixL33VAU=",
+      "expected_ciphertext_len": 128
+    },
+    {
+      "name": "key_empty",
+      "mode": "key",
+      "version_byte": "0x12",
+      "key_hex": "0102030405060708091011121314151617181920212223242526272829303132",
+      "plaintext_hex": "",
+      "ciphertext_b64": "EnpKTRsJEwrk/Bvm/gXWoAxsvQnxZqtbcYCiOD39GigBooEX4Gv3lbL0eii8b39xe6rxM9pnBF/vf1/3dt/IYJiQOgNp1NJ2YEIhinCRrxhKDFtfLlssisz1",
+      "expected_ciphertext_len": 90
+    },
+    {
+      "name": "key_binary",
+      "mode": "key",
+      "version_byte": "0x12",
+      "key_hex": "0102030405060708091011121314151617181920212223242526272829303132",
+      "plaintext_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "ciphertext_b64": "Esev6jMUVR/7ko/UOHw2q+qNQAkcizUHv1wwYbODopzIs4aBE5/+mJ2cpEHJvFumOs+/Z5W6fwb1CdD9jZKMa88ZOEclfIsyUcvqv/7W6/ooDaBVeah6tWfN/67e+PjIzJpzjElnCoDEWNO8D20jNehOK1MqeVHN3CseVDylIYi2WEI92Dsjek852K3WBQJRNnTCtw==",
+      "expected_ciphertext_len": 148
+    }
+  ],
+  "deterministic_components": {
+    "description": "Component-level vectors over fixed inputs (pre-shared-key mode). Key mode derives enc/mac subkeys via HMAC-SHA256 domain labels; the keystream uses the encryption subkey and the MAC uses the authentication subkey.",
+    "key_hex": "0102030405060708091011121314151617181920212223242526272829303132",
+    "nonce_hex": "000102030405060708090a0b0c0d0e0f",
+    "keystream_64_hex": "f3581c4151918a01ebe760b3b213439792e2252bbfd8e624be32472976d2e593ec40a82a21c5d5246402478033318e09cc23a9c77c5e5567343961d2514116e8",
+    "mac_over_fixed_ciphertext": {
+      "version_byte": "0x12",
+      "ciphertext_hex": "000102030405060708090a0b0c0d0e0f10111213",
+      "expected_mac_hex": "76e18d0f94c1fb19d0ea0a4fb9080cfe"
+    }
+  },
+  "constants": {
+    "VERSION_PASSWORD": "0x02",
+    "VERSION_KEY": "0x12",
+    "V2_HEADER_SIZE": 17,
+    "MIN_PADDING": 32,
+    "MAX_PADDING": 128,
+    "MIN_TIMESTAMP_MS": 1577836800000,
+    "MAX_TIMESTAMP_MS": 4102444800000,
+    "NONCE_SIZE": 16,
+    "MAC_SIZE": 16,
+    "COUNTER_SIZE": 8,
+    "SALT_SIZE": 16,
+    "PBKDF2_ITERATIONS": 600000,
+    "PASSWORD_HEADER_OVERHEAD": 49,
+    "KEY_HEADER_OVERHEAD": 33
+  }
+}

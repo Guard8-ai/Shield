@@ -34,10 +34,12 @@ import time
 from typing import Any, Dict, List, Optional
 
 from shield.integrations.confidential.base import (
+    ATTESTATION_NOT_VERIFIED_MESSAGE,
     AttestationError,
     AttestationProvider,
     AttestationResult,
     TEEType,
+    warn_insecure_attestation_demo,
 )
 
 NSM_SOCKET_PATH = "/run/nitro_enclaves/vsock.sock"
@@ -65,12 +67,16 @@ class NitroAttestationProvider(AttestationProvider):
         expected_pcrs: Optional[Dict[int, str]] = None,
         max_age_seconds: float = 300.0,
         verify_certificate: bool = True,
+        allow_insecure_demo: bool = False,
     ):
         self.expected_pcrs = expected_pcrs or {}
         self.max_age_seconds = max_age_seconds
         self.verify_certificate = verify_certificate
+        self.allow_insecure_demo = allow_insecure_demo
         self._cbor = None
         self._cose = None
+        if allow_insecure_demo:
+            warn_insecure_attestation_demo("AWS Nitro")
 
     @property
     def tee_type(self) -> TEEType:
@@ -200,6 +206,18 @@ class NitroAttestationProvider(AttestationProvider):
                     error="Missing certificate bundle",
                     raw_evidence=evidence,
                 )
+
+        # FAIL-CLOSED: the COSE_Sign1 signature and Nitro cert chain are never
+        # verified here, so we must not claim verified=True (RT2-4).
+        if not self.allow_insecure_demo:
+            return AttestationResult(
+                verified=False,
+                tee_type=self.tee_type,
+                measurements=measurements,
+                claims=claims,
+                error=ATTESTATION_NOT_VERIFIED_MESSAGE.format(tee="AWS Nitro"),
+                raw_evidence=evidence,
+            )
 
         return AttestationResult(
             verified=True,

@@ -4,15 +4,11 @@
 //!
 //! This module does NOT implement the `WebAuthn` security model correctly:
 //!
-//! - **No origin binding**: `clientDataJSON.origin` is not validated against
-//!   the relying party's expected origin. Any origin can register and
-//!   authenticate credentials.
-//! - **No rpId binding**: `authenticatorData.rpIdHash` is not verified.
-//!   Credentials from one relying party are accepted by any other.
-//! - **No clientDataJSON binding**: the challenge is not bound to the HTTP
-//!   origin + operation type, leaving this implementation vulnerable to
-//!   phishing and cross-origin attacks.
-//! - **No attestation**: the authenticator's identity cannot be verified.
+//! - **Registration**: Create and store FIDO2 credentials
+//! - **Authentication**: Verify users with stored credentials
+//! - **Shield Integration**: Credentials encrypted with authenticated symmetric encryption
+//! - **Replay Protection**: Signature counter validation prevents replay attacks
+//! - **Challenge Management**: Secure challenge generation and validation
 //!
 //! These are not minor implementation details — they are fundamental
 //! violations of the `WebAuthn` L2/L3 security model.

@@ -35,10 +35,12 @@ import time
 from typing import Any, Dict, List, Optional
 
 from shield.integrations.confidential.base import (
+    ATTESTATION_NOT_VERIFIED_MESSAGE,
     AttestationError,
     AttestationProvider,
     AttestationResult,
     TEEType,
+    warn_insecure_attestation_demo,
 )
 
 SGX_REPORT_BODY_SIZE = 384
@@ -70,12 +72,16 @@ class SGXAttestationProvider(AttestationProvider):
         min_isv_svn: int = 0,
         verify_with_pccs: bool = False,
         pccs_url: str = "https://localhost:8081/sgx/certification/v4",
+        allow_insecure_demo: bool = False,
     ):
         self.expected_mrenclave = expected_mrenclave
         self.expected_mrsigner = expected_mrsigner
         self.min_isv_svn = min_isv_svn
         self.verify_with_pccs = verify_with_pccs
         self.pccs_url = pccs_url
+        self.allow_insecure_demo = allow_insecure_demo
+        if allow_insecure_demo:
+            warn_insecure_attestation_demo("Intel SGX")
 
     @property
     def tee_type(self) -> TEEType:
@@ -180,6 +186,19 @@ class SGXAttestationProvider(AttestationProvider):
                     error=f"PCCS verification failed: {e}",
                     raw_evidence=evidence,
                 )
+
+        # FAIL-CLOSED: the DCAP quote ECDSA signature and PCK cert chain (and,
+        # when enabled, the PCCS verdict body) are never verified here, so we
+        # must not claim verified=True from unverified evidence (RT2-4).
+        if not self.allow_insecure_demo:
+            return AttestationResult(
+                verified=False,
+                tee_type=self.tee_type,
+                measurements=measurements,
+                claims=claims,
+                error=ATTESTATION_NOT_VERIFIED_MESSAGE.format(tee="Intel SGX"),
+                raw_evidence=evidence,
+            )
 
         return AttestationResult(
             verified=True,
