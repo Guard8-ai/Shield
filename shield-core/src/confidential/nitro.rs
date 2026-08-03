@@ -79,15 +79,6 @@ impl NitroAttestationProvider {
         }
     }
 
-    /// Set expected report data (challenge) that must be present in the attestation document.
-    ///
-    /// An empty expected value is rejected to prevent accidental acceptance of any report.
-    #[must_use]
-    pub fn with_expected_report_data(mut self, expected: impl Into<Vec<u8>>) -> Self {
-        self.expected_report_data = Some(expected.into());
-        self
-    }
-
     /// Add an expected PCR value.
     #[must_use]
     pub fn with_expected_pcr(mut self, index: u8, value: impl Into<String>) -> Self {

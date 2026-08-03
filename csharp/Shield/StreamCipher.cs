@@ -125,7 +125,7 @@ namespace Dikestra.Shield
                 uint encLenU = BitConverter.ToUInt32(encrypted, pos);
                 pos += 4;
 
-                if (encLen == 0)
+                if (encLenU == 0)
                 {
                     // Authenticated end-of-stream marker: require the tag and
                     // verify it commits to the number of chunks actually seen.
@@ -229,8 +229,8 @@ namespace Dikestra.Shield
 
             while (input.Read(lenBytes, 0, 4) == 4)
             {
-                int encLen = BitConverter.ToInt32(lenBytes, 0);
-                if (encLen == 0)
+                uint encLenU = BitConverter.ToUInt32(lenBytes, 0);
+                if (encLenU == 0)
                 {
                     byte[] tag = new byte[32];
                     if (input.Read(tag, 0, 32) != 32)
@@ -242,8 +242,8 @@ namespace Dikestra.Shield
                     break;
                 }
 
-                if (encLenU > int.MaxValue ||
-                    encLenU > (ulong)(input.Length - input.Position))
+                if (encLenU > (uint)int.MaxValue ||
+                    (long)encLenU > input.Length - input.Position)
                     throw new IOException("Incomplete chunk");
                 int encLen = (int)encLenU;
                 byte[] encrypted = new byte[encLen];

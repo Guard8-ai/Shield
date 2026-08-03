@@ -1,103 +1,90 @@
 {
   "version": "4.0",
-  "description": "Shield v4 deterministic test vectors for cross-language conformance. Each vector specifies a ciphertext_hex that must decrypt to expected_plaintext_hex using the given key. Encryption is non-deterministic (random nonce+padding), so vectors are decrypt-only. Use max_age_ms=None (disabled) to avoid timestamp expiry on v2 vectors.",
+  "description": "Shield v4 key-mode deterministic test vectors for cross-language conformance. Wire format: 0x13 || 0x01(suite) || nonce(12) || AES-GCM(ct||tag). AEAD key = HKDF-SHA256-Expand(master_key, 'shield/aead/v4', 32). All vectors use nonce=0x00*12, timestamp_ms=0, pad_len=32, padding=0x00*32 (fixed for determinism). Set max_age_ms=null to disable timestamp validation.",
   "format_notes": {
-    "v1": "nonce(16) + encrypt(counter(8) + plaintext) + mac(16). No timestamp or padding.",
-    "v2": "nonce(16) + encrypt(counter(8) + timestamp_ms_le64(8) + pad_len(1) + padding + plaintext) + mac(16). Timestamp in range [1577836800000, 4102444800000] triggers v2 detection.",
-    "subkey_derivation": "enc_key = HMAC-SHA256(master_key, 'shield-encrypt'); mac_key = HMAC-SHA256(master_key, 'shield-authenticate')",
-    "keystream": "blocks = SHA256(enc_key || nonce || counter_le32) for counter=0,1,2...; XOR with data",
-    "mac": "HMAC-SHA256(mac_key, nonce || ciphertext)[0:16]"
+    "v4-key": "0x13 || 0x01 || nonce(12) || AES-GCM(aeadKey, nonce, inner, aad=0x13||0x01); inner = timestamp_ms_le64(8) || pad_len(1) || padding || plaintext",
+    "aead_key_derivation": "HKDF-SHA256-Expand(master_key, info='shield/aead/v4', L=32)",
+    "determinism": "nonce=0*12, timestamp_ms=0, pad_len=32, padding=0*32"
   },
   "test_vectors": [
     {
       "id": "v4-v1-001",
-      "description": "v1 format: zero key, zero nonce, plaintext=hello",
-      "format": "v1",
+      "description": "v4 key-mode: zero key, plaintext=hello",
+      "format": "v4-key",
       "key_hex": "0000000000000000000000000000000000000000000000000000000000000000",
       "expected_plaintext_hex": "68656c6c6f",
-      "expected_plaintext_utf8": "hello",
-      "ciphertext_hex": "000000000000000000000000000000004658de168c30a75796f9c222a481ca474e3d4f238ec02e4ad181ac518c",
-      "max_age_ms": null
+      "ciphertext_hex": "1301000000000000000000000000e6c2b83d449e146be3bac68ba551440a0ebb73b91564bf80b232f328348d5e27db23b7c25dae4eee5e29d17b403708d0f94f2d41758dfae07f7e6bf08343",
+      "max_age_ms": null,
+      "expected_plaintext_utf8": "hello"
     },
     {
       "id": "v4-v1-002",
-      "description": "v1 format: sequential key (0x00..0x1F), nonce=0x01*16, plaintext=Shield v4 test",
-      "format": "v1",
+      "description": "v4 key-mode: sequential key (0x00..0x1F), plaintext=Shield v4 test",
+      "format": "v4-key",
       "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
       "expected_plaintext_hex": "536869656c642076342074657374",
-      "expected_plaintext_utf8": "Shield v4 test",
-      "ciphertext_hex": "01010101010101010101010101010101156fe78b2604c4c29b0c1cf38f59bd1f0049ba679f017fc5f8fc9732c02dfb5810f12a451dff",
-      "max_age_ms": null
+      "ciphertext_hex": "13010000000000000000000000008dd4e86b7951593ab5a79f79164f08e5987f867211a2520dfed69f0a09f358d05cb0be217a4501935f4d440ca4002e5343b93392651f89e6f963ac072138060bf27dc16d67d8f3",
+      "max_age_ms": null,
+      "expected_plaintext_utf8": "Shield v4 test"
     },
     {
       "id": "v4-v1-003",
-      "description": "v1 format: key=0x55*32, nonce=0x33*16, plaintext=8 bytes 0xFF (binary)",
-      "format": "v1",
+      "description": "v4 key-mode: key=0x55*32, binary plaintext=0xFF*8",
+      "format": "v4-key",
       "key_hex": "5555555555555555555555555555555555555555555555555555555555555555",
       "expected_plaintext_hex": "ffffffffffffffff",
-      "expected_plaintext_utf8": null,
-      "ciphertext_hex": "3333333333333333333333333333333362f172a9b185e37d060597d1e380c5d0bca03a4665dbd67cf5622695f99359e8",
+      "ciphertext_hex": "13010000000000000000000000002600f6ea8805189d78b642c527f685aa4b668ab0cb6b41b4e84e5ee63fa0c1bd0fcc289caf88ca34ea69d5acc2b3e0559de0df4f5b65d52e67ecf23a757b42d7f0",
       "max_age_ms": null
     },
     {
       "id": "v4-v2-001",
-      "description": "v2 format: key=0xAB*32, nonce=0x42*16, timestamp=1700000000000, pad=32 zeros, plaintext=Hello World",
-      "format": "v2",
+      "description": "v4 key-mode: key=0xAB*32, plaintext=Hello, World!",
+      "format": "v4-key",
       "key_hex": "abababababababababababababababababababababababababababababababab",
       "expected_plaintext_hex": "48656c6c6f2c20576f726c6421",
-      "expected_plaintext_utf8": "Hello, World!",
-      "ciphertext_hex": "42424242424242424242424242424242b64c15b93c9b3debd6bb6689b2ad953b89d216fd3d9655d4ef9c98b5effb1a018f95cc4a32c95fdc88b8566ac521dfa34691d7bcdfcf0e6e64ef3a9e5b490b0bf5acd9a2055a9b1ac403b731d9fb",
-      "timestamp_ms": 1700000000000,
-      "pad_len": 32,
-      "max_age_ms": null
+      "ciphertext_hex": "1301000000000000000000000000ed207ffc8bbeb03aa1c03f8a64bbd51f1c4a7dc3243a0797272b2a92281054cd5a19d9bb12eb13c672deb5804b4677e88bd1d40c487cf4a10b139b25fcdb0c78702a90e17ddb",
+      "max_age_ms": null,
+      "expected_plaintext_utf8": "Hello, World!"
     },
     {
       "id": "v4-v2-002",
-      "description": "v2 format: empty plaintext, key=alternating 0x01 0x02, pad=64 zeros",
-      "format": "v2",
+      "description": "v4 key-mode: alternating key 0x01 0x02, empty plaintext",
+      "format": "v4-key",
       "key_hex": "0102010201020102010201020102010201020102010201020102010201020102",
       "expected_plaintext_hex": "",
-      "expected_plaintext_utf8": "",
-      "ciphertext_hex": "10203040102030401020304010203040baf624e746a0b08500ca50bd44f81f69414546a7240327c5e2d9a924f095a5ae946f08baf25971d6e7e3e264369e176f11751e96dfcf7c7a58f81a1788902957dd0fab92ddaca261f0720f9c21f9bbd87084d1ea1d0f1389202f025b362f9f6e5f",
-      "timestamp_ms": 1700000000000,
-      "pad_len": 64,
-      "max_age_ms": null
+      "ciphertext_hex": "1301000000000000000000000000f7001914791ade674b2a332e54b16b0db8ef1932f2d2c1f571347542e81176e0fcdaae67067aff0cf0a95954af5123308ff2021d401fd7b1d4",
+      "max_age_ms": null,
+      "expected_plaintext_utf8": ""
     },
     {
       "id": "v4-v2-003",
-      "description": "v2 format: pangram, sequential key 0x00..0x1F, sequential nonce 0x00..0x0F, timestamp=2024-01-01",
-      "format": "v2",
+      "description": "v4 key-mode: sequential key, pangram plaintext",
+      "format": "v4-key",
       "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
       "expected_plaintext_hex": "54686520717569636b2062726f776e20666f78206a756d7073206f76657220746865206c617a7920646f67",
-      "expected_plaintext_utf8": "The quick brown fox jumps over the lazy dog",
-      "ciphertext_hex": "000102030405060708090a0b0c0d0e0f68c57fa2607ad7162056814c07d5ee128769cafbe71220edc25764dcf90502fe4eb2a7091b56096a46462814e176b74b8bd6a06d3052c6ae833c2cd7691d8846cb28e32f227a4daf2cac2a2e43df879670531bf731589305d63a7a9f344aa872d03a0fffa479ff85aa0193e5faea7f6754703529d5dfe6098115112d",
-      "timestamp_ms": 1704067200000,
-      "pad_len": 48,
-      "max_age_ms": null
+      "ciphertext_hex": "13010000000000000000000000008dd4e86b7951593ab5a79f79164f08e5987f867211a2520dfed69f0a09f358d05cb0be217a4501935f4a4400e11d3f1a56e6338472038ad80f0e44633d4c97f0ae1a15f7b246e67b3e964dba8c16e84517a2177aad4d1ff59a2a0b21d97671fd0844b6ea",
+      "max_age_ms": null,
+      "expected_plaintext_utf8": "The quick brown fox jumps over the lazy dog"
     },
     {
       "id": "v4-v2-004",
-      "description": "v2 format: binary plaintext (16 bytes 0x00..0x0F), key=0xFF..0xE0",
-      "format": "v2",
+      "description": "v4 key-mode: descending key, binary plaintext 0x00..0x0F",
+      "format": "v4-key",
       "key_hex": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0",
       "expected_plaintext_hex": "000102030405060708090a0b0c0d0e0f",
-      "expected_plaintext_utf8": null,
-      "ciphertext_hex": "aa55aa55aa55aa55aa55aa55aa55aa55691e56ebe422a4e6a89f8a9bb84c3f4817a12240840552e7e70e7338e8a01787804c4fc6e67a97deef57d69c6d4433524e1d7cd6a573cdce776b3203b645bd1fd382fd04a97ab2e4e6422368b845c29759",
-      "timestamp_ms": 1700000000000,
-      "pad_len": 32,
-      "max_age_ms": null
+      "ciphertext_hex": "1301000000000000000000000000b046ac47a56f6b5d33dd98d793ef3b797ed61510e3e508ba602613ded85522f3d6534f029d51eab4ae290e61efc27f71ae8b1ac642c588e1b73ead252116b38cd7a3602a44e6795147",
+      "max_age_ms": null,
+      "expected_plaintext_utf8": "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f"
     },
     {
       "id": "v4-v2-005",
-      "description": "v2 format: pre-shared quickEncrypt key (0x01..0x20), plaintext=quick encrypt test",
-      "format": "v2",
-      "key_hex": "0102030405060708091011121314151617181920212223242526272829303132",
+      "description": "v4 key-mode: key=0x01..0x20, plaintext=quick encrypt test",
+      "format": "v4-key",
+      "key_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
       "expected_plaintext_hex": "717569636b20656e63727970742074657374",
-      "expected_plaintext_utf8": "quick encrypt test",
-      "ciphertext_hex": "9a8b7c6d9a8b7c6d9a8b7c6d9a8b7c6d4e4688a96a07b5a49cf0f2777ddb14a5970642e7b28dcf4970afe18f9de3db5c650655e9415f52e622bcfb9865e15772b6f38539fbfcb29367021be5e9da263a24149b3997c48d248916ad09fb914c93ddb041b2a841dbcc0682cf",
-      "timestamp_ms": 1700000000000,
-      "pad_len": 40,
-      "max_age_ms": null
+      "ciphertext_hex": "130100000000000000000000000063ed16c5e3afd25ee93e2804fa0e1b5ee070e1791dffd555c2f0985fa8b0c7b7562b1ec438755687cb1dbb8de9b266e76222c93730baf9b5065aadaa9f7a044459ccdb270b7a23d1088977",
+      "max_age_ms": null,
+      "expected_plaintext_utf8": "quick encrypt test"
     }
   ]
 }
