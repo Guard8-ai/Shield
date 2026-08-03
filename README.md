@@ -4,6 +4,12 @@
 
 # Shield
 
+> **⚠️ This repository is no longer maintained.**
+>
+> Development has moved to **[https://github.com/Dikestra-ai/Shield](https://github.com/Dikestra-ai/Shield)**.
+> Please open issues, submit PRs, and follow releases there.
+> This repository will not receive further updates.
+
 **Misuse-resistant authenticated encryption on a standard AEAD core (AES-256-GCM / ChaCha20-Poly1305), byte-identical across 12 language bindings, with an optional post-quantum hybrid key exchange (X25519 + ML-KEM-768, FIPS 203). The symmetric core uses no RSA/ECC, so it is unaffected by attacks on asymmetric crypto; 256-bit keys give ~128-bit post-quantum security.**
 
 [![CI](https://github.com/llamaboi55/Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/llamaboi55/Shield/actions/workflows/ci.yml)
