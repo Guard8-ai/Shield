@@ -153,9 +153,7 @@ impl<S: CredentialStore> Fido2Manager<S> {
 
         // Validate authenticatorData structure
         if authenticator_data.len() < AUTHENTICATOR_DATA_MIN_LEN {
-            return Err(Fido2Error::WebAuthn(
-                "authenticatorData too short".into(),
-            ));
+            return Err(Fido2Error::WebAuthn("authenticatorData too short".into()));
         }
 
         // Verify rpIdHash == SHA-256(rp_id)
@@ -285,9 +283,7 @@ impl<S: CredentialStore> Fido2Manager<S> {
 
         // Validate authenticatorData structure
         if authenticator_data.len() < AUTHENTICATOR_DATA_MIN_LEN {
-            return Err(Fido2Error::WebAuthn(
-                "authenticatorData too short".into(),
-            ));
+            return Err(Fido2Error::WebAuthn("authenticatorData too short".into()));
         }
 
         // Verify rpIdHash == SHA-256(rp_id)
@@ -344,8 +340,7 @@ impl<S: CredentialStore> Fido2Manager<S> {
 
         // Verify ECDSA P-256 signature over: authenticatorData || SHA-256(clientDataJSON)
         let client_data_hash = sha256(client_data_json);
-        let mut signed_data =
-            Vec::with_capacity(authenticator_data.len() + client_data_hash.len());
+        let mut signed_data = Vec::with_capacity(authenticator_data.len() + client_data_hash.len());
         signed_data.extend_from_slice(authenticator_data);
         signed_data.extend_from_slice(&client_data_hash);
 
@@ -490,8 +485,7 @@ mod tests {
 
     fn gen_authenticator() -> (EcdsaKeyPair, SystemRandom, Vec<u8>) {
         let rng = SystemRandom::new();
-        let pkcs8 =
-            EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
+        let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
         let key_pair =
             EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng)
                 .unwrap();
@@ -510,8 +504,9 @@ mod tests {
 
     /// Build a clientDataJSON bytes for the given type, origin, and challenge.
     fn build_client_data_json(op_type: &str, origin: &str, challenge_b64: &str) -> Vec<u8> {
-        let challenge_bytes =
-            base64::engine::general_purpose::STANDARD.decode(challenge_b64).unwrap();
+        let challenge_bytes = base64::engine::general_purpose::STANDARD
+            .decode(challenge_b64)
+            .unwrap();
         let challenge_b64url =
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&challenge_bytes);
         format!(
@@ -719,8 +714,7 @@ mod tests {
         // First auth — counter = 1
         let auth_challenge1 = manager.generate_authentication_challenge(user_id).unwrap();
         let auth_data1 = build_authenticator_data(TEST_RP_ID, 1);
-        let cdj1 =
-            build_client_data_json("webauthn.get", TEST_ORIGIN, &auth_challenge1.challenge);
+        let cdj1 = build_client_data_json("webauthn.get", TEST_ORIGIN, &auth_challenge1.challenge);
         let sig1 = sign_webauthn(&key_pair, &rng, &auth_data1, &cdj1);
         manager
             .verify_authentication(
@@ -735,8 +729,7 @@ mod tests {
         // Second auth with same counter = 1 should fail (replay)
         let auth_challenge2 = manager.generate_authentication_challenge(user_id).unwrap();
         let auth_data2 = build_authenticator_data(TEST_RP_ID, 1); // same counter
-        let cdj2 =
-            build_client_data_json("webauthn.get", TEST_ORIGIN, &auth_challenge2.challenge);
+        let cdj2 = build_client_data_json("webauthn.get", TEST_ORIGIN, &auth_challenge2.challenge);
         let sig2 = sign_webauthn(&key_pair, &rng, &auth_data2, &cdj2);
         let result = manager.verify_authentication(
             &auth_challenge2.challenge,
@@ -774,7 +767,11 @@ mod tests {
         let auth_challenge = manager.generate_authentication_challenge(user_id).unwrap();
         let auth_data = build_authenticator_data(TEST_RP_ID, 1);
         // Phishing origin
-        let cdj = build_client_data_json("webauthn.get", "https://evil.com", &auth_challenge.challenge);
+        let cdj = build_client_data_json(
+            "webauthn.get",
+            "https://evil.com",
+            &auth_challenge.challenge,
+        );
         let sig = sign_webauthn(&key_pair, &rng, &auth_data, &cdj);
 
         let result = manager.verify_authentication(
