@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shield-crypto"
-version = "2.3.0"
+version = "2.4.0"
 description = "Authenticated symmetric encryption library"
 readme = "README.md"
 license = {text = "MIT"}

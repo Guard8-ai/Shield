@@ -58,7 +58,7 @@ publishing {
         register<MavenPublication>("release") {
             groupId = "ai.dikestra"
             artifactId = "shield-android"
-            version = "2.3.0"
+            version = "2.4.0"
 
             afterEvaluate {
                 from(components["release"])

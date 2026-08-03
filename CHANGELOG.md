@@ -7,6 +7,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-08-03
+
+### Security
+- **ARC r1b audit (2026-07-14) — full remediation across all 12 bindings.**
+  All findings from the external Guard8.ai ARC security code review have been
+  addressed. Key fixes by area:
+  - **Rust core:** `MAX_KEYGEN_LENGTH=1024`, output files created with `0o600`,
+    empty-challenge fail-closed in Nitro/SEV attestation, three `copy_from_slice`
+    length guards in group, `saturating_sub` for identity rotation.
+  - **Go:** `applyHandshakeDeadline()` now enforced in both `Connect` and `Accept`
+    (previously only compiled, never called); `uint64` stream chunk lengths with
+    64 MB cap to prevent 32-bit overflow; safe unsigned bounds check.
+  - **Python:** LRU key cache capped at 16 entries; commit-after-verify ratchet
+    (recv chain updated only after MAC verify); `HandshakeTimeout` context manager
+    enforced; CLI removes `-p/--password` flag in favour of `getpass`; output
+    files written with `0o600`; FastAPI integration returns generic `"Invalid
+    request"` instead of leaking exception text.
+  - **JavaScript:** LRU key cache capped at 128 entries; commit-after-verify
+    ratchet; `_withHandshakeTimeout` wrapper; `timingSafeEqual` length guards
+    before every call in signatures and TOTP; fetch-hook fails closed on
+    decryption error (returns 502, not plaintext fallback).
+  - **JVM (Java / Kotlin):** `DeviceFingerprint` / `Fingerprint` switched from
+    MD5 to SHA-256; saturating subtraction for rotation counter; `clearPassword()`
+    zeros password bytes after PBKDF2; false "Compatible with Shield Rust core"
+    ratchet comments corrected.
+  - **Apple (iOS / Swift):** RNG failure now throws instead of silently producing
+    zero bytes in `generateSecret`, `generateCodes`, and `RecoveryCodes`;
+    `SecureKeychain` mutual exclusion of `kSecAttrAccessible` /
+    `kSecAttrAccessControl` fixed; random salt data-loss bug fixed.
+  - **C / C#:** `malloc` null checks; `BCryptGenRandom` for Windows entropy;
+    Lamport bounds checks; `totp_code_equal` and recovery constant-time via
+    `totp_code_equal()`; `StreamCipher` uses `uint` chunk lengths to prevent
+    signed 32-bit overflow; cache key zeroized on `Dispose`.
+  - **shield-proxy:** Slowloris mitigation — `detect()` returns `None` after
+    10-second timeout; F1 frame type + 8-byte sequence number carried in every
+    encrypted frame (replay and truncation detection); DNS/metrics endpoints
+    default to loopback (`127.0.0.1`); placeholder / empty PSK rejected at
+    startup; HA heartbeat socket binds configured address (fixes split-brain
+    caused by ephemeral `:0` binding); mandatory PSK when redundancy enabled.
+  - **FIDO2:** Module deprecated with explicit security notice (no origin
+    binding, no rpId binding, no clientDataJSON binding, no attestation);
+    empty-challenge bypass closed; migration path to `webauthn-rs` documented.
+    The `Fido2Manager` struct is `#[deprecated(since = "4.0.0")]`.
+  - **Docker / systemd:** All containers run as UID 65532 (`distroless:nonroot`),
+    `read_only: true`, `cap_drop: [ALL]`, `no-new-privileges`; systemd unit
+    gains `CapabilityBoundingSet=`, `RestrictAddressFamilies=AF_INET AF_INET6`,
+    `SystemCallFilter=@system-service`, `MemoryDenyWriteExecute`, and 8 further
+    hardening directives.
+  - **CI:** `trufflehog@main` SHA-pinned to `@6f3c981e` (v3.96.0); Python v4
+    interop test (`python tests/interop.py`) added as a required CI step.
+  - **`postcss` bumped to ≥8.5.18** (browser devDependency override) to close
+    path-traversal via `sourceMappingURL` auto-loading (Dependabot #24, high).
+
+### Added
+- **`GroupKeyUpdate` struct** — `remove_member()` now returns
+  `Result<Option<GroupKeyUpdate>>` instead of `bool`. The new type carries the
+  rotated group key encrypted for each _remaining_ member; the removed member is
+  excluded, closing the forward-secrecy gap (ARC finding H8).
+- **`python/shield/ratchet_v2.py`** — reference implementation of the proposed
+  v5 unified ratchet using `HKDFExpand-SHA256` for both chain and message key
+  derivation. 15 tests, documented in `docs/design/ratchet-realignment.md`.
+- **Ratchet family test vectors** — `tests/ratchet_vectors_family_{a,b,c}.json`
+  with per-family KDF tables (HMAC-SHA256 / raw-SHA256 / SHA256-with-"ratchet"
+  label), `tests/test_ratchet_vectors.py` (4 pytest tests), and
+  `tests/README_ratchet.md` explaining the three-family split.
+- **`docs/adr/ADR-001-argon2id-kdf.md`** — architecture decision record
+  recommending Argon2id (`m=64 MB, t=3, p=4`) for Shield v5 key derivation,
+  with platform support matrix, wire format change (`0x14` version byte), and
+  migration path. Interim PBKDF2 iteration count raised 600k → 800k in the Rust
+  core (other bindings to follow in a coordinated release).
+- **`docs/design/ratchet-realignment.md`** — design document cataloguing the
+  three ratchet families and proposing HKDF-SHA256 unification for v5.
+- **`.github/workflows/swift.yml`** — dedicated Swift / iOS CI job on
+  `macos-latest`; runs `swift test` for both the `swift/` package and the
+  `ios/` package and verifies `tests/v4_test_vectors.json` is present.
+- **`tests/interop.py` rewritten** for v4 ciphertext format (103–199 byte
+  overhead); the old v2/v3 keystream assertions are removed. CI now runs
+  `python tests/interop.py` as a required step.
+
+### Changed
+- `remove_member(&mut self, member_id: &str)` return type changed from `bool`
+  to `Result<Option<GroupKeyUpdate>>`. Callers that ignored the return value
+  compile with a warning; callers that matched on `bool` must update. The new
+  return value carries the rotated key for distribution to remaining members.
+- `GroupKeyUpdate` added to `shield_core` public exports.
+
+### Fixed
+- `tests/test_padding_validation.py`: two tests that contained no assertions
+  now have ≥3 assertions each (source-code validation + behavioural roundtrip).
+- `tests/test_cross_language.py`: docstring corrected from "any language" to
+  "Python↔JS and Python↔Go; other bindings use their own suites".
+- `NATION_STATE_SECURITY.md`: PBKDF2 count corrected (was 100k, now 600k);
+  "Why Shield May Be STRONGER Than AES-256" section marked WITHDRAWN with v4
+  correction blockquotes; side-channel comparison table updated.
+- `PROTOCOL.md §3.8`: cross-language incompatibility caveat added ("Rust
+  reference only" for HMAC-SHA256 chain claim).
+- `README.md`: "byte-identical across 12 bindings" scoped to verified layers
+  (base v4 AEAD, PQ KEX, channel session key); non-conformance-locked modules
+  listed explicitly.
+
 ## [2.3.0] - 2026-07-02
 
 ### Security

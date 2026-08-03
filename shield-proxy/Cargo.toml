@@ -5,7 +5,7 @@
 
 [package]
 name = "shield-proxy"
-version = "2.3.0"
+version = "2.4.0"
 edition = "2021"
 authors = ["Eliran Sabag"]
 description = "Transparent proxy with Shield encryption, DNS failover, and hot redundancy"

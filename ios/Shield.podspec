@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'Shield'
-  s.version          = '2.3.0'
+  s.version          = '2.4.0'
   s.summary          = 'Authenticated symmetric encryption for iOS/macOS'
   s.description      = <<-DESC
     Shield provides symmetric authenticated encryption with 256-bit keys (~128-bit post-quantum security).
